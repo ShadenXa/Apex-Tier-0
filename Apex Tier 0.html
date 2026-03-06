@@ -626,6 +626,125 @@ input[type=range]{accent-color:var(--t0);width:100px}
 #fehBannerList::-webkit-scrollbar{width:4px}
 #fehBannerList::-webkit-scrollbar-thumb{background:var(--t0);border-radius:2px}
 @keyframes shineFly{from{opacity:1;transform:scale(1) translate(0,0)}to{opacity:0;transform:scale(0) translate(var(--dx),var(--dy))}}
+
+/* ══════════════════════════════════════════════
+   PATCH CSS — Merged from v2.0
+   ══════════════════════════════════════════════ */
+
+/* Fix: settings-body must scroll and not collapse */
+.settings-body {
+  flex: 1 1 0% !important;
+  overflow-y: auto !important;
+  min-height: 0 !important;
+}
+
+/* Fix: dropzone never shrinks when image grid is huge */
+.settings-section:has(.drop-zone-v2) {
+  flex-shrink: 0 !important;
+}
+.drop-zone-v2 {
+  flex-shrink: 0 !important;
+}
+
+/* Pagination controls */
+.img-page-controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 8px 0;
+}
+.img-page-btn {
+  background: var(--panel2);
+  border: 1px solid var(--border);
+  color: var(--text2);
+  padding: 5px 14px;
+  border-radius: 4px;
+  font-family: var(--display);
+  font-size: .65rem;
+  cursor: pointer;
+  transition: all .15s;
+  letter-spacing: 1px;
+}
+.img-page-btn:hover:not(:disabled) {
+  border-color: var(--t0);
+  color: var(--t0);
+}
+.img-page-btn:disabled {
+  opacity: .3;
+  cursor: not-allowed;
+}
+.img-page-info {
+  font-family: var(--mono);
+  font-size: .6rem;
+  color: var(--text2);
+  min-width: 80px;
+  text-align: center;
+}
+
+/* ══════════════════════════════════════════════
+   PATCH CSS — FIX #5: Remove tutorial blur
+   ══════════════════════════════════════════════ */
+.tut-backdrop {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  background: rgba(0, 0, 0, 0.85) !important;
+}
+
+/* Preset save button styling */
+.preset-save-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 3px;
+  background: rgba(251, 191, 36, .15);
+  border: 1px solid rgba(251, 191, 36, .4);
+  color: var(--gold);
+  font-size: .5rem;
+  cursor: pointer;
+  transition: all .15s;
+  flex-shrink: 0;
+  margin-left: 2px;
+}
+.preset-save-icon:hover {
+  background: rgba(251, 191, 36, .3);
+  transform: scale(1.1);
+}
+
+/* Banner rate display */
+.banner-rates {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+}
+.banner-rate-chip {
+  font-family: var(--mono);
+  font-size: .55rem;
+  padding: 2px 6px;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+  background: var(--panel2);
+}
+
+/* Credit line on home */
+.home-credit {
+  font-family: var(--mono);
+  font-size: .55rem;
+  color: var(--text3);
+  letter-spacing: 1px;
+  margin-top: 8px;
+  opacity: .7;
+}
+
+/* v2.1 patch CSS */
+#activeBannerStrip, .gacha-wrap > div:first-child button { display: none !important; }
+/* Ensure banner list consumes available height */
+.gacha-wrap { overflow: hidden !important; display: flex !important; flex-direction: column !important; }
+#fehBannerList { flex: 1; overflow-y: auto; padding-bottom: 20px; }
 </style>
 </head>
 <body>
@@ -7000,321 +7119,6 @@ console.log('%c APEX TIER 0 HOTFIX PATCH APPLIED','color:#22c55e;font-weight:bol
 
 </script>
 
-<!-- 
-  ╔═══════════════════════════════════════════════════════════════╗
-  ║  APEX TIER 0 — MEGA PATCH v2.0                              ║
-  ║  Fixes: 11k Images, Audio, Presets, Banners, Tutorial, Credit║
-  ║  INSERT THIS BLOCK RIGHT BEFORE </script>
-<!-- 
-  ╔═══════════════════════════════════════════════════════════════╗
-  ║  APEX TIER 0 — HOTFIX v2.1 (Banner & Icon Fixes)            ║
-  ║  Auto-injected patch to fix Gacha selection logic           ║
-  ╚═══════════════════════════════════════════════════════════════╝
--->
-<style>
-/* Hide old carousel elements that conflict with the new list */
-#activeBannerStrip, .gacha-wrap > div:first-child button { display: none !important; }
-/* Ensure banner list consumes available height */
-.gacha-wrap { overflow: hidden !important; display: flex !important; flex-direction: column !important; }
-#fehBannerList { flex: 1; overflow-y: auto; padding-bottom: 20px; }
-</style>
-<script>
-(function() {
-    console.log('%c APEX TIER 0 HOTFIX v2.1 LOADING...', 'color:#00e5ff;font-weight:bold;font-size:14px');
-
-    // 1. OVERRIDE rollUnit TO SEARCH ALL BANNERS (Fixes "Unable to select auto banners")
-    // Previous logic only looked in S.banners (custom only). Now looks in getAvailableBanners()
-    window.rollUnit = function(guaranteeHigh=false) {
-        const pool = getPool();
-        if(!pool.length){ toast('Add images first!','err'); return null; }
-        
-        S.pullCount++;
-        let img;
-        
-        // Find the active banner object from the FULL list (Standard + Custom + Auto)
-        const allBanners = getAvailableBanners();
-        const activeBanner = allBanners.find(b => b.id === S.activeBannerId);
-
-        if(activeBanner && (activeBanner.heroNames?.length || activeBanner.heroIds?.length)) {
-            // Create weighted pool
-            const weighted = [];
-            // Map IDs/Names to actual image objects
-            const focusNames = activeBanner.heroIds 
-                ? activeBanner.heroIds.map(id => {
-                    const u = S.roster.find(r => r.id === id); 
-                    if(!u) return null;
-                    const im = S.images.find(i => i.src === u.src);
-                    return im ? im.name : u.name;
-                }).filter(Boolean)
-                : activeBanner.heroNames;
-
-            // Add focus units 4x times
-            pool.forEach(p => {
-                const isFocus = focusNames.includes(p.name);
-                // Boost weight: 4x for focus, 1x for non-focus
-                const weight = isFocus ? 4 : 1;
-                for(let k=0; k<weight; k++) weighted.push(p);
-            });
-            img = weighted[~~(Math.random() * weighted.length)];
-        } else {
-            // Standard pool
-            img = pool[~~(Math.random() * pool.length)];
-        }
-
-        const grade = rollGrade(guaranteeHigh || S.pullCount >= CFG.PITY);
-        trackQuest('summons');
-        if(['A','S','T0'].includes(grade)) trackQuest('highPull');
-
-        // Check duplicate
-        const existing = S.roster.find(u => u.name === img.name);
-        if(existing) {
-            existing.totalPulls = (existing.totalPulls||1) + 1;
-            if(existing.plus >= CFG.MAX_PLUS) {
-                existing.shards = (existing.shards||0) + 3;
-                existing.sp = (existing.sp||0) + 100;
-                return {dup:true, unit:existing, gained:0, overMax:true};
-            }
-            const gain = CFG.PLUS_PER_DUP;
-            const before = existing.plus;
-            existing.plus = Math.min(CFG.MAX_PLUS, existing.plus + gain);
-            const gained = existing.plus - before;
-            if(gained > 0) {
-                const stats = ['maxHp','atk','def','mag','res','spd'];
-                stats.forEach(s => {
-                    const boost = Math.ceil(gained/stats.length);
-                    existing[s] += boost;
-                    const bsKey = s === 'maxHp' ? 'hp' : s;
-                    if(existing.baseStat) existing.baseStat[bsKey] += boost;
-                });
-            }
-            return {dup:true, unit:existing, gained};
-        }
-        
-        const unit = createUnit(img.src, img.name, grade);
-        unit.hue = img.hue || 0;
-        unit.isAnimated = img.isAnimated || false;
-        unit.format = img.format || 'jpeg';
-        S.roster.push(unit);
-        return {dup:false, unit};
-    };
-
-    // 2. OVERRIDE refreshGacha TO FIX BUTTONS & ICONS
-    window.refreshGacha = function() {
-        document.getElementById('orbCount').textContent = S.ap;
-        const pct = Math.min(100, (S.pullCount / CFG.PITY) * 100);
-        document.getElementById('pityFill').style.width = pct + '%';
-        document.getElementById('pityText').textContent = `${S.pullCount}/${CFG.PITY}`;
-
-        const listEl = document.getElementById('fehBannerList');
-        if (!listEl) return;
-        listEl.innerHTML = '';
-
-        const banners = getAvailableBanners();
-        if (!banners.length) {
-            listEl.innerHTML = '<div style="text-align:center;color:var(--text2);padding:40px;">No banners available. Upload images in Settings!</div>';
-            return;
-        }
-
-        banners.forEach((banner, idx) => {
-            // Rates
-            let t0Rate = banner.t0Rate || (2.0 + (S.pullCount > 30 ? (S.pullCount - 30) * 0.1 : 0));
-            let sRate = banner.sRate || (7.0 + (S.pullCount > 30 ? (S.pullCount - 30) * 0.5 : 0));
-            let aRate = banner.aRate || 14;
-            
-            // Fix Icon Lookup: Try exact image match -> Try Unit Name match -> Placeholder
-            let focusImages = [];
-            const namesToFind = (banner.heroNames || []).slice(0, 5);
-            
-            if (banner.isStandard) {
-                 focusImages = S.images.filter(i => !i.isDefault).slice(0, 4);
-            } else {
-                 focusImages = namesToFind.map(name => {
-                    // Try finding image directly
-                    let img = S.images.find(i => i.name === name);
-                    // Fallback: Find unit in roster and get its src
-                    if (!img) {
-                        const unit = S.roster.find(u => u.name === name);
-                        if (unit && unit.src) img = {src: unit.src, name: unit.name};
-                    }
-                    return img;
-                 }).filter(Boolean);
-            }
-
-            const thumbsHTML = focusImages.map(img =>
-                `<img src="${img.src}" draggable="false" style="width:44px;height:44px;border-radius:50%;object-fit:cover;border:2px solid var(--gold);pointer-events:none;background:#000;" title="${esc(img.name)}">`
-            ).join('');
-
-            const isActive = banner.id === S.activeBannerId;
-            const label = banner.isStandard ? 'STANDARD POOL' : banner.name;
-
-            const card = document.createElement('div');
-            card.style.cssText = `background:var(--panel);border:${isActive ? '2px solid var(--gold)' : '1px solid var(--border)'};border-radius:12px;padding:16px;position:relative;overflow:hidden;flex-shrink:0;${isActive ? 'box-shadow:0 0 20px rgba(251,191,36,.15);' : ''}`;
-
-            // We explicitly set S.activeBannerId in the onclicks to ensure the engine pulls from THIS banner
-            card.innerHTML = `
-            <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;">
-              <div>
-                <div style="font-family:var(--display);font-size:.8rem;color:${isActive ? 'var(--gold)' : 'var(--text)'};letter-spacing:1px;font-weight:700">${isActive ? '★ ' : ''}${label}</div>
-                <div style="font-size:.6rem;color:var(--text2);font-family:var(--mono);margin-top:2px">
-                  ${banner.isStandard ? 'All images included' : `${focusImages.length} focus heroes`}
-                </div>
-                ${banner.t0FocusName ? `<div style="font-size:.58rem;color:var(--t0);font-family:var(--display);margin-top:4px;background:rgba(255,45,85,.1);padding:2px 4px;border-radius:4px;display:inline-block">★ T0: ${esc(banner.t0FocusName)}</div>` : ''}
-              </div>
-              <div style="text-align:right;">
-                <div class="banner-rates">
-                  <span class="banner-rate-chip" style="color:var(--t0);border-color:rgba(255,45,85,.3)">T0: ${t0Rate.toFixed(1)}%</span>
-                  <span class="banner-rate-chip" style="color:var(--s);border-color:rgba(255,215,0,.3)">S: ${sRate.toFixed(1)}%</span>
-                </div>
-              </div>
-            </div>
-            <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;min-height:44px">${thumbsHTML || '<span style="font-size:.6rem;color:var(--text3);align-self:center">No images found</span>'}</div>
-            <div style="display:flex;gap:8px;flex-wrap:wrap;">
-              <button class="btn2 btn-sm" onclick="S.activeBannerId='${banner.id}';startSession()">SESSION (5 AP)</button>
-              <button class="btn2 btn-sm" onclick="S.activeBannerId='${banner.id}';pull1()">1 PULL (5 AP)</button>
-              <button class="btn2 btn-sm" onclick="S.activeBannerId='${banner.id}';pull10()">10 PULL (40 AP)</button>
-              ${!isActive ? `<button class="fbtn" onclick="setActiveBanner('${banner.id}');refreshGacha()">Set Default</button>` : ''}
-            </div>
-            ${isActive ? '<div style="position:absolute;top:0;left:0;right:0;height:2px;background:var(--t0g);background-size:200% 200%;animation:t0shift 3s ease infinite"></div>' : ''}`;
-
-            listEl.appendChild(card);
-        });
-        
-        // Add footer padding
-        const pad = document.createElement('div');
-        pad.style.height = "40px";
-        listEl.appendChild(pad);
-    };
-
-    console.log('%c APEX TIER 0 HOTFIX v2.1 APPLIED', 'color:#00e5ff;font-weight:bold;font-size:14px');
-    
-    // Re-render if currently on Gacha screen
-    if(document.getElementById('gacha').classList.contains('active')) {
-        refreshGacha();
-    }
-})();
-</script>
-</body>
-</html>
-
-</body></html>      ║
-  ╚═══════════════════════════════════════════════════════════════╝
--->
-
-<style>
-/* ══════════════════════════════════════════════
-   PATCH CSS — FIX #1: Settings scrolling + dropzone
-   ══════════════════════════════════════════════ */
-
-/* Fix: settings-body must scroll and not collapse */
-.settings-body {
-  flex: 1 1 0% !important;
-  overflow-y: auto !important;
-  min-height: 0 !important;
-}
-
-/* Fix: dropzone never shrinks when image grid is huge */
-.settings-section:has(.drop-zone-v2) {
-  flex-shrink: 0 !important;
-}
-.drop-zone-v2 {
-  flex-shrink: 0 !important;
-}
-
-/* Pagination controls */
-.img-page-controls {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  margin-top: 10px;
-  padding: 8px 0;
-}
-.img-page-btn {
-  background: var(--panel2);
-  border: 1px solid var(--border);
-  color: var(--text2);
-  padding: 5px 14px;
-  border-radius: 4px;
-  font-family: var(--display);
-  font-size: .65rem;
-  cursor: pointer;
-  transition: all .15s;
-  letter-spacing: 1px;
-}
-.img-page-btn:hover:not(:disabled) {
-  border-color: var(--t0);
-  color: var(--t0);
-}
-.img-page-btn:disabled {
-  opacity: .3;
-  cursor: not-allowed;
-}
-.img-page-info {
-  font-family: var(--mono);
-  font-size: .6rem;
-  color: var(--text2);
-  min-width: 80px;
-  text-align: center;
-}
-
-/* ══════════════════════════════════════════════
-   PATCH CSS — FIX #5: Remove tutorial blur
-   ══════════════════════════════════════════════ */
-.tut-backdrop {
-  backdrop-filter: none !important;
-  -webkit-backdrop-filter: none !important;
-  background: rgba(0, 0, 0, 0.85) !important;
-}
-
-/* Preset save button styling */
-.preset-save-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 18px;
-  height: 18px;
-  border-radius: 3px;
-  background: rgba(251, 191, 36, .15);
-  border: 1px solid rgba(251, 191, 36, .4);
-  color: var(--gold);
-  font-size: .5rem;
-  cursor: pointer;
-  transition: all .15s;
-  flex-shrink: 0;
-  margin-left: 2px;
-}
-.preset-save-icon:hover {
-  background: rgba(251, 191, 36, .3);
-  transform: scale(1.1);
-}
-
-/* Banner rate display */
-.banner-rates {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-  margin-top: 6px;
-}
-.banner-rate-chip {
-  font-family: var(--mono);
-  font-size: .55rem;
-  padding: 2px 6px;
-  border-radius: 3px;
-  border: 1px solid var(--border);
-  background: var(--panel2);
-}
-
-/* Credit line on home */
-.home-credit {
-  font-family: var(--mono);
-  font-size: .55rem;
-  color: var(--text3);
-  letter-spacing: 1px;
-  margin-top: 8px;
-  opacity: .7;
-}
-</style>
-
 <script>
 // ╔═══════════════════════════════════════════════════════════════╗
 // ║  MEGA PATCH — Runtime overrides applied after original code   ║
@@ -8131,20 +7935,6 @@ updateHomeScreen = function () {
 })();
 </script>
 
-
-<!-- 
-  ╔═══════════════════════════════════════════════════════════════╗
-  ║  APEX TIER 0 — HOTFIX v2.1 (Banner & Icon Fixes)            ║
-  ║  Auto-injected patch to fix Gacha selection logic           ║
-  ╚═══════════════════════════════════════════════════════════════╝
--->
-<style>
-/* Hide old carousel elements that conflict with the new list */
-#activeBannerStrip, .gacha-wrap > div:first-child button { display: none !important; }
-/* Ensure banner list consumes available height */
-.gacha-wrap { overflow: hidden !important; display: flex !important; flex-direction: column !important; }
-#fehBannerList { flex: 1; overflow-y: auto; padding-bottom: 20px; }
-</style>
 <script>
 (function() {
     console.log('%c APEX TIER 0 HOTFIX v2.1 LOADING...', 'color:#00e5ff;font-weight:bold;font-size:14px');
@@ -8320,19 +8110,7 @@ updateHomeScreen = function () {
     }
 })();
 </script>
-</body>
-</html>
 
-</body>
-</html>
-
-
-<!--
-  ╔═══════════════════════════════════════════════════════════════╗
-  ║  APEX TIER 0 — HOTFIX v2.2 (Gacha Roster Fix)                 ║
-  ║  Fixes banners to focus on unowned images + Lv 40 dupes.      ║
-  ╚═══════════════════════════════════════════════════════════════╝
--->
 <script>
 (function() {
     console.log('%c APEX TIER 0 HOTFIX v2.2 (Gacha Roster Fix) LOADING...', 'color:#00e5ff;font-weight:bold;font-size:14px');
@@ -8456,3 +8234,6 @@ updateHomeScreen = function () {
     console.log('%c APEX TIER 0 HOTFIX v2.2 APPLIED', 'color:#00e5ff;font-weight:bold;font-size:14px');
 })();
 </script>
+
+</body>
+</html>
