@@ -625,6 +625,7 @@ input[type=range]{accent-color:var(--t0);width:100px}
 #fehBannerList{scrollbar-width:thin;scrollbar-color:var(--t0) var(--bg2)}
 #fehBannerList::-webkit-scrollbar{width:4px}
 #fehBannerList::-webkit-scrollbar-thumb{background:var(--t0);border-radius:2px}
+@keyframes shineFly{from{opacity:1;transform:scale(1) translate(0,0)}to{opacity:0;transform:scale(0) translate(var(--dx),var(--dy))}}
 </style>
 </head>
 <body>
@@ -2680,7 +2681,7 @@ function getAtkRange(unit){
 const range=(['Bow','Dagger','Sniper'].includes(unit.weapon)||unit.role==='Sniper')?2:1; // Bug #20: add Dagger
 const cells=[];
 for(let dy=-range;dy<=range;dy++)for(let dx=-range;dx<=range;dx++){
-const d=Math.abs(dx)+Math.abs(dy);if(d===0||d>range)continue;
+const d=Math.abs(dx)+Math.abs(dy);if(d===0||(range===2&&d===1)||d>range)continue;
 const nx=unit.x+dx,ny=unit.y+dy;
 if(nx<0||ny<0||nx>=B.mapW||ny>=B.mapH)continue;
 const t=unitAt(nx,ny);
@@ -3206,24 +3207,13 @@ setTimeout(()=>{el.classList.remove('shake');B.shaking=false;},150);
 
 function hitPause(cb){setTimeout(cb,100);}
 
+if(!B.floatingTexts)B.floatingTexts=[];
 function floatTxt(x,y,text,color='#fbbf24',isCrit=false){
 const px=x*CS+CS/2,py=y*CS+CS/2;
-let yOff=0,alpha=1;
 const sz=isCrit?CS*.38:CS*.22;
 const speed=isCrit?2.5:1.5;
-const iv=setInterval(()=>{
-drawMap();
-B.ctx.save();B.ctx.globalAlpha=alpha;
-B.ctx.fillStyle=color;
-B.ctx.font=`bold ${sz}px 'Orbitron',sans-serif`;
-if(isCrit){B.ctx.shadowColor='#fff';B.ctx.shadowBlur=14;}
-else{B.ctx.shadowColor=color;B.ctx.shadowBlur=6;}
-B.ctx.textAlign='center';
-B.ctx.fillText(text,px+(isCrit?(Math.random()-.5)*6:0),py-yOff);
-B.ctx.restore();
-yOff+=speed;alpha-=.04;
-if(alpha<=0)clearInterval(iv);
-},25);
+const critJitter=isCrit?(Math.random()-.5)*6:0;
+B.floatingTexts.push({px,py,text,color,sz,speed,alpha:1,yOff:0,isCrit,critJitter});
 }
 
 // Impact frame: white flash over canvas on crits
@@ -3267,16 +3257,20 @@ let step=0,startT=null;
 const STEP_MS=90;
 let from={x:unit.x,y:unit.y};
 function tick(ts){
+if(B.phase==='over'){B.animating=Math.max(0,(B.animating||1)-1);return;}
 if(!startT)startT=ts;
 const t=Math.min((ts-startT)/STEP_MS,1);
 const to=path[step];
 const p=easeIO(t);
-const savedX=unit.x,savedY=unit.y;
-unit.x=999;unit.y=999;drawMap();unit.x=savedX;unit.y=savedY;
-const px=(from.x+(to.x-from.x)*p)*CS,py=(from.y+(to.y-from.y)*p)*CS;
-drawBUnitAt(B.ctx,unit,px,py);
+// Use _bx/_by pixel offsets so drawBUnitEnhanced renders the unit mid-slide with full visual detail
+const interpX=(from.x+(to.x-from.x)*p)*CS;
+const interpY=(from.y+(to.y-from.y)*p)*CS;
+unit._bx=Math.round(interpX-unit.x*CS);
+unit._by=Math.round(interpY-unit.y*CS);
+unit._bxEnd=Date.now()+200;
+drawMap();
 if(t>=1){
-unit.x=to.x;unit.y=to.y;from={x:to.x,y:to.y};step++;startT=null;
+unit.x=to.x;unit.y=to.y;unit._bx=0;unit._by=0;from={x:to.x,y:to.y};step++;startT=null;
 if(step>=path.length){drawMap();
 // Evaluate OnMove passives
 unit.passives?.forEach(p=>{
@@ -3360,7 +3354,7 @@ aiAct(e,next);
 function aiAct(enemy,done){
 if(B.phase==='over'){if(done)done();return;}
 const players=B.pUnits.filter(u=>u.hp>0);
-if(!players.length){done();return;}
+if(!players.length){setTimeout(done,10);return;}
 
 // === HEALER AI: heal wounded allies instead of attacking ===
 if(enemy.assist&&(enemy.assist.id==='heal'||enemy.assist.id==='physic')&&!enemy.acted){
@@ -3514,7 +3508,7 @@ markActed(enemy);drawMap();setTimeout(done,CFG.AI_DELAY*.3);
 },CFG.AI_DELAY*.3);return;
 }
 
-if(enemy.frozen){markActed(enemy);done();return;}
+if(enemy.frozen){markActed(enemy);setTimeout(done,10);return;}
 
 const reachable=getReachable(enemy);
 let best=null,bestScore=Infinity;
@@ -3523,10 +3517,10 @@ const d=Math.abs(cell.x-target.x)+Math.abs(cell.y-target.y);
 const score=d<=wRange?-500+d:d;
 if(score<bestScore){bestScore=score;best=cell;}
 }
-if(!best){markActed(enemy);done();return;}
+if(!best){markActed(enemy);setTimeout(done,10);return;}
 
 const path=astar(enemy.x,enemy.y,best.x,best.y,enemy)||[{x:best.x,y:best.y}];
-if(!path.length){markActed(enemy);done();return;}
+if(!path.length){markActed(enemy);setTimeout(done,10);return;}
 
 enemy.moved=true;
 animateMove(enemy,path,()=>{
@@ -3712,10 +3706,7 @@ background:${colors[~~(Math.random()*colors.length)]};
 left:${20+Math.random()*60}%;top:${20+Math.random()*60}%;
 pointer-events:none;animation:shineFly 1s ease-out forwards;
 --dx:${(Math.random()-.5)*200}px;--dy:${(Math.random()-.5)*200}px;`;
-const kf=document.createElement('style');
-kf.textContent=`@keyframes shineFly{from{opacity:1;transform:scale(1) translate(0,0)}to{opacity:0;transform:scale(0) translate(var(--dx),var(--dy))}}`;
-document.head.appendChild(kf);
-document.body.appendChild(p);setTimeout(()=>{p.remove();kf.remove();},1100);
+document.body.appendChild(p);setTimeout(()=>{p.remove();},1100);
 },i*40);
 }
 }
@@ -3867,8 +3858,6 @@ loginStreak:S.loginStreak,lastLoginDate:S.lastLoginDate,
 quests:S.quests,questProgress:S.questProgress,
 ghbCleared:S.ghbCleared||[],
 gachaSession:null,
-// If a session was mid-pick when save() fires, flag how much AP to refund on next load
-gachaPendingRefund:S.gachaSession&&S.gachaSession.picked>0?(5+(S.gachaSession.picked-1)*4):0,
 itemInventory:S.itemInventory||[],
 unlockedAbilities:S.unlockedAbilities||[],
 teamSize:S.teamSize||4,currentBattleMode:currentBattleMode||'ladder',currentBattleConfig:currentBattleConfig,currentDifficulty:currentDifficulty||'normal'};
@@ -3903,8 +3892,7 @@ if(d.uid)uid=d.uid;
 if(d.currentBattleMode)currentBattleMode=d.currentBattleMode;
 if(d.currentBattleConfig)currentBattleConfig=d.currentBattleConfig;
 if(d.currentDifficulty)currentDifficulty=d.currentDifficulty;
-// Refund AP for any gacha session that was wiped mid-pick on last save
-if(d.gachaPendingRefund>0){S.ap+=d.gachaPendingRefund;toast(`Refunded ${d.gachaPendingRefund} AP from interrupted summon`,'gold');}
+// gachaPendingRefund removed — AP is deducted directly on orb pick, no refund needed
 }else if(idbImgs.length)S.images=idbImgs;
 // Migrate all roster units
 // Restore team size from save
@@ -4736,8 +4724,13 @@ reader.readAsDataURL(file);
 function removeImage(idx){
 if(!confirm(`Remove "${S.images[idx].name}"?`))return;
 // Bug #66: Clear src on roster units that used this image
+const removedSrc=S.images[idx].src;
 const removedName=S.images[idx].name;
 S.roster.forEach(u=>{if(u.name===removedName)delete u.src;});
+// Clean up pooled DOM <img> element for this image to prevent DOM node accumulation
+if(typeof _animElPool!=='undefined'&&removedSrc&&_animElPool.has(removedSrc)){
+const el=_animElPool.get(removedSrc);if(el&&el.remove)el.remove();_animElPool.delete(removedSrc);
+}
 S.images.splice(idx,1);refreshSettings();toast('Removed');
 }
 
@@ -5380,6 +5373,22 @@ for(let i=0;i<25;i++){const ex=(i*41+T*30)%cw;const ey=ch-(i*23+T*80)%ch;ctx.beg
 ctx.fillStyle='rgba(200,200,220,.06)';
 for(let i=0;i<8;i++){const fx=(i*60+Math.sin(T*0.3+i)*40)%cw;const fy=(i*50+ch/2)%ch;ctx.beginPath();ctx.ellipse(fx,fy,60+Math.sin(T*0.2+i)*10,20,0,0,Math.PI*2);ctx.fill();}
 }
+}
+
+// Layer 9: Floating damage/heal text (driven by B.floatingTexts array)
+if(B.floatingTexts&&B.floatingTexts.length){
+B.floatingTexts=B.floatingTexts.filter(ft=>{
+ctx.save();ctx.globalAlpha=ft.alpha;
+ctx.fillStyle=ft.color;
+ctx.font=`bold ${ft.sz}px 'Orbitron',sans-serif`;
+if(ft.isCrit){ctx.shadowColor='#fff';ctx.shadowBlur=14;}
+else{ctx.shadowColor=ft.color;ctx.shadowBlur=6;}
+ctx.textAlign='center';
+ctx.fillText(ft.text,ft.px+ft.critJitter,ft.py-ft.yOff);
+ctx.restore();
+ft.yOff+=ft.speed;ft.alpha-=0.04;
+return ft.alpha>0;
+});
 }
 }
 
@@ -7530,6 +7539,9 @@ class MaestroV2 {
 
     osc.start(now);
     osc.stop(now + duration + 0.05);
+    // Disconnect gain node after note finishes to prevent audio node accumulation
+    const cleanupMs = (duration + 0.15) * 1000;
+    setTimeout(() => { try { gain.disconnect(); filter.disconnect(); } catch(e){} }, cleanupMs);
   }
 
   // Dedicated bass oscillator
@@ -7555,6 +7567,7 @@ class MaestroV2 {
 
     osc.start(now);
     osc.stop(now + duration + 0.05);
+    setTimeout(() => { try { gain.disconnect(); filter.disconnect(); } catch(e){} }, (duration + 0.15) * 1000);
   }
 
   start() {
@@ -7660,6 +7673,7 @@ class MaestroV2 {
     g.gain.setValueAtTime(vol, now);
     g.gain.exponentialRampToValueAtTime(0.001, now + 0.06);
     src.start(now); src.stop(now + 0.07);
+    setTimeout(() => { try { g.disconnect(); f.disconnect(); } catch(e){} }, 150);
   }
 }
 
