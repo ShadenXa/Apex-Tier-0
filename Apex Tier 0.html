@@ -5305,7 +5305,7 @@ if(stripEl){
 if(S.activeBannerId){
 const banner=S.banners.find(b=>b.id===S.activeBannerId);
 if(banner){
-stripEl.innerHTML=`<div class="home-banner-label">ACTIVE BANNER</div><div class="home-banner-name">${banner.name}</div>`;
+stripEl.innerHTML=`<div class="home-banner-label">ACTIVE BANNER</div><div class="home-banner-name">${esc(banner.name)}</div>`;
 stripEl.style.display='block';
 }else stripEl.style.display='none';
 }else stripEl.style.display='none';
@@ -8199,7 +8199,7 @@ refreshGacha = function () {
     ).join('');
 
     const isActive = banner.id === S.activeBannerId || (banner.isStandard && !S.activeBannerId);
-    const label = banner.isStandard ? 'STANDARD POOL' : banner.name;
+    const label = banner.isStandard ? 'STANDARD POOL' : esc(banner.name);
     const hasT0Focus = banner.t0FocusName;
 
     const card = document.createElement('div');
@@ -8523,7 +8523,7 @@ updateHomeScreen = function () {
             ).join('');
 
             const isActive = banner.id === S.activeBannerId;
-            const label = banner.isStandard ? 'STANDARD POOL' : banner.name;
+            const label = banner.isStandard ? 'STANDARD POOL' : esc(banner.name);
 
             const card = document.createElement('div');
             card.style.cssText = `background:var(--panel);border:${isActive ? '2px solid var(--gold)' : '1px solid var(--border)'};border-radius:12px;padding:16px;position:relative;overflow:hidden;flex-shrink:0;${isActive ? 'box-shadow:0 0 20px rgba(251,191,36,.15);' : ''}`;
