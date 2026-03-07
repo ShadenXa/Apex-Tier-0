@@ -853,6 +853,20 @@ input[type=range]{accent-color:var(--t0);width:100px}
   /* Daycare slots bigger for touch */
   .dc-slot{padding:14px;min-height:140px}
 }
+
+/* ═══ v3.0 — ACHIEVEMENTS, COMPENDIUM, FISHING, TRADES ═══ */
+.achieve-toast{position:fixed;top:-100px;left:50%;transform:translateX(-50%);background:linear-gradient(135deg,rgba(251,191,36,.95),rgba(255,107,53,.95));border:2px solid #fff;border-radius:8px;padding:12px 20px;color:#fff;z-index:11000;box-shadow:0 10px 30px rgba(0,0,0,.8);text-align:center;transition:top .4s cubic-bezier(.34,1.56,.64,1);pointer-events:none}
+.achieve-toast.show{top:20px}
+.achieve-title{font-family:var(--display);font-size:1rem;font-weight:900;letter-spacing:2px;text-shadow:0 2px 4px rgba(0,0,0,.5)}
+.achieve-desc{font-size:.75rem;font-family:var(--mono);margin-top:4px}
+.compendium-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(60px,1fr));gap:6px;margin-top:12px}
+.comp-slot{width:60px;height:60px;border-radius:8px;border:2px solid var(--border);background:var(--panel2);opacity:.4;filter:grayscale(100%);transition:all .3s;object-fit:cover}
+.comp-slot.unlocked{opacity:1;filter:grayscale(0%);border-color:var(--gold);box-shadow:0 0 10px rgba(251,191,36,.3)}
+.fishing-pond{width:100%;height:200px;background:linear-gradient(180deg,#0a1828,#0f223a);border:2px solid var(--blue);border-radius:12px;position:relative;overflow:hidden;margin-bottom:12px}
+.fish-bobber{width:16px;height:16px;background:var(--red);border:2px solid #fff;border-radius:50%;position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);transition:top .1s}
+.fish-ripple{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:0;height:0;border:2px solid rgba(0,229,255,.5);border-radius:50%;animation:ripple 1.5s infinite}
+@keyframes ripple{0%{width:10px;height:10px;opacity:1}100%{width:80px;height:80px;opacity:0}}
+.code-textarea{width:100%;height:80px;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:var(--mono);font-size:.6rem;padding:8px;border-radius:6px;resize:none;margin-bottom:8px}
 </style>
 </head>
 <body>
@@ -881,6 +895,7 @@ input[type=range]{accent-color:var(--t0);width:100px}
 <button class="btn2" style="flex:1" onclick="nav('modes')" data-tip="Training Tower, Arena, GHB, Tempest Trials, Hall of Forms, and more">MODES</button>
 </div>
 <button class="btn2" onclick="chooseDifficulty(()=>{currentBattleMode='ladder';currentBattleConfig=null;startBattle();})" data-tip="Quick battle to climb the ELO ladder and earn AP">LADDER BATTLE</button>
+<button class="btn2" style="border-color:#00e5ff;color:#00e5ff" onclick="nav('tavern')" data-tip="Fishing minigame, hero compendium, trade codes, community banners">TAVERN</button>
 <button class="btn2" onclick="nav('settings')" data-tip="Upload images, configure battle options, manage banners and save data">SETTINGS</button>
 </div>
 <div style="font-family:var(--mono);font-size:.65rem;color:var(--text3);max-width:280px;line-height:1.7">Upload images to create Infinite Units. Climb the Elo ladder from Iron to Tier 0.</div>
@@ -1161,6 +1176,61 @@ input[type=range]{accent-color:var(--t0);width:100px}
 </div>
 </div>
 </div>
+</div>
+
+<!-- TAVERN (Minigames & Social) -->
+<div class="screen" id="tavern">
+<div class="hdr"><div class="hdr-logo">THE TAVERN</div><div class="hdr-nav"><button class="nbtn" onclick="nav('home')">HOME</button></div></div>
+<div class="sbar"><div class="sbar-t">MINIGAMES &amp; COMMUNITY</div></div>
+<div style="flex:1;overflow-y:auto;padding:16px;max-width:600px;margin:0 auto;width:100%;display:flex;flex-direction:column;gap:16px">
+
+<!-- FISHING MINIGAME -->
+<div class="settings-section">
+<h2 style="color:var(--blue)">APEX FISHING</h2>
+<p style="font-size:.7rem;color:var(--text2);margin-bottom:8px">Cost: 5 AP. Wait for the bobber to dip entirely underwater, then tap instantly to catch rare items and shards!</p>
+<div class="fishing-pond" id="fishPond" onclick="catchFish()">
+<div class="fish-ripple"></div>
+<div class="fish-bobber" id="fishBobber"></div>
+</div>
+<button class="btn-t0" id="fishBtn" style="width:100%;background:linear-gradient(135deg,#00e5ff,#3b82f6)" onclick="startFishing()">CAST LINE (5 AP)</button>
+</div>
+
+<!-- HERO COMPENDIUM -->
+<div class="settings-section">
+<h2 style="color:var(--gold)">HERO COMPENDIUM</h2>
+<div id="compStats" style="font-family:var(--display);font-size:.8rem;color:var(--text);margin-bottom:4px">Collected: 0 / 0</div>
+<p style="font-size:.65rem;color:var(--green);margin-bottom:8px">Every 5 unique images collected grants a permanent +1% to all stats account-wide!</p>
+<button class="btn2 btn-sm" onclick="renderCompendium()">View Compendium</button>
+<div class="compendium-grid" id="compGrid" style="display:none"></div>
+</div>
+
+<!-- COMMUNITY TRADING & BANNERS -->
+<div class="settings-section">
+<h2 style="color:#7c4dff">ASYNC MULTIPLAYER CODES</h2>
+<p style="font-size:.7rem;color:var(--text2);margin-bottom:8px">Share units and banners with other players using Data Codes! No servers required.</p>
+<textarea id="importCodeBox" class="code-textarea" placeholder="Paste a Unit Code or Community Banner Code here..."></textarea>
+<div style="display:flex;gap:8px">
+<button class="btn-t0" style="flex:1;background:linear-gradient(135deg,#7c4dff,#b000ff)" onclick="importDataCode()">IMPORT CODE</button>
+</div>
+<div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
+<div style="font-size:.7rem;color:var(--text2);margin-bottom:4px">To export a unit, go to their Hero Detail screen.</div>
+<div style="font-size:.7rem;color:var(--text2)">To export a banner, go to Settings &gt; Banners.</div>
+</div>
+</div>
+
+<!-- ACHIEVEMENTS LIST -->
+<div class="settings-section">
+<h2 style="color:var(--t0)">ACHIEVEMENTS</h2>
+<div id="achieveList" style="display:flex;flex-direction:column;gap:6px"></div>
+</div>
+
+</div>
+</div>
+
+<!-- Achievement Toast -->
+<div id="achieveToast" class="achieve-toast">
+<div class="achieve-title">ACHIEVEMENT UNLOCKED</div>
+<div class="achieve-desc" id="achieveDesc"></div>
 </div>
 
 <!-- SETTINGS -->
@@ -1721,6 +1791,7 @@ quests:{daily:[],story:[],lastDailyDate:''},questProgress:{},
 ghbCleared:[],
 gachaSession:null,
 currentBattleMode:'ladder',currentBattleConfig:null,currentDifficulty:'normal',
+achievements:[],compendium:[],_fishCaught:0,
 };
 let uid=0;
 let sortMode='grade';
@@ -1974,6 +2045,7 @@ if(id==='settings'){activeSettingsTab='images';setSettingsTab('images');}
 if(id==='modes')refreshModes();
 if(id==='daycare'&&typeof refreshDaycare==='function')refreshDaycare();
 if(id==='quests'){renderQuests();updateQuestBadge();}
+if(id==='tavern'&&typeof refreshTavern==='function')refreshTavern();
 if(id==='home')updateHomeScreen();
 // Tutorial hint btn: show on home, hide on battle
 const hintBtn=document.getElementById('tutHintBtn');
@@ -4151,7 +4223,8 @@ gachaSession:null,
 itemInventory:S.itemInventory||[],
 unlockedAbilities:S.unlockedAbilities||[],
 teamSize:S.teamSize||4,currentBattleMode:currentBattleMode||'ladder',currentBattleConfig:currentBattleConfig,currentDifficulty:currentDifficulty||'normal',
-daycareSlots:S.daycareSlots||[null,null],daycareBond:S.daycareBond||0,supportMap:S.supportMap||{},fusionChildren:S.fusionChildren||[]};
+daycareSlots:S.daycareSlots||[null,null],daycareBond:S.daycareBond||0,supportMap:S.supportMap||{},fusionChildren:S.fusionChildren||[],
+achievements:S.achievements||[],compendium:S.compendium||[],_fishCaught:S._fishCaught||0};
 localStorage.setItem(SAVE_KEY,JSON.stringify(sd));
 await saveIDB(S.images);
 if(!silent)toast('Saved!','ok');refreshSettings();
@@ -4188,6 +4261,10 @@ if(d.daycareSlots)S.daycareSlots=d.daycareSlots;
 if(d.daycareBond!==undefined)S.daycareBond=d.daycareBond;
 if(d.supportMap)S.supportMap=d.supportMap;
 if(d.fusionChildren)S.fusionChildren=d.fusionChildren;
+// v3.0 expansion data
+if(d.achievements)S.achievements=d.achievements;
+if(d.compendium)S.compendium=d.compendium;
+if(d._fishCaught)S._fishCaught=d._fishCaught;
 }else if(idbImgs.length)S.images=idbImgs;
 // Migrate all roster units
 // Restore team size from save
@@ -10316,6 +10393,449 @@ updateHomeScreen = function () {
     }
 
     console.log('%c  ✓ Android/Mobile touch support loaded', 'color:#22c55e');
+})();
+
+// ╔══════════════════════════════════════════════════════════════╗
+// ║  APEX TIER 0 — v3.0 CONTENT EXPANSION                      ║
+// ║  Achievements, Compendium, Fishing, Trades, Community Banners║
+// ╚══════════════════════════════════════════════════════════════╝
+(function() {
+    'use strict';
+    console.log('%c APEX TIER 0 v3.0 EXPANSION LOADING...', 'color:#00e5ff;font-weight:bold');
+
+    // ─── 1. INITIALIZE DATA ───
+    if(!S.achievements) S.achievements = [];
+    if(!S.compendium) S.compendium = [];
+
+    // ─── 2. ACHIEVEMENTS SYSTEM ───
+    const ACHIEVEMENTS_DB = [
+        { id:'a_first_blood', name:'First Blood', desc:'Win your first battle.', req:()=>S.wins>=1, reward:20 },
+        { id:'a_warlord', name:'Warlord', desc:'Win 50 battles.', req:()=>S.wins>=50, reward:100 },
+        { id:'a_centurion', name:'Centurion', desc:'Win 100 battles.', req:()=>S.wins>=100, reward:200 },
+        { id:'a_summoner', name:'Apprentice Summoner', desc:'Have 10 heroes in your barracks.', req:()=>S.roster.length>=10, reward:30 },
+        { id:'a_grand_summoner', name:'Grand Summoner', desc:'Have 30 heroes in your barracks.', req:()=>S.roster.length>=30, reward:80 },
+        { id:'a_tier0', name:'Mythic Luck', desc:'Summon a TIER 0 Hero.', req:()=>S.roster.some(u=>u.grade==='T0'), reward:100 },
+        { id:'a_max_level', name:'Apex Predator', desc:'Reach Level 40 with a hero.', req:()=>S.roster.some(u=>u.level>=40), reward:50 },
+        { id:'a_collector5', name:'Collector', desc:'Register 5 unique images in the Compendium.', req:()=>S.compendium&&S.compendium.length>=5, reward:30 },
+        { id:'a_collector20', name:'Hoarder', desc:'Register 20 unique images in the Compendium.', req:()=>S.compendium&&S.compendium.length>=20, reward:150 },
+        { id:'a_elo1200', name:'Rising Star', desc:'Reach 1200 ELO.', req:()=>S.elo>=1200, reward:50 },
+        { id:'a_elo1500', name:'Champion', desc:'Reach 1500 ELO.', req:()=>S.elo>=1500, reward:100 },
+        { id:'a_campaign5', name:'Adventurer', desc:'Complete 5 campaign chapters.', req:()=>(S.campaignDone&&S.campaignDone.length>=5), reward:40 },
+        { id:'a_campaign20', name:'Veteran', desc:'Complete 20 campaign chapters.', req:()=>(S.campaignDone&&S.campaignDone.length>=20), reward:100 },
+        { id:'a_rich', name:'War Chest', desc:'Accumulate 500 AP total.', req:()=>S.ap>=500, reward:50 },
+        { id:'a_fish1', name:'First Catch', desc:'Catch your first fish.', req:()=>S._fishCaught>=1, reward:15 },
+        { id:'a_fish10', name:'Angler', desc:'Catch 10 fish.', req:()=>S._fishCaught>=10, reward:50 },
+        { id:'a_daycare', name:'Matchmaker', desc:'Place two units in the Daycare.', req:()=>S.daycareSlots&&S.daycareSlots[0]&&S.daycareSlots[1], reward:30 }
+    ];
+
+    window.checkAchievements = function() {
+        ACHIEVEMENTS_DB.forEach(ach => {
+            if(!S.achievements.includes(ach.id) && ach.req()) {
+                S.achievements.push(ach.id);
+                S.ap += ach.reward;
+                save(true);
+                const at = document.getElementById('achieveToast');
+                if(at) {
+                    document.getElementById('achieveDesc').textContent = ach.name + ': ' + ach.desc + ' (+' + ach.reward + ' AP)';
+                    at.classList.add('show');
+                    sfx('victory');
+                    setTimeout(() => at.classList.remove('show'), 4000);
+                }
+            }
+        });
+    };
+
+    // Hook achievement check into battle end
+    const _origCBO_v3 = window.checkBattleOver;
+    window.checkBattleOver = function() {
+        const res = _origCBO_v3.apply(this, arguments);
+        if(B.phase === 'over') checkAchievements();
+        return res;
+    };
+
+    // Hook achievement check into summons
+    const _origRollUnit_v3 = window.rollUnit;
+    window.rollUnit = function(guaranteeHigh) {
+        const res = _origRollUnit_v3.apply(this, arguments);
+        if(res && res.unit && !res.overMax) {
+            if(!S.compendium.includes(res.unit.name)) {
+                S.compendium.push(res.unit.name);
+            }
+        }
+        checkAchievements();
+        return res;
+    };
+
+    // ─── 3. COMPENDIUM & COLLECTION BONUS ───
+    window.getCompendiumBonus = function() {
+        return Math.floor((S.compendium.length || 0) / 5) * 0.01;
+    };
+
+    // Hook into prepUnit to apply compendium bonus
+    const _origPrepUnit_v3 = window.prepUnit;
+    window.prepUnit = function(unit, side) {
+        const u = _origPrepUnit_v3.apply(this, arguments);
+        if(u && side === 'player') {
+            const bonusMult = 1 + getCompendiumBonus();
+            if(bonusMult > 1) {
+                ['atk','def','mag','res','spd'].forEach(s => {
+                    u[s] = Math.floor(u[s] * bonusMult);
+                });
+                u.maxHp = Math.floor(u.maxHp * bonusMult);
+                u.hp = u.maxHp;
+            }
+        }
+        return u;
+    };
+
+    window.renderCompendium = function() {
+        const grid = document.getElementById('compGrid');
+        if(!grid) return;
+
+        // Retroactive: add current roster images to compendium
+        S.roster.forEach(u => {
+            if(!S.compendium.includes(u.name)) S.compendium.push(u.name);
+        });
+
+        const totalUnique = S.images.filter(i => !i.isDefault).length;
+        const compStats = document.getElementById('compStats');
+        if(compStats) compStats.textContent = 'Collected: ' + S.compendium.length + ' / ' + (totalUnique > 0 ? totalUnique : '?');
+
+        grid.style.display = 'grid';
+        grid.innerHTML = '';
+
+        S.images.filter(i => !i.isDefault).forEach(img => {
+            const unlocked = S.compendium.includes(img.name);
+            const el = document.createElement('img');
+            el.src = img.src;
+            el.className = 'comp-slot' + (unlocked ? ' unlocked' : '');
+            el.title = unlocked ? img.name : '???';
+            grid.appendChild(el);
+        });
+    };
+
+    // ─── 4. FISHING MINIGAME ───
+    let fishingState = 'idle';
+    let fishTimer = null;
+    if(!S._fishCaught) S._fishCaught = 0;
+
+    window.startFishing = function() {
+        if(S.ap < 5) { toast('Not enough AP!', 'err'); return; }
+        if(fishingState !== 'idle') return;
+
+        S.ap -= 5;
+        save(true);
+        if(typeof updateHomeScreen === 'function') updateHomeScreen();
+
+        fishingState = 'waiting';
+        const fishBtn = document.getElementById('fishBtn');
+        if(fishBtn) {
+            fishBtn.textContent = 'WAIT FOR A BITE...';
+            fishBtn.style.opacity = '0.5';
+        }
+
+        const waitTime = 2000 + Math.random() * 4000;
+        fishTimer = setTimeout(() => {
+            fishingState = 'bite';
+            const bobber = document.getElementById('fishBobber');
+            if(bobber) bobber.style.top = '70%';
+            const fb = document.getElementById('fishBtn');
+            if(fb) {
+                fb.textContent = 'TAP TO REEL IN!!';
+                fb.style.opacity = '1';
+                fb.style.background = 'var(--red)';
+            }
+            // 800ms window to catch
+            fishTimer = setTimeout(() => {
+                if(fishingState === 'bite') {
+                    fishingState = 'idle';
+                    resetFishUI('THE FISH GOT AWAY!', 'err');
+                }
+            }, 800);
+        }, waitTime);
+    };
+
+    window.catchFish = function() {
+        if(fishingState === 'bite') {
+            clearTimeout(fishTimer);
+            fishingState = 'idle';
+            S._fishCaught = (S._fishCaught || 0) + 1;
+            sfx('crit');
+
+            const r = Math.random();
+            let rewardMsg = '';
+            if(r < 0.1 && typeof ITEM_DB !== 'undefined') {
+                const pool = ITEM_DB.filter(i => i.rarity === 'S' || i.rarity === 'A');
+                if(pool.length > 0) {
+                    const itm = {...pool[~~(Math.random() * pool.length)]};
+                    itm.instanceId = 'itm_' + Date.now();
+                    if(!S.itemInventory) S.itemInventory = [];
+                    S.itemInventory.push(itm);
+                    rewardMsg = 'Caught a Rare Item: ' + itm.name + '!';
+                } else {
+                    S.ap += 15;
+                    rewardMsg = 'Caught an AP Fish! (+15 AP)';
+                }
+            } else if(r < 0.4) {
+                const amt = 1 + ~~(Math.random() * 3);
+                S.shards = (S.shards || 0) + amt;
+                rewardMsg = 'Caught a chest with ' + amt + ' Shards!';
+            } else {
+                const amt = 5 + ~~(Math.random() * 10);
+                S.ap += amt;
+                rewardMsg = 'Caught an AP Fish! (+' + amt + ' AP)';
+            }
+            save(true);
+            checkAchievements();
+            resetFishUI(rewardMsg, 'ok');
+        } else if(fishingState === 'waiting') {
+            clearTimeout(fishTimer);
+            fishingState = 'idle';
+            resetFishUI('You reeled in too early!', 'err');
+        }
+    };
+
+    function resetFishUI(msg, type) {
+        toast(msg, type);
+        const bobber = document.getElementById('fishBobber');
+        if(bobber) bobber.style.top = '50%';
+        const fb = document.getElementById('fishBtn');
+        if(fb) {
+            fb.textContent = 'CAST LINE (5 AP)';
+            fb.style.opacity = '1';
+            fb.style.background = 'linear-gradient(135deg,#00e5ff,#3b82f6)';
+        }
+    }
+
+    // ─── 5. ASYNC MULTIPLAYER: EXPORT / IMPORT CODES ───
+
+    // Add Export button to Hero Detail
+    const _origOpenHD_v3 = window.openHeroDetail;
+    window.openHeroDetail = function(idx) {
+        _origOpenHD_v3.apply(this, arguments);
+        const hdNav = document.querySelector('#heroDetail .hdr-nav');
+        if(hdNav && !hdNav.querySelector('.export-btn')) {
+            const btn = document.createElement('button');
+            btn.className = 'btn2 btn-sm export-btn';
+            btn.textContent = 'Export Code';
+            btn.onclick = () => window.exportUnit(idx);
+            hdNav.insertBefore(btn, hdNav.firstChild);
+        }
+    };
+
+    // Add Export button to Banners
+    const _origRefreshBannerList_v3 = window.refreshBannerList;
+    window.refreshBannerList = function() {
+        _origRefreshBannerList_v3.apply(this, arguments);
+        const actions = document.querySelectorAll('.banner-actions');
+        actions.forEach((act, i) => {
+            const banner = S.banners ? S.banners[i] : null;
+            if(banner && !act.querySelector('.export-bn-btn')) {
+                const btn = document.createElement('button');
+                btn.className = 'fbtn export-bn-btn';
+                btn.textContent = 'Export';
+                btn.style.color = '#00e5ff';
+                btn.onclick = () => window.exportBanner(banner.id);
+                act.insertBefore(btn, act.firstChild);
+            }
+        });
+    };
+
+    window.exportUnit = function(idx) {
+        const u = S.roster[idx];
+        if(!u || !u.src) return;
+        const pack = {
+            type: 'APEX_UNIT',
+            u: Object.assign({}, u, {img: null}),
+            img: u.src
+        };
+        const code = btoa(encodeURIComponent(JSON.stringify(pack)));
+        if(navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(code).then(() => toast('Unit Code Copied! Paste it to a friend.', 'ok')).catch(() => {
+                prompt('Copy this code:', code);
+            });
+        } else {
+            prompt('Copy this code:', code);
+        }
+    };
+
+    window.exportBanner = function(bannerId) {
+        const banner = S.banners ? S.banners.find(b => b.id === bannerId) : null;
+        if(!banner) return;
+        const images = (banner.heroNames || []).map(name => {
+            const img = S.images.find(i => i.name === name);
+            return img ? {name: img.name, src: img.src} : null;
+        }).filter(Boolean);
+        const pack = {
+            type: 'APEX_BANNER',
+            banner: banner,
+            images: images
+        };
+        const code = btoa(encodeURIComponent(JSON.stringify(pack)));
+        if(navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(code).then(() => toast('Banner Code Copied! Share with the community.', 'ok')).catch(() => {
+                prompt('Copy this code:', code);
+            });
+        } else {
+            prompt('Copy this code:', code);
+        }
+    };
+
+    window.importDataCode = function() {
+        const codeBox = document.getElementById('importCodeBox');
+        const code = (codeBox ? codeBox.value : '').trim();
+        if(!code) { toast('Enter a code first!', 'err'); return; }
+
+        try {
+            const pack = JSON.parse(decodeURIComponent(atob(code)));
+
+            if(pack.type === 'APEX_UNIT') {
+                if(!S.images.find(i => i.src === pack.img)) {
+                    S.images.push({src: pack.img, name: pack.u.name, isDefault: false});
+                }
+                const newU = pack.u;
+                uid++; newU.id = uid;
+                newU.src = pack.img;
+                S.roster.push(newU);
+                if(!S.compendium.includes(newU.name)) S.compendium.push(newU.name);
+                toast('Imported Unit: ' + newU.name + '!', 'gold');
+                sfx('summon');
+
+            } else if(pack.type === 'APEX_BANNER') {
+                (pack.images || []).forEach(img => {
+                    if(!S.images.find(i => i.src === img.src)) {
+                        S.images.push({src: img.src, name: img.name, isDefault: false});
+                    }
+                });
+                const newBanner = pack.banner;
+                newBanner.id = 'banner_' + Date.now();
+                if(!S.banners) S.banners = [];
+                S.banners.push(newBanner);
+                toast('Imported Community Banner: ' + newBanner.name + '!', 'gold');
+                sfx('victory');
+
+            } else if(pack.type === 'APEX_MERC') {
+                // Mercenary system — add temp unit for one battle
+                if(!S.images.find(i => i.src === pack.img)) {
+                    S.images.push({src: pack.img, name: pack.u.name, isDefault: false});
+                }
+                const merc = pack.u;
+                uid++; merc.id = uid;
+                merc.src = pack.img;
+                merc.isMercenary = true;
+                S.roster.push(merc);
+                if(!S.compendium.includes(merc.name)) S.compendium.push(merc.name);
+                toast('Mercenary ' + merc.name + ' joined for 1 battle!', 'gold');
+                sfx('summon');
+
+            } else {
+                toast('Unrecognized Code Format.', 'err');
+            }
+
+            if(codeBox) codeBox.value = '';
+            save(true);
+            checkAchievements();
+
+        } catch(e) {
+            toast('Invalid or Corrupted Code.', 'err');
+            console.error('Import error:', e);
+        }
+    };
+
+    // Export as Mercenary (single strongest unit for co-op)
+    window.exportMercenary = function(idx) {
+        const u = S.roster[idx];
+        if(!u || !u.src) return;
+        const pack = {
+            type: 'APEX_MERC',
+            u: Object.assign({}, u, {img: null}),
+            img: u.src
+        };
+        const code = btoa(encodeURIComponent(JSON.stringify(pack)));
+        if(navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(code).then(() => toast('Mercenary Code Copied! Your friend can use this unit for 1 battle.', 'ok')).catch(() => {
+                prompt('Copy this mercenary code:', code);
+            });
+        } else {
+            prompt('Copy this mercenary code:', code);
+        }
+    };
+
+    // ─── 6. TAVERN REFRESH ───
+    window.refreshTavern = function() {
+        // Update achievement list
+        const achieveList = document.getElementById('achieveList');
+        if(achieveList) {
+            achieveList.innerHTML = '';
+            ACHIEVEMENTS_DB.forEach(ach => {
+                const done = S.achievements.includes(ach.id);
+                achieveList.innerHTML += '<div style="display:flex;align-items:center;gap:8px;padding:8px;background:var(--panel2);border:1px solid ' +
+                    (done ? 'var(--gold)' : 'var(--border)') + ';border-radius:6px;opacity:' + (done ? '1' : '.6') + '">' +
+                    '<div style="font-size:1rem">' + (done ? '&#9733;' : '&#9734;') + '</div>' +
+                    '<div style="flex:1"><div style="font-size:.7rem;font-weight:600;color:' + (done ? 'var(--gold)' : 'var(--text)') + '">' + ach.name + '</div>' +
+                    '<div style="font-size:.6rem;color:var(--text2)">' + ach.desc + '</div></div>' +
+                    '<div style="font-family:var(--mono);font-size:.6rem;color:var(--gold)">+' + ach.reward + ' AP</div></div>';
+            });
+        }
+
+        // Update compendium stats
+        const compStats = document.getElementById('compStats');
+        if(compStats) {
+            const totalUnique = S.images.filter(i => !i.isDefault).length;
+            compStats.textContent = 'Collected: ' + (S.compendium ? S.compendium.length : 0) + ' / ' + (totalUnique > 0 ? totalUnique : '?');
+        }
+
+        // Run achievement check on visit
+        checkAchievements();
+    };
+
+    // ─── 7. SAVE/LOAD INTEGRATION ───
+    // Ensure v3 data persists in saves
+    const _origSave_v3 = window.save;
+    window.save = function(quiet) {
+        // Ensure fields exist before save
+        if(!S.achievements) S.achievements = [];
+        if(!S.compendium) S.compendium = [];
+        if(!S._fishCaught) S._fishCaught = 0;
+        return _origSave_v3.apply(this, arguments);
+    };
+
+    // Ensure v3 data loads properly
+    const _origLoadGame_v3 = window.loadGame;
+    window.loadGame = function() {
+        const result = _origLoadGame_v3.apply(this, arguments);
+        if(!S.achievements) S.achievements = [];
+        if(!S.compendium) S.compendium = [];
+        if(!S._fishCaught) S._fishCaught = 0;
+        // Retroactive: register all existing roster images into compendium
+        S.roster.forEach(u => {
+            if(u.name && !S.compendium.includes(u.name)) S.compendium.push(u.name);
+        });
+        return result;
+    };
+
+    // ─── 8. CLEAN UP MERCENARIES AFTER BATTLE ───
+    const _origCBO_v3merc = window.checkBattleOver;
+    window.checkBattleOver = function() {
+        const res = _origCBO_v3merc.apply(this, arguments);
+        if(B.phase === 'over') {
+            // Remove mercenary units after battle ends
+            const mercs = S.roster.filter(u => u.isMercenary);
+            if(mercs.length > 0) {
+                mercs.forEach(m => {
+                    const idx = S.team.indexOf(S.roster.indexOf(m));
+                    if(idx >= 0) S.team.splice(idx, 1);
+                });
+                S.roster = S.roster.filter(u => !u.isMercenary);
+                save(true);
+                if(mercs.length === 1) toast('Mercenary ' + mercs[0].name + ' has departed.', '');
+                else toast(mercs.length + ' mercenaries have departed.', '');
+            }
+        }
+        return res;
+    };
+
+    console.log('%c  ✓ v3.0 Content Expansion loaded (Achievements, Compendium, Fishing, Trades)', 'color:#22c55e');
 })();
 
 </script>
