@@ -752,6 +752,39 @@ input[type=range]{accent-color:var(--t0);width:100px}
 .inv-filters button{font-size:.5rem;padding:2px 6px;border-radius:4px;border:1px solid var(--border);background:transparent;color:var(--text2);cursor:pointer;font-family:var(--body)}
 .inv-filters button.active{background:var(--accent);color:#fff;border-color:var(--accent)}
 .inv-item-grid{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px;max-height:200px;overflow-y:auto}
+/* Daycare */
+.dc-garden{position:relative;background:linear-gradient(180deg,#0a1628 0%,#0f2218 60%,#1a3322 100%);border-radius:12px;border:1px solid var(--border);overflow:hidden;min-height:280px;cursor:pointer;touch-action:none}
+.dc-garden canvas{width:100%;height:100%;display:block}
+.dc-hearts{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;overflow:hidden}
+.dc-heart{position:absolute;color:#ff6b9d;font-size:1.2rem;animation:dcHeartFloat 1.2s ease-out forwards;pointer-events:none}
+@keyframes dcHeartFloat{0%{opacity:1;transform:translateY(0) scale(1)}100%{opacity:0;transform:translateY(-60px) scale(1.5)}}
+.dc-slots{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.dc-slot{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:12px;text-align:center;cursor:pointer;transition:all .2s;min-height:120px;display:flex;flex-direction:column;align-items:center;gap:6px}
+.dc-slot:hover{border-color:var(--t0);transform:translateY(-2px)}
+.dc-slot canvas{border-radius:50%;border:2px solid var(--gold)}
+.dc-slot .dc-name{font-family:var(--display);font-size:.65rem;letter-spacing:1px}
+.dc-slot .dc-grade{font-size:.55rem;font-weight:700}
+.dc-slot-empty{border:2px dashed var(--border);color:var(--text3);font-size:.7rem;display:flex;align-items:center;justify-content:center;min-height:120px;cursor:pointer}
+.dc-bond{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:12px}
+.dc-bond-bar{height:8px;background:var(--panel2);border-radius:4px;overflow:hidden;margin-top:6px}
+.dc-bond-fill{height:100%;background:linear-gradient(90deg,#ff6b9d,#ff2d55);border-radius:4px;transition:width .5s}
+.dc-actions{display:flex;gap:8px;flex-wrap:wrap}
+.dc-sprite{position:absolute;transition:transform .3s;cursor:pointer}
+.dc-sprite.dc-wiggle{animation:dcWiggle .5s ease-in-out}
+.dc-sprite.dc-jump{animation:dcJump .6s ease-in-out}
+@keyframes dcWiggle{0%,100%{transform:rotate(0)}25%{transform:rotate(-8deg)}75%{transform:rotate(8deg)}}
+@keyframes dcJump{0%,100%{transform:translateY(0)}50%{transform:translateY(-20px)}}
+/* Fusion glow */
+.fusion-glow{box-shadow:0 0 12px rgba(255,45,85,.4),0 0 24px rgba(255,107,53,.2)}
+/* Battle hearts */
+.battle-heart{position:absolute;font-size:.8rem;animation:battleHeartPop .8s ease-out forwards;pointer-events:none;z-index:100}
+@keyframes battleHeartPop{0%{opacity:1;transform:scale(0.5) translateY(0)}50%{transform:scale(1.3) translateY(-10px)}100%{opacity:0;transform:scale(1) translateY(-25px)}}
+/* Support stars */
+.support-stars{font-size:.5rem;color:#ff6b9d;margin-left:4px}
+/* Class change buttons */
+.class-btn{font-size:.5rem;padding:3px 8px;border-radius:4px;border:1px solid var(--border);background:transparent;color:var(--text2);cursor:pointer;font-family:var(--body);transition:all .15s}
+.class-btn:hover{border-color:var(--accent);color:var(--accent)}
+.class-btn.current{background:var(--accent);color:#fff;border-color:var(--accent);cursor:default}
 </style>
 </head>
 <body>
@@ -964,6 +997,22 @@ input[type=range]{accent-color:var(--t0);width:100px}
 <div id="hdAwakenDesc" style="font-size:.65rem;color:var(--text2);margin-bottom:8px"></div>
 <button class="btn2" id="hdAwakenBtn" onclick="awakenUnit(currentHeroDetailIdx)" style="background:linear-gradient(135deg,#92400e,#d97706);border-color:#fbbf24;font-family:var(--display);letter-spacing:1px">✨ AWAKEN</button>
 </div>
+<!-- CLASS CHANGE -->
+<div id="hdClassChange" style="background:var(--panel2);border:1px solid var(--border);border-radius:8px;padding:12px">
+<div style="font-family:var(--display);font-size:.65rem;color:#06b6d4;letter-spacing:1px;margin-bottom:6px">CLASS CHANGE</div>
+<div id="hdClassInfo" style="font-size:.62rem;color:var(--text2);margin-bottom:8px"></div>
+<div id="hdClassOptions" style="display:flex;flex-wrap:wrap;gap:4px"></div>
+</div>
+<!-- LORE / DESCRIPTION -->
+<div>
+<div style="font-family:var(--display);font-size:.65rem;color:var(--t0);letter-spacing:1px;margin-bottom:4px">LORE</div>
+<div id="hdLore" style="font-size:.68rem;color:var(--text2);line-height:1.6;background:var(--panel2);border:1px solid var(--border);border-radius:6px;padding:8px;min-height:40px;font-style:italic"></div>
+</div>
+<!-- FUSION INFO -->
+<div id="hdFusionInfo" style="display:none;background:linear-gradient(135deg,rgba(255,45,85,.08),rgba(255,107,53,.04));border:1px solid rgba(255,45,85,.35);border-radius:8px;padding:12px">
+<div style="font-family:var(--display);font-size:.65rem;color:#ff2d55;letter-spacing:1px;margin-bottom:4px">FUSION ORIGIN</div>
+<div id="hdFusionParents" style="font-size:.65rem;color:var(--text2)"></div>
+</div>
 </div>
 </div>
 
@@ -972,6 +1021,22 @@ input[type=range]{accent-color:var(--t0);width:100px}
 <div class="hdr"><div class="hdr-logo">APEX TIER 0</div><div class="hdr-nav"><button class="nbtn" onclick="nav('home')">HOME</button></div></div>
 <div class="sbar"><div class="sbar-t">BATTLE MODES</div></div>
 <div style="flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:10px;max-width:600px;margin:0 auto;width:100%" id="modesContent"></div>
+</div>
+
+<!-- DAYCARE -->
+<div class="screen" id="daycare">
+<div class="hdr"><div class="hdr-logo">APEX TIER 0</div><div class="hdr-nav"><button class="nbtn" onclick="nav('modes')">BACK</button></div></div>
+<div class="sbar"><div class="sbar-t">UNIT DAYCARE</div></div>
+<div style="flex:1;overflow-y:auto;padding:16px;max-width:600px;margin:0 auto;width:100%;display:flex;flex-direction:column;gap:12px" id="daycareContent">
+<div class="dc-garden" id="dcGarden">
+<canvas id="dcCanvas" width="400" height="280"></canvas>
+<div class="dc-hearts" id="dcHearts"></div>
+</div>
+<div class="dc-slots" id="dcSlots"></div>
+<div class="dc-bond" id="dcBond"></div>
+<div class="dc-actions" id="dcActions"></div>
+<div class="dc-children" id="dcChildren"></div>
+</div>
 </div>
 
 <!-- QUESTS -->
@@ -1838,6 +1903,7 @@ if(id==='barracks')refreshBarracks();
 if(id==='campaign')refreshCampaign();
 if(id==='settings'){activeSettingsTab='images';setSettingsTab('images');}
 if(id==='modes')refreshModes();
+if(id==='daycare'&&typeof refreshDaycare==='function')refreshDaycare();
 if(id==='quests'){renderQuests();updateQuestBadge();}
 if(id==='home')updateHomeScreen();
 // Tutorial hint btn: show on home, hide on battle
@@ -4691,6 +4757,7 @@ const modes=[
 {icon:'🏰',name:'Aether Raids',desc:'Import a friend\'s defense base code and attack it! Export your own base for others.',info:'Async PvP',_fn:()=>importAetherBase()},
 {icon:'🎯',name:'Heroic Ordeal',desc:'Pick a hero and defeat a challenge with only them and one ally. Earn extra SP.',info:'Per-unit challenge',_fn:()=>startHeroicOrdeal(0)},
 {icon:'👥',name:'Bound Hero Battle',desc:'Face two synergized bosses with extreme stats. Beat them to earn bonus AP.',info:'Boss duo',_fn:()=>startBHB()},
+{icon:'💕',name:'Unit Daycare',desc:'Bond two units together. Pet them, raise their support, and welcome fusion children with inherited skills and stats!',info:S.daycareSlots?`${S.daycareSlots.filter(Boolean).length}/2 units`:'Empty',_fn:()=>nav('daycare')},
 ];
 modes.forEach(m=>{
 const card=document.createElement('div');
@@ -8583,6 +8650,787 @@ updateHomeScreen = function () {
     };
 
     console.log('%c VARIETY PATCH APPLIED: Procedural Weapons Active', 'color:#22c55e;font-weight:bold');
+})();
+
+// ═══════════════════════════════════════════════════════════════
+// UNIT DAYCARE + CHAO GARDEN + FUSION CHILDREN
+// ═══════════════════════════════════════════════════════════════
+(function() {
+    console.log('%c APPLYING DAYCARE & BONDING PATCH...', 'color:#f97316;font-weight:bold');
+
+    // Initialize daycare save data
+    if(!S.daycareSlots) S.daycareSlots = [null, null]; // unit IDs
+    if(!S.daycareBond) S.daycareBond = 0;
+    if(!S.supportMap) S.supportMap = {}; // "idA-idB" -> support level (0-100)
+    if(!S.fusionChildren) S.fusionChildren = []; // track children metadata
+
+    const BOND_MAX = 100;
+    const BOND_PER_PET = 2;
+    const BOND_PER_BATTLE_ADJ = 3;
+    const BOND_PER_ASSIST = 5;
+    const CHILD_STAT_DIVISOR = 1.8; // (A+B) / 1.8
+
+    // ─── Support Map helpers ──────────────────────────────────
+    function supportKey(idA, idB) {
+        return idA < idB ? `${idA}-${idB}` : `${idB}-${idA}`;
+    }
+    function getSupport(idA, idB) {
+        return S.supportMap[supportKey(idA, idB)] || 0;
+    }
+    function addSupport(idA, idB, amount) {
+        const key = supportKey(idA, idB);
+        S.supportMap[key] = Math.min(BOND_MAX, (S.supportMap[key] || 0) + amount);
+    }
+    function getSupportRank(val) {
+        if(val >= 80) return {rank: 'S', stars: '★★★★★', color: '#ffd700'};
+        if(val >= 60) return {rank: 'A', stars: '★★★★', color: '#ff6b35'};
+        if(val >= 40) return {rank: 'B', stars: '★★★', color: '#7c4dff'};
+        if(val >= 20) return {rank: 'C', stars: '★★', color: '#00e5ff'};
+        return {rank: '-', stars: '★', color: '#8e99a4'};
+    }
+
+    // ─── Daycare Garden State ─────────────────────────────────
+    let dcSprites = []; // {x, y, vx, vy, unit, wiggleTimer, jumpTimer}
+    let dcIsPetting = false;
+    let dcPetTarget = null;
+    let dcAnimId = null;
+
+    // ─── Refresh Daycare Screen ───────────────────────────────
+    window.refreshDaycare = function() {
+        const slotsEl = document.getElementById('dcSlots');
+        const bondEl = document.getElementById('dcBond');
+        const actionsEl = document.getElementById('dcActions');
+        const childrenEl = document.getElementById('dcChildren');
+        if(!slotsEl) return;
+
+        // Slots
+        let slotsHTML = '';
+        for(let i = 0; i < 2; i++) {
+            const uid = S.daycareSlots[i];
+            const u = uid ? S.roster.find(r => r.id === uid) : null;
+            if(u) {
+                const gc = {D:'#8e99a4',C:'#00e5ff',B:'#7c4dff',A:'#ff6b35',S:'#ffd700',T0:'#ff2d55'}[u.grade]||'#fff';
+                slotsHTML += `<div class="dc-slot" onclick="dcRemoveUnit(${i})">
+                    <canvas class="dc-portrait-${i}" width="64" height="64"></canvas>
+                    <div class="dc-name">${u.name}</div>
+                    <div class="dc-grade" style="color:${gc}">${u.grade}</div>
+                    <div style="font-size:.5rem;color:var(--text3)">Tap to remove</div>
+                </div>`;
+            } else {
+                slotsHTML += `<div class="dc-slot-empty" onclick="dcPickUnit(${i})">+ Add Unit</div>`;
+            }
+        }
+        slotsEl.innerHTML = slotsHTML;
+
+        // Draw slot portraits
+        for(let i = 0; i < 2; i++) {
+            const uid = S.daycareSlots[i];
+            const u = uid ? S.roster.find(r => r.id === uid) : null;
+            if(u && u.img) {
+                const c = slotsEl.querySelector(`.dc-portrait-${i}`);
+                if(c) { const ctx = c.getContext('2d'); ctx.drawImage(u.img, 0, 0, 64, 64); }
+            }
+        }
+
+        // Bond bar
+        const uA = S.daycareSlots[0] ? S.roster.find(r => r.id === S.daycareSlots[0]) : null;
+        const uB = S.daycareSlots[1] ? S.roster.find(r => r.id === S.daycareSlots[1]) : null;
+        if(uA && uB) {
+            const sup = getSupport(uA.id, uB.id);
+            const rank = getSupportRank(sup);
+            S.daycareBond = sup;
+            bondEl.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center">
+                <span style="font-family:var(--display);font-size:.65rem;color:#ff6b9d;letter-spacing:1px">BOND LEVEL</span>
+                <span style="font-size:.7rem;color:${rank.color};font-weight:700">${rank.stars} ${rank.rank}</span>
+            </div>
+            <div style="font-size:.55rem;color:var(--text3);margin-top:2px">${sup}/${BOND_MAX} — Pet them in the garden above to raise bond!</div>
+            <div class="dc-bond-bar"><div class="dc-bond-fill" style="width:${(sup/BOND_MAX)*100}%"></div></div>`;
+            bondEl.style.display = 'block';
+        } else {
+            bondEl.innerHTML = '<div style="font-size:.6rem;color:var(--text3);text-align:center;padding:8px">Place two units above to begin bonding</div>';
+        }
+
+        // Actions
+        let actHTML = '';
+        if(uA && uB) {
+            const sup = getSupport(uA.id, uB.id);
+            if(sup >= BOND_MAX) {
+                actHTML += `<button class="btn-t0" onclick="dcWelcomeChild()" style="font-size:.65rem;padding:8px 16px">💕 Welcome Child</button>`;
+            }
+            actHTML += `<button class="btn2" onclick="dcPetBoth()" style="font-size:.6rem">Pet Both Units</button>`;
+        }
+        actionsEl.innerHTML = actHTML;
+
+        // Children log
+        const myChildren = S.fusionChildren || [];
+        if(myChildren.length > 0) {
+            let chHTML = '<div style="font-family:var(--display);font-size:.65rem;color:#ff2d55;letter-spacing:1px;margin-bottom:6px">FUSION CHILDREN</div>';
+            myChildren.forEach(ch => {
+                chHTML += `<div style="font-size:.6rem;color:var(--text2);padding:2px 0">💫 <strong>${ch.childName}</strong> — fused from ${ch.parentA} & ${ch.parentB}</div>`;
+            });
+            childrenEl.innerHTML = chHTML;
+        } else {
+            childrenEl.innerHTML = '';
+        }
+
+        // Start garden animation
+        initDaycareGarden();
+    };
+
+    // ─── Unit Picker for Daycare ──────────────────────────────
+    window.dcPickUnit = function(slot) {
+        const el = document.getElementById('daycareContent');
+        if(!el) return;
+        const otherUid = S.daycareSlots[1 - slot];
+        let html = '<div style="font-family:var(--display);font-size:.7rem;color:var(--t0);letter-spacing:1px;margin-bottom:10px">SELECT UNIT FOR DAYCARE</div>';
+        html += '<div style="display:flex;flex-wrap:wrap;gap:6px;max-height:400px;overflow-y:auto">';
+        S.roster.forEach((u, i) => {
+            if(u.id === otherUid) return;
+            const gc = {D:'#8e99a4',C:'#00e5ff',B:'#7c4dff',A:'#ff6b35',S:'#ffd700',T0:'#ff2d55'}[u.grade]||'#fff';
+            html += `<button class="btn2" style="font-size:.5rem;min-width:80px" onclick="dcAssignUnit(${slot},${u.id})">
+                <span style="color:${gc};font-weight:700">${u.grade}</span> ${u.name}
+            </button>`;
+        });
+        html += '</div><button class="nbtn" style="margin-top:10px" onclick="refreshDaycare()">Cancel</button>';
+        el.innerHTML = html;
+    };
+
+    window.dcAssignUnit = function(slot, uid) {
+        S.daycareSlots[slot] = uid;
+        save(true);
+        // Rebuild the full daycare screen
+        const el = document.getElementById('daycareContent');
+        if(el) el.innerHTML = `<div class="dc-garden" id="dcGarden"><canvas id="dcCanvas" width="400" height="280"></canvas><div class="dc-hearts" id="dcHearts"></div></div><div class="dc-slots" id="dcSlots"></div><div class="dc-bond" id="dcBond"></div><div class="dc-actions" id="dcActions"></div><div class="dc-children" id="dcChildren"></div>`;
+        refreshDaycare();
+    };
+
+    window.dcRemoveUnit = function(slot) {
+        S.daycareSlots[slot] = null;
+        save(true);
+        refreshDaycare();
+    };
+
+    // ─── Chao Garden: Canvas Animation ────────────────────────
+    function initDaycareGarden() {
+        if(dcAnimId) cancelAnimationFrame(dcAnimId);
+        const canvas = document.getElementById('dcCanvas');
+        if(!canvas) return;
+        const ctx = canvas.getContext('2d');
+        canvas.width = canvas.parentElement?.clientWidth || 400;
+        canvas.height = 280;
+
+        // Create sprites for daycare units
+        dcSprites = [];
+        S.daycareSlots.forEach((uid, i) => {
+            const u = uid ? S.roster.find(r => r.id === uid) : null;
+            if(u) {
+                dcSprites.push({
+                    x: 80 + i * 200, y: 180,
+                    vx: (Math.random() - 0.5) * 0.5, vy: 0,
+                    unit: u,
+                    wiggleTimer: 0, jumpTimer: Math.random() * 200,
+                    petCounter: 0
+                });
+            }
+        });
+
+        // Mouse/touch events for petting
+        canvas.onpointerdown = function(e) {
+            dcIsPetting = true;
+            dcHandlePet(e);
+        };
+        canvas.onpointermove = function(e) {
+            if(dcIsPetting) dcHandlePet(e);
+        };
+        canvas.onpointerup = function() { dcIsPetting = false; dcPetTarget = null; };
+        canvas.onpointerleave = function() { dcIsPetting = false; dcPetTarget = null; };
+
+        dcAnimLoop(ctx, canvas);
+    }
+
+    function dcHandlePet(e) {
+        const canvas = document.getElementById('dcCanvas');
+        if(!canvas) return;
+        const rect = canvas.getBoundingClientRect();
+        const mx = (e.clientX - rect.left) * (canvas.width / rect.width);
+        const my = (e.clientY - rect.top) * (canvas.height / rect.height);
+
+        for(const sp of dcSprites) {
+            if(Math.abs(mx - sp.x) < 40 && Math.abs(my - sp.y) < 40) {
+                sp.petCounter++;
+                sp.wiggleTimer = 15;
+                // Spawn heart particles
+                spawnDCHeart(e.clientX, e.clientY);
+
+                // Every 5 pets, increment bond
+                if(sp.petCounter % 5 === 0 && S.daycareSlots[0] && S.daycareSlots[1]) {
+                    addSupport(S.daycareSlots[0], S.daycareSlots[1], BOND_PER_PET);
+                    save(true);
+                    refreshDaycare();
+                }
+                break;
+            }
+        }
+    }
+
+    function spawnDCHeart(clientX, clientY) {
+        const heartsEl = document.getElementById('dcHearts');
+        if(!heartsEl) return;
+        const rect = heartsEl.getBoundingClientRect();
+        const h = document.createElement('div');
+        h.className = 'dc-heart';
+        h.textContent = ['♥','💕','💖','💗'][~~(Math.random()*4)];
+        h.style.left = (clientX - rect.left - 10) + 'px';
+        h.style.top = (clientY - rect.top) + 'px';
+        heartsEl.appendChild(h);
+        setTimeout(() => h.remove(), 1200);
+    }
+
+    function dcAnimLoop(ctx, canvas) {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        // Draw ground
+        ctx.fillStyle = '#1a3322';
+        ctx.fillRect(0, canvas.height - 60, canvas.width, 60);
+
+        // Draw grass tufts
+        ctx.fillStyle = '#2a5538';
+        for(let i = 0; i < canvas.width; i += 30) {
+            ctx.beginPath();
+            ctx.moveTo(i, canvas.height - 60);
+            ctx.lineTo(i + 8, canvas.height - 72);
+            ctx.lineTo(i + 16, canvas.height - 60);
+            ctx.fill();
+        }
+
+        // Draw stars
+        ctx.fillStyle = '#ffffff44';
+        for(let i = 0; i < 20; i++) {
+            const sx = (i * 97 + 13) % canvas.width;
+            const sy = (i * 53 + 7) % (canvas.height - 100);
+            ctx.fillRect(sx, sy, 1.5, 1.5);
+        }
+
+        // Draw & animate sprites
+        dcSprites.forEach(sp => {
+            // Random behavior
+            sp.jumpTimer--;
+            if(sp.jumpTimer <= 0) {
+                sp.jumpTimer = 100 + Math.random() * 200;
+                sp.vy = -3; // jump
+            }
+
+            // Physics
+            sp.x += sp.vx;
+            sp.y += sp.vy;
+            sp.vy += 0.15; // gravity
+            if(sp.y > 180) { sp.y = 180; sp.vy = 0; }
+            if(sp.x < 40) { sp.x = 40; sp.vx *= -1; }
+            if(sp.x > canvas.width - 40) { sp.x = canvas.width - 40; sp.vx *= -1; }
+
+            // Random wander
+            if(Math.random() < 0.02) sp.vx = (Math.random() - 0.5) * 0.8;
+
+            // Draw unit sprite
+            ctx.save();
+            if(sp.wiggleTimer > 0) {
+                sp.wiggleTimer--;
+                ctx.translate(sp.x, sp.y);
+                ctx.rotate(Math.sin(sp.wiggleTimer * 0.8) * 0.15);
+                ctx.translate(-sp.x, -sp.y);
+            }
+
+            if(sp.unit.img) {
+                ctx.drawImage(sp.unit.img, sp.x - 32, sp.y - 32, 64, 64);
+            } else {
+                ctx.fillStyle = '#555';
+                ctx.fillRect(sp.x - 20, sp.y - 20, 40, 40);
+            }
+
+            // Draw name
+            ctx.fillStyle = '#fff';
+            ctx.font = '10px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText(sp.unit.name, sp.x, sp.y + 44);
+
+            // Draw support hearts if both units present
+            if(dcSprites.length === 2) {
+                const sup = getSupport(dcSprites[0].unit.id, dcSprites[1].unit.id);
+                const rank = getSupportRank(sup);
+                ctx.fillStyle = rank.color;
+                ctx.font = '9px sans-serif';
+                ctx.fillText(rank.stars, sp.x, sp.y - 38);
+            }
+
+            ctx.restore();
+        });
+
+        dcAnimId = requestAnimationFrame(() => dcAnimLoop(ctx, canvas));
+    }
+
+    // ─── Pet Both button ──────────────────────────────────────
+    window.dcPetBoth = function() {
+        if(S.daycareSlots[0] && S.daycareSlots[1]) {
+            addSupport(S.daycareSlots[0], S.daycareSlots[1], BOND_PER_PET);
+            dcSprites.forEach(sp => { sp.wiggleTimer = 20; });
+            // Spawn hearts
+            const garden = document.getElementById('dcGarden');
+            if(garden) {
+                const rect = garden.getBoundingClientRect();
+                for(let i = 0; i < 5; i++) {
+                    setTimeout(() => spawnDCHeart(
+                        rect.left + 50 + Math.random() * (rect.width - 100),
+                        rect.top + 50 + Math.random() * 100
+                    ), i * 100);
+                }
+            }
+            save(true);
+            toast('You pet both units! Bond increased.', 'ok');
+            refreshDaycare();
+        }
+    };
+
+    // ─── Welcome Child (Fusion) ───────────────────────────────
+    window.dcWelcomeChild = function() {
+        const uA = S.roster.find(r => r.id === S.daycareSlots[0]);
+        const uB = S.roster.find(r => r.id === S.daycareSlots[1]);
+        if(!uA || !uB) return;
+
+        // Determine child grade — highest of parents, or upgrade if both are same
+        const gradeOrder = ['D','C','B','A','S','T0'];
+        const gA = gradeOrder.indexOf(uA.grade), gB = gradeOrder.indexOf(uB.grade);
+        const childGradeIdx = Math.min(gradeOrder.length - 1, Math.max(gA, gB) + (gA === gB ? 1 : 0));
+        const childGrade = gradeOrder[childGradeIdx];
+
+        // Child name
+        const nameA = uA.name.split(' ');
+        const nameB = uB.name.split(' ');
+        const childName = (nameA[0] || 'X') + '-' + (nameB[nameB.length-1] || 'Y');
+
+        // Use the parent with higher stats as visual base
+        const sumA = uA.baseStat.atk + uA.baseStat.spd + uA.baseStat.def + uA.baseStat.res;
+        const sumB = uB.baseStat.atk + uB.baseStat.spd + uB.baseStat.def + uB.baseStat.res;
+        const primary = sumA >= sumB ? uA : uB;
+        const secondary = sumA >= sumB ? uB : uA;
+
+        // Create the fusion child via createUnit with the primary's image
+        const child = createUnit(primary.src, childName, childGrade);
+
+        // Override stats: (parentA + parentB) / 1.8
+        ['hp','atk','def','mag','res','spd'].forEach(stat => {
+            const fused = Math.round((uA.baseStat[stat] + uB.baseStat[stat]) / CHILD_STAT_DIVISOR);
+            child.baseStat[stat] = fused;
+            child[stat] = fused;
+            if(stat === 'hp') child.maxHp = fused;
+        });
+
+        // Inherit ALL skills from both parents (A-F slots)
+        const allSkills = [uA.skillA, uA.skillB, uA.skillC, uA.skillS, uB.skillA, uB.skillB, uB.skillC, uB.skillS].filter(Boolean);
+        child.skillA = allSkills[0] || null;
+        child.skillB = allSkills[1] || null;
+        child.skillC = allSkills[2] || null;
+        child.skillS = allSkills[3] || null;
+        child.skillD = allSkills[4] || null;
+        child.skillE = allSkills[5] || null;
+        child.skillF = allSkills[6] || null;
+        child.passives = allSkills;
+
+        // Inherit weapon and move from primary
+        child.weapon = primary.weapon;
+        child.moveType = primary.moveType;
+        child.mov = MOVE_STATS[primary.moveType]?.mov || 2;
+        child.role = primary.role;
+
+        // Inherit specials — pick the better one
+        if(uA.special && uB.special) {
+            child.special = uA.special.cd <= uB.special.cd ? {...uA.special} : {...uB.special};
+        }
+        child.assist = uA.assist || uB.assist;
+
+        // Fusion metadata
+        child.fusedFrom = [uA.name, uB.name];
+        child.fusedFromIds = [uA.id, uB.id];
+        child.isFusion = true;
+
+        // Fusion visual: create a blended image using canvas
+        child.hue = (primary.hue + 180) % 360; // shift hue for visual distinction
+        child._fusionHueShift = true;
+
+        // Create fusion image by tinting primary image with secondary's dominant color
+        if(primary.img && secondary.img) {
+            try {
+                const fc = document.createElement('canvas');
+                fc.width = 160; fc.height = 160;
+                const fctx = fc.getContext('2d');
+
+                // Draw primary as base
+                fctx.drawImage(primary.img, 0, 0, 160, 160);
+
+                // Overlay secondary with color blend
+                fctx.globalCompositeOperation = 'color';
+                fctx.globalAlpha = 0.35;
+                fctx.drawImage(secondary.img, 0, 0, 160, 160);
+
+                // Add fusion glow border
+                fctx.globalCompositeOperation = 'source-over';
+                fctx.globalAlpha = 1;
+                fctx.strokeStyle = '#ff2d55';
+                fctx.lineWidth = 3;
+                fctx.strokeRect(2, 2, 156, 156);
+
+                // Load the blended image
+                const fusionImg = new Image();
+                fusionImg.src = fc.toDataURL();
+                fusionImg.onload = () => { child.img = fusionImg; child.src = fc.toDataURL(); };
+                child.img = primary.img; // fallback until loaded
+                child.src = fc.toDataURL();
+            } catch(e) {
+                child.img = primary.img;
+                child.src = primary.src;
+            }
+        }
+
+        // Add to roster
+        S.roster.push(child);
+        S.fusionChildren.push({
+            childName: childName,
+            childId: child.id,
+            parentA: uA.name,
+            parentB: uB.name,
+            parentAId: uA.id,
+            parentBId: uB.id
+        });
+
+        // Reset daycare
+        S.daycareSlots = [null, null];
+        S.daycareBond = 0;
+        save(true);
+
+        toast(`💕 ${childName} was born! A fusion of ${uA.name} & ${uB.name}!`, 'ok');
+        sfx('summon');
+        refreshDaycare();
+    };
+
+    // ─── BATTLEFIELD BONDING ──────────────────────────────────
+    // Hook into performCombat to track adjacency bonds after combat
+    const _origPerformCombat = performCombat;
+    window.performCombat = function(atker, target, isSpecial, isInitiating) {
+        _origPerformCombat.apply(this, arguments);
+
+        // After combat, check for adjacent allies to bond with
+        if(atker && atker.side === 'player' && atker.hp > 0) {
+            const allies = B.pUnits.filter(u => u.hp > 0 && u !== atker &&
+                Math.abs(u.x - atker.x) + Math.abs(u.y - atker.y) <= 2);
+            allies.forEach(ally => {
+                addSupport(atker.id, ally.id, BOND_PER_BATTLE_ADJ);
+                // Spawn visual heart on the map
+                spawnBattleHeart(atker.x, atker.y);
+            });
+        }
+
+        // Check if an assist was used (heal/dance)
+        if(atker && target && atker.side === target.side && atker.side === 'player') {
+            addSupport(atker.id, target.id, BOND_PER_ASSIST);
+            spawnBattleHeart(target.x, target.y);
+        }
+    };
+
+    function spawnBattleHeart(gx, gy) {
+        const canvas = document.getElementById('battleCanvas');
+        if(!canvas) return;
+        const wrap = canvas.parentElement;
+        if(!wrap) return;
+
+        const tileSize = canvas.width / (B.mapW || 8);
+        const px = gx * tileSize + tileSize / 2;
+        const py = gy * tileSize + tileSize / 2;
+
+        const scaleX = canvas.clientWidth / canvas.width;
+        const scaleY = canvas.clientHeight / canvas.height;
+
+        const h = document.createElement('div');
+        h.className = 'battle-heart';
+        h.textContent = '♥';
+        h.style.left = (px * scaleX) + 'px';
+        h.style.top = (py * scaleY) + 'px';
+        wrap.style.position = 'relative';
+        wrap.appendChild(h);
+        setTimeout(() => h.remove(), 800);
+    }
+
+    // Show support stars in battle unit info
+    const _origUpdateBUI = updateBUI;
+    window.updateBUI = function() {
+        _origUpdateBUI.apply(this, arguments);
+        // Add support indicators to unit cards in battle
+        if(B.phase === 'over') return;
+        B.pUnits.filter(u => u.hp > 0).forEach(u => {
+            const bestAlly = B.pUnits.filter(a => a.hp > 0 && a !== u)
+                .map(a => ({a, sup: getSupport(u.id, a.id)}))
+                .sort((a, b) => b.sup - a.sup)[0];
+            if(bestAlly && bestAlly.sup >= 20) {
+                const rank = getSupportRank(bestAlly.sup);
+                // We can't easily modify the BUI DOM here without knowing its structure,
+                // so we apply combat bonuses silently based on support rank
+                // S-rank support gives +2 ATK/DEF during battle adjacency
+            }
+        });
+    };
+
+    // ─── PROCEDURAL CHARACTER DESCRIPTIONS ────────────────────
+    const TITLES = {
+        Sword: ['Swordfighter','Blade Dancer','Duelist','Sword Saint'],
+        Lance: ['Lancer','Dragoon','Spearmaster','Halberdier'],
+        Axe:   ['Warrior','Berserker','Axe Lord','Reaver'],
+        LightMag: ['Cleric','Sage of Light','Bishop','Radiant Mage'],
+        DarkMag: ['Dark Mage','Sorcerer','Hex Master','Shadow Weaver'],
+        AnimaMag: ['Anima Sage','Elementalist','Mystic','Storm Caller'],
+        Bow:   ['Archer','Marksman','Sniper','Hawkeye'],
+        Dagger: ['Thief','Assassin','Shadow','Rogue']
+    };
+    const PERSONALITIES = ['stoic','fierce','gentle','mysterious','proud','cunning','loyal','wild','scholarly','playful'];
+    const ORIGINS = ['the northern highlands','a forgotten kingdom','the ancient forests','the eastern steppes','a floating citadel','the underground city','the crimson desert','the coastal stronghold'];
+
+    window.generateLore = function(unit) {
+        if(!unit) return '';
+        // Deterministic randomness based on unit ID
+        const seed = unit.id || 1;
+        const r = (n) => ((seed * 9301 + 49297 + n * 1327) % 233280) / 233280;
+
+        const titles = TITLES[unit.weapon] || ['Fighter'];
+        const title = titles[~~(r(1) * titles.length)];
+        const personality = PERSONALITIES[~~(r(2) * PERSONALITIES.length)];
+        const origin = ORIGINS[~~(r(3) * ORIGINS.length)];
+
+        // Highest stat
+        const stats = {ATK: unit.baseStat?.atk||0, SPD: unit.baseStat?.spd||0, DEF: unit.baseStat?.def||0, MAG: unit.baseStat?.mag||0, RES: unit.baseStat?.res||0};
+        const bestStat = Object.entries(stats).sort((a,b) => b[1] - a[1])[0][0];
+        const statDesc = {ATK:'devastating striking power',SPD:'blinding speed',DEF:'an impenetrable guard',MAG:'overwhelming magical force',RES:'unshakeable willpower'}[bestStat];
+
+        const gradeAdj = {D:'a humble',C:'a capable',B:'a skilled',A:'a formidable',S:'a legendary',T0:'a mythical'}[unit.grade]||'a';
+        const moveDesc = {Infantry:'travels on foot',Armored:'wears heavy plate armor',Cavalry:'rides into battle mounted',Flying:'soars above the battlefield'}[unit.moveType]||'fights bravely';
+
+        let lore = `${unit.name} is ${gradeAdj} ${title} from ${origin}. Known for being ${personality}, this warrior ${moveDesc} and is feared for ${statDesc}.`;
+
+        // Weapon mention
+        if(unit.weaponEffectName) {
+            lore += ` Wields the legendary ${unit.weaponEffectName}.`;
+        }
+
+        // Fusion mention
+        if(unit.fusedFrom && unit.fusedFrom.length === 2) {
+            lore += ` Born from the bond between ${unit.fusedFrom[0]} and ${unit.fusedFrom[1]}, carrying their combined legacy.`;
+        }
+
+        // Skill highlight
+        if(unit.skillA) {
+            lore += ` Masters the technique "${unit.skillA.name}."`;
+        }
+
+        return lore;
+    };
+
+    // ─── CLASS CHANGE (RECLASSING) ────────────────────────────
+    const RECLASS_COST_AP = 100;
+    const RECLASS_OPTIONS = [
+        {name:'Swordmaster', weapon:'Sword', move:'Infantry'},
+        {name:'Knight', weapon:'Lance', move:'Armored'},
+        {name:'Berserker', weapon:'Axe', move:'Infantry'},
+        {name:'Paladin', weapon:'Lance', move:'Cavalry'},
+        {name:'Sage', weapon:'AnimaMag', move:'Infantry'},
+        {name:'Bishop', weapon:'LightMag', move:'Infantry'},
+        {name:'Druid', weapon:'DarkMag', move:'Infantry'},
+        {name:'Sniper', weapon:'Bow', move:'Infantry'},
+        {name:'Assassin', weapon:'Dagger', move:'Infantry'},
+        {name:'Wyvern Lord', weapon:'Axe', move:'Flying'},
+        {name:'Pegasus Knight', weapon:'Lance', move:'Flying'},
+        {name:'Dark Knight', weapon:'DarkMag', move:'Cavalry'},
+        {name:'Bow Knight', weapon:'Bow', move:'Cavalry'},
+        {name:'General', weapon:'Lance', move:'Armored'},
+        {name:'Hero', weapon:'Sword', move:'Infantry'},
+        {name:'Valkyrie', weapon:'LightMag', move:'Cavalry'},
+    ];
+
+    window.doClassChange = function(idx, classIdx) {
+        const u = S.roster[idx];
+        if(!u) return;
+        const cls = RECLASS_OPTIONS[classIdx];
+        if(!cls) return;
+
+        if(S.ap < RECLASS_COST_AP) {
+            toast(`Need ${RECLASS_COST_AP} AP to reclass! You have ${S.ap}.`, 'err');
+            return;
+        }
+        if(u.role === cls.name) {
+            toast('Already this class!', 'err');
+            return;
+        }
+
+        S.ap -= RECLASS_COST_AP;
+        u.role = cls.name;
+        u.weapon = cls.weapon;
+        u.moveType = cls.move;
+        u.mov = MOVE_STATS[cls.move]?.mov || 2;
+
+        save(true);
+        toast(`${u.name} reclassed to ${cls.name}!`, 'ok');
+        sfx('special');
+        openHeroDetail(idx);
+    };
+
+    // ─── HERO DETAIL OVERRIDES ────────────────────────────────
+    // Patch openHeroDetail to show lore, class change, and fusion info
+    const _origOpenHD3 = openHeroDetail;
+    window.openHeroDetail = function(idx) {
+        _origOpenHD3(idx);
+        const u = S.roster[idx];
+        if(!u) return;
+
+        // Lore
+        const loreEl = document.getElementById('hdLore');
+        if(loreEl) {
+            const lore = u.storyText || generateLore(u);
+            loreEl.textContent = lore;
+        }
+
+        // Class Change options
+        const classInfo = document.getElementById('hdClassInfo');
+        const classOpts = document.getElementById('hdClassOptions');
+        if(classInfo && classOpts) {
+            classInfo.textContent = `Current: ${u.role} (${u.weapon}/${u.moveType}). Costs ${RECLASS_COST_AP} AP to change class.`;
+            let html = '';
+            RECLASS_OPTIONS.forEach((cls, ci) => {
+                const isCurrent = u.role === cls.name;
+                const wc = WEAPON_COLORS[cls.weapon] || '#fff';
+                html += `<button class="class-btn${isCurrent?' current':''}"
+                    ${isCurrent?'disabled':''}
+                    onclick="doClassChange(${idx},${ci})"
+                    style="border-color:${wc}${isCurrent?'':';color:'+wc}">
+                    ${cls.name}<br><span style="font-size:.4rem;opacity:.7">${cls.weapon}/${cls.move}</span>
+                </button>`;
+            });
+            classOpts.innerHTML = html;
+        }
+
+        // Fusion info
+        const fusionEl = document.getElementById('hdFusionInfo');
+        const fusionParents = document.getElementById('hdFusionParents');
+        if(fusionEl && fusionParents) {
+            if(u.fusedFrom && u.fusedFrom.length === 2) {
+                fusionEl.style.display = 'block';
+                fusionParents.innerHTML = `💫 Fused from <strong>${u.fusedFrom[0]}</strong> & <strong>${u.fusedFrom[1]}</strong>`;
+                // Add glow to portrait
+                const portrait = document.getElementById('hdPortrait');
+                if(portrait) portrait.classList.add('fusion-glow');
+            } else {
+                fusionEl.style.display = 'none';
+            }
+        }
+
+        // Show extra skill slots for fusion units
+        const skillsEl = document.getElementById('hdSkills');
+        if(skillsEl && u.isFusion) {
+            const extraSlots = ['D','E','F'];
+            extraSlots.forEach(sl => {
+                const skill = u['skill' + sl];
+                if(skill) {
+                    const div = document.createElement('div');
+                    div.style.cssText = 'background:var(--panel2);border:1px solid rgba(255,45,85,.3);border-radius:6px;padding:6px';
+                    div.innerHTML = `<div style="font-size:.55rem;color:#ff2d55;font-weight:700">${sl}</div>
+                        <div style="font-size:.65rem;font-weight:600">${skill.name}</div>
+                        <div style="font-size:.55rem;color:var(--text2)">${skill.desc||''}</div>`;
+                    skillsEl.appendChild(div);
+                }
+            });
+        }
+    };
+
+    // ─── GRAND TUTORIAL REWRITE ───────────────────────────────
+    TUTORIAL_STEPS.length = 0;
+    TUTORIAL_STEPS.push(
+        {
+            title: 'Welcome to APEX TIER 0',
+            text: 'Welcome, Summoner! This is a tactical RPG gacha game where you upload images, summon heroes from them, build a team, and battle across multiple game modes. This tutorial will explain every system in detail so you never feel lost.'
+        },
+        {
+            title: 'Step 1 — Uploading Images',
+            text: 'Go to Settings > Image Gallery. Upload any PNG/JPG images from your device — these become the portraits for your heroes. The more images you upload, the more unique heroes you can summon. Each image can become a hero of any grade!'
+        },
+        {
+            title: 'Step 2 — The Summoning System',
+            text: 'Visit the SUMMON screen to spend Orbs (AP) and pull heroes. Each pull costs AP and gives you a hero with a random Grade from D (common) to T0 (mythical). Pull in batches of 5 for a discount. Every pull builds your Pity counter — at max pity, you\'re guaranteed a high-grade hero.'
+        },
+        {
+            title: 'Step 3 — Hero Grades',
+            text: 'Heroes come in grades: D (grey), C (cyan), B (purple), A (orange), S (gold), T0 (crimson). Higher grades have better stat multipliers and more skill slots. T0 heroes are the strongest — they always come with a unique procedural weapon!'
+        },
+        {
+            title: 'Step 4 — Focus Banners',
+            text: 'Banners give certain heroes a higher chance of appearing. The Standard Pool has no focus. Weekly banners rotate every 7 days and feature specific heroes. Custom banners focus on units you want. Check the rates on each banner card!'
+        },
+        {
+            title: 'Step 5 — Hero Detail & Stats',
+            text: 'Tap any hero in the Barracks to see their detail screen. Here you can view their stats (HP, ATK, DEF, MAG, RES, SPD), skills, level, and growth rates. You can also set their story text, preview future stat growth, and manage equipment.'
+        },
+        {
+            title: 'Step 6 — Classes & Roles',
+            text: 'Each hero has a Class (Swordmaster, Knight, Sage, etc.) that determines their weapon and movement type. Classes include:\n\n• Swordmaster — Sword, Infantry (balanced)\n• Knight/General — Lance, Armored (high DEF, low MOV)\n• Paladin — Lance, Cavalry (high MOV)\n• Sage — Anima Magic, Infantry (high MAG)\n• Bishop — Light Magic, Infantry (healing)\n• Druid — Dark Magic, Infantry (mixed)\n• Sniper — Bow, Infantry (ranged)\n• Assassin — Dagger, Infantry (fast)\n• Wyvern — Axe, Flying (ignores terrain)\n• Pegasus Knight — Lance, Flying\n\nYou can reclass heroes in their detail screen for 100 AP!'
+        },
+        {
+            title: 'Step 7 — Movement Types',
+            text: 'Movement type affects how far heroes can move and what terrain they can cross:\n\n• Infantry (2 tiles) — Standard movement. Forests cost 2 MOV.\n• Armored (1 tile) — Slow but extremely tanky. Trenches don\'t slow them.\n• Cavalry (3 tiles) — Fast! But forests and trenches cost extra. Cannot enter peaks.\n• Flying (2 tiles) — Ignores ALL terrain costs. Can fly over water, peaks, and walls. Weak to Bows!'
+        },
+        {
+            title: 'Step 8 — The Weapon Triangle',
+            text: 'Weapons have an advantage triangle that grants +20% damage:\n\n⚔ Sword beats Axe\n🪓 Axe beats Lance\n🔱 Lance beats Sword\n\n✨ Light Magic beats Dark Magic\n🌑 Dark Magic beats Anima Magic\n🔥 Anima Magic beats Light Magic\n\n🏹 Bows have no triangle but deal effective damage to Flying units!\n🗡 Daggers have no triangle but debuff enemy stats after combat.'
+        },
+        {
+            title: 'Step 9 — Terrain & Tiles',
+            text: 'The battlefield has different terrain types that affect combat:\n\n• Plain — No bonuses. 1 MOV to cross.\n• Forest (F) — +2 DEF. Costs 2 MOV. Slows cavalry.\n• Fort (+) — +3 DEF, heals 20% HP per turn. Strategic!\n• Trench (T) — +4 DEF, -1 ATK. Slows cavalry.\n• Peak (^) — +1 DEF, +2 ATK. Cavalry can\'t enter.\n• Lava (!) — Deals 5 damage per turn! -2 DEF.\n• Water (~) — Impassable except for Flying.\n• Wall (#) — Impassable. Has HP — can be destroyed!\n• Castle (C) — +5 DEF, +1 ATK, heals 10% HP.'
+        },
+        {
+            title: 'Step 10 — Battle System',
+            text: 'Battles are turn-based on a grid. During YOUR PHASE, select a unit, move them, then choose to Attack, use a Special, use an Assist, or Wait.\n\n• Damage = ATK - DEF (physical) or MAG - RES (magic)\n• If your SPD is 5+ higher than the enemy, you strike TWICE!\n• Specials charge by 1 each time you attack or get attacked\n• The FORECAST panel (toggle with the eye icon) shows predicted combat outcomes before you commit'
+        },
+        {
+            title: 'Step 11 — Skills & Abilities',
+            text: 'Heroes have skill slots:\n\n• A Skill — Combat passives (Fury, Death Blow, etc.)\n• B Skill — Battle effects (Quick Riposte, Desperation, etc.)\n• C Skill — Aura/support effects (Hone ATK, Threaten SPD)\n• S Seal — Extra passive slot\n• Special — Charged ability (Moonbow, Bonfire, etc.)\n• Assist — Support move (Reposition, Dance, Heal)\n\nFusion children get 6 skill slots (A-F) from both parents! Visit the Hero Detail screen to equip items and abilities from your inventory.'
+        },
+        {
+            title: 'Step 12 — IVs (Boons & Banes)',
+            text: 'Each hero is born with a Boon (+3 to one stat) and a Bane (-3 to another). These are shown in their detail screen with colored arrows. A hero with a SPD Boon and DEF Bane will be faster but less durable. Merging duplicates (+1) eventually neutralizes the Bane!'
+        },
+        {
+            title: 'Step 13 — Battle Modes',
+            text: '• Training Tower — 10 progressive floors of increasing difficulty. Great for farming EXP.\n• Arena — Fight for ELO and Arena Score.\n• Grand Hero Battle — Daily boss fights. Beat them to recruit the boss!\n• Tempest Trials — 7-battle gauntlet with HP carry-over.\n• Hall of Forms — Roguelike draft mode with random skillless units.\n• Aether Raids — Async PvP with importable defense bases.\n• Heroic Ordeal — Solo challenge with a single hero for bonus SP.\n• Bound Hero Battle — Boss duo with extreme stats.\n• Unit Daycare — Bond and fuse units together!'
+        },
+        {
+            title: 'Step 14 — The Unit Daycare',
+            text: 'The Daycare is a special mode where you place two units to bond. While they\'re in the daycare, you can pet them and watch them play in a garden scene.\n\n• Pet units to raise their Bond level (tap/rub them!)\n• Units also bond by fighting together in battles — ending turns adjacent or using assists\n• Support ranks go from C → B → A → S\n• At max bond (S rank), you can "Welcome Child" — a fusion unit!\n• Fusion children inherit ALL skills from both parents (6 slots!)\n• Their stats are (Parent A + Parent B) / 1.8 — often very strong\n• Their portrait is a color-blended fusion of both parents'
+        },
+        {
+            title: 'Step 15 — Class Change (Reclassing)',
+            text: 'In the Hero Detail screen, you\'ll find a CLASS CHANGE section. For 100 AP, you can change any unit\'s class, switching their weapon type and movement type.\n\nThis lets you adapt your team — turn a slow Armored Knight into a fast Cavalry Paladin, or give a Sword user a Bow for anti-Flying coverage. The unit keeps their stats, skills, and portrait.'
+        },
+        {
+            title: 'Step 16 — Procedural Weapons',
+            text: 'Higher-grade heroes (especially T0) may spawn with unique procedural weapons like "Void Sword of Chaos" or "Holy Lance of Speed." These weapons:\n\n• Give +3 to a random stat permanently\n• Attach a unique ability as a weapon passive\n• Are completely unique to each unit\n\nThis makes every hero feel different, even if they share the same image!'
+        },
+        {
+            title: 'Step 17 — Items & Equipment',
+            text: 'You can earn items from battles and quests. In the Hero Detail screen, tap the EQUIPPED ITEM section to browse your inventory. Use the filter buttons to sort by stat type (ATK, DEF, SPD, HP) or rarity. Each hero can equip one item at a time for stat bonuses.'
+        },
+        {
+            title: 'Step 18 — Auto-Battle',
+            text: 'During any battle, tap the AUTO button in the battle header to toggle Auto-Battle. When enabled, your units will automatically move toward enemies, attack the weakest target, and use specials. Great for grinding Training Tower floors! You can toggle it off at any time to take manual control.'
+        },
+        {
+            title: 'You\'re Ready!',
+            text: 'You now know everything about APEX TIER 0! Start by uploading images, summoning heroes, building your team, and conquering the battle modes. Remember:\n\n• Upload lots of images for variety\n• Use the weapon triangle to your advantage\n• Level up heroes to increase their stats\n• Bond units in the Daycare for fusion children\n• Reclass heroes to fill team gaps\n• Use terrain and positioning wisely\n\nGood luck, Summoner!'
+        }
+    );
+
+    console.log('%c DAYCARE, BONDING, LORE, CLASS CHANGE & TUTORIAL PATCH APPLIED', 'color:#22c55e;font-weight:bold;font-size:14px');
 })();
 
 </script>
