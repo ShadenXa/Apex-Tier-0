@@ -785,6 +785,55 @@ input[type=range]{accent-color:var(--t0);width:100px}
 .class-btn{font-size:.5rem;padding:3px 8px;border-radius:4px;border:1px solid var(--border);background:transparent;color:var(--text2);cursor:pointer;font-family:var(--body);transition:all .15s}
 .class-btn:hover{border-color:var(--accent);color:var(--accent)}
 .class-btn.current{background:var(--accent);color:#fff;border-color:var(--accent);cursor:default}
+/* ═══ SCREEN TRANSITIONS ═══ */
+.transition-layer{position:fixed;top:0;left:0;width:100%;height:100%;z-index:9999;pointer-events:none;display:none}
+.transition-layer.active{display:block;pointer-events:all}
+/* Cyber Shutter (battle) */
+.trans-shutter{background:transparent}
+.trans-shutter .sbar-l,.trans-shutter .sbar-r{position:absolute;width:100%;height:50%;background:var(--bg);left:0}
+.trans-shutter .sbar-l{top:0;transform:translateY(-100%)}
+.trans-shutter .sbar-r{bottom:0;transform:translateY(100%)}
+.trans-shutter.in .sbar-l{animation:shutterIn .3s ease-out forwards}
+.trans-shutter.in .sbar-r{animation:shutterIn .3s ease-out forwards}
+.trans-shutter.out .sbar-l{animation:shutterOut .3s ease-in forwards}
+.trans-shutter.out .sbar-r{animation:shutterOut .3s ease-in forwards}
+@keyframes shutterIn{to{transform:translateY(0)}}
+@keyframes shutterOut{to{transform:translateY(-100%)}}
+.trans-shutter.out .sbar-r{animation-name:shutterOutR}
+@keyframes shutterOutR{to{transform:translateY(100%)}}
+/* Gate of Light (summon) */
+.trans-light{background:transparent}
+.trans-light .flash{position:absolute;top:0;left:0;width:100%;height:100%;background:radial-gradient(circle,#ffd70088,#fff 40%,#ffd70066);opacity:0}
+.trans-light.in .flash{animation:lightFlash .5s ease-out forwards}
+.trans-light.out .flash{animation:lightFadeOut .3s ease-in forwards}
+@keyframes lightFlash{0%{opacity:0;transform:scale(0.5)}40%{opacity:1;transform:scale(1.2)}100%{opacity:1;transform:scale(1)}}
+@keyframes lightFadeOut{to{opacity:0;transform:scale(1.5)}}
+/* Soft Fade (daycare/settings) */
+.trans-fade{background:transparent}
+.trans-fade .blur{position:absolute;top:0;left:0;width:100%;height:100%;background:var(--bg);opacity:0}
+.trans-fade.in .blur{animation:fadeIn .3s ease-out forwards}
+.trans-fade.out .blur{animation:fadeOutT .3s ease-in forwards}
+@keyframes fadeIn{to{opacity:1}}
+@keyframes fadeOutT{from{opacity:1}to{opacity:0}}
+/* Slide (barracks/settings) */
+.trans-slide{background:transparent;overflow:hidden}
+.trans-slide .panel{position:absolute;top:0;width:100%;height:100%;background:var(--bg)}
+.trans-slide.slide-left .panel{left:100%}
+.trans-slide.slide-right .panel{right:100%}
+.trans-slide.in.slide-left .panel{animation:slideInL .35s ease-out forwards}
+.trans-slide.in.slide-right .panel{animation:slideInR .35s ease-out forwards}
+.trans-slide.out.slide-left .panel{animation:slideOutL .3s ease-in forwards}
+.trans-slide.out.slide-right .panel{animation:slideOutR .3s ease-in forwards}
+@keyframes slideInL{from{transform:translateX(0)}to{transform:translateX(-100%)}}
+@keyframes slideInR{from{transform:translateX(0)}to{transform:translateX(100%)}}
+@keyframes slideOutL{from{transform:translateX(-100%)}to{transform:translateX(-200%)}}
+@keyframes slideOutR{from{transform:translateX(100%)}to{transform:translateX(200%)}}
+/* Weapon Viewer */
+.weapon-viewer{background:var(--panel2);border:1px solid var(--border);border-radius:8px;padding:10px;margin-top:8px}
+.weapon-tag{display:inline-block;font-size:.5rem;padding:2px 6px;border-radius:4px;border:1px solid;margin:2px;font-family:var(--mono)}
+.weapon-effect-box{background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:8px;margin-top:6px;font-size:.62rem}
+/* Battle support indicator */
+.support-pip{position:absolute;top:-8px;right:-4px;font-size:.45rem;color:#ff6b9d;text-shadow:0 0 4px #ff2d55}
 </style>
 </head>
 <body>
@@ -792,6 +841,7 @@ input[type=range]{accent-color:var(--t0);width:100px}
 <div class="toast" id="toast"></div>
 <div class="forecast" id="forecast"></div>
 <div class="cinematic-overlay" id="cinematicOverlay"></div>
+<div class="transition-layer" id="transLayer"></div>
 
 <!-- HOME -->
 <div class="screen active" id="home">
@@ -2282,7 +2332,7 @@ document.getElementById('mStats').innerHTML=Object.entries(sm).map(([k,v])=>`
 <div class="stat-val">${v}</div>
 </div>`).join('');
 // Abilities
-let abHTML=`<div class="ability-box"><h3>SPECIAL: ${u.special.name} (CD:${u.special.cd})</h3><div class="ability-desc">${u.special.desc}</div></div>`;
+let abHTML=u.special?`<div class="ability-box"><h3>SPECIAL: ${u.special.name} (CD:${u.special.cd})</h3><div class="ability-desc">${u.special.desc}</div></div>`:'';
 u.passives.forEach((p,i)=>{
 abHTML+=`<div class="ability-box"><h3>PASSIVE ${i+1}: ${p.name}</h3><div class="ability-desc">${p.desc}</div></div>`;
 });
@@ -2514,7 +2564,7 @@ function prepUnit(unit,side){
     u.hp=(u.tempestHp!==undefined)?u.tempestHp:u.maxHp;
     if(u.tempestHp!==undefined)delete u.tempestHp;
     u.acted=u.moved=false;
-    u.specialCharges=u.special.cd;
+    u.specialCharges=u.special?u.special.cd:0;
     u.shielded=false;u.frozen=false;u.extraAction=false;u.poisoned=0;u.burned=0;
     u.side=side;u.img=null;
     return u;
@@ -4056,7 +4106,8 @@ ghbCleared:S.ghbCleared||[],
 gachaSession:null,
 itemInventory:S.itemInventory||[],
 unlockedAbilities:S.unlockedAbilities||[],
-teamSize:S.teamSize||4,currentBattleMode:currentBattleMode||'ladder',currentBattleConfig:currentBattleConfig,currentDifficulty:currentDifficulty||'normal'};
+teamSize:S.teamSize||4,currentBattleMode:currentBattleMode||'ladder',currentBattleConfig:currentBattleConfig,currentDifficulty:currentDifficulty||'normal',
+daycareSlots:S.daycareSlots||[null,null],daycareBond:S.daycareBond||0,supportMap:S.supportMap||{},fusionChildren:S.fusionChildren||[]};
 localStorage.setItem(SAVE_KEY,JSON.stringify(sd));
 await saveIDB(S.images);
 if(!silent)toast('Saved!','ok');refreshSettings();
@@ -4121,10 +4172,6 @@ u.assist=u.assist??(typeof ASSIST_SKILLS!=='undefined'&&ASSIST_SKILLS.length?ASS
 if(!u.faction&&typeof assignFactionClass==='function')assignFactionClass(u);
 u.equippedItem=u.equippedItem??null;
 u.equippedAbilities=u.equippedAbilities??[null,null];
-u.equippedItem=u.equippedItem??null;
-u.equippedAbilities=u.equippedAbilities??[null,null];
-u.equippedItem=u.equippedItem??null;
-u.equippedAbilities=u.equippedAbilities??[null,null];
 u.passives=[u.skillA,u.skillB,u.skillC,u.skillS].filter(Boolean);
 // Bug #10: Reconstruct src from images by name
 if(!u.src){
@@ -4136,6 +4183,21 @@ if(!S.banners)S.banners=[];
 if(!S.activeBannerId)S.activeBannerId=null;
 if(!S.seals)S.seals=[];
 if(!S.teamPresets||!Array.isArray(S.teamPresets))S.teamPresets=[null,null,null,null,null];
+// Restore daycare & support systems
+if(d.daycareSlots)S.daycareSlots=d.daycareSlots;
+if(d.daycareBond!==undefined)S.daycareBond=d.daycareBond;
+if(d.supportMap)S.supportMap=d.supportMap;
+if(d.fusionChildren)S.fusionChildren=d.fusionChildren;
+// Sanitize team — remove indices that point beyond roster length
+S.team=S.team.filter(idx=>idx>=0&&idx<S.roster.length);
+// Sanitize daycare — remove unit IDs that no longer exist
+const rosterIds=new Set(S.roster.map(u=>u.id));
+if(S.daycareSlots)S.daycareSlots=S.daycareSlots.map(uid=>uid&&rosterIds.has(uid)?uid:null);
+// Sanitize presets — remove stale indices
+S.teamPresets=(S.teamPresets||[]).map(p=>{
+if(!p||!p.team)return null;
+return{...p,team:p.team.filter(idx=>idx>=0&&idx<S.roster.length)};
+});
 if(S.activePreset===undefined)S.activePreset=0;
 if(!S.trainingFloor)S.trainingFloor=1;
 if(!S.arenaScore)S.arenaScore=0;
@@ -4710,6 +4772,7 @@ function hdDismiss(){
 const idx=currentHeroDetailIdx;if(idx<0)return;
 const u=S.roster[idx];if(!u)return;
 if(!confirm(`Dismiss ${u.name}?`))return;
+const dismissedId=u.id;
 const ti=S.team.indexOf(idx);if(ti>=0)S.team.splice(ti,1);
 S.team=S.team.map(t=>t>idx?t-1:t);
 // Update preset indices to account for the removed roster slot
@@ -4717,6 +4780,10 @@ S.teamPresets=S.teamPresets.map(p=>{
 if(!p)return null;
 return{...p,team:p.team.filter(t=>t!==idx).map(t=>t>idx?t-1:t)};
 });
+// Clean up daycare slots referencing dismissed unit
+if(S.daycareSlots)S.daycareSlots=S.daycareSlots.map(uid=>uid===dismissedId?null:uid);
+// Clean up support map entries
+if(S.supportMap){Object.keys(S.supportMap).forEach(k=>{if(k.includes(String(dismissedId)))delete S.supportMap[k];});}
 S.roster.splice(idx,1);
 currentHeroDetailIdx=-1;
 save(true);nav('barracks');refreshBarracks();toast('Dismissed.');
@@ -5730,7 +5797,7 @@ function applyIVs(unit){
 const stats=['maxHp','atk','def','mag','res','spd'];
 const boon=stats[~~(Math.random()*stats.length)];
 let bane=stats[~~(Math.random()*stats.length)];
-while(bane===boon)bane=stats[~~(Math.random()*stats.length)];
+for(let _g=0;bane===boon&&_g<50;_g++)bane=stats[~~(Math.random()*stats.length)];
 unit.boon=boon;unit.bane=bane;
 unit[boon]=(unit[boon]||0)+3;
 unit[bane]=Math.max(1,(unit[bane]||0)-3);
@@ -5975,7 +6042,7 @@ hofState=null;save(true);return;
 const allSkills=[...LEARNABLE_SKILLS,...ASSIST_SKILLS.map(a=>({...a,slot:'assist',spCost:0}))];
 const choices=[];
 const seen=new Set();
-while(choices.length<3){
+for(let _g=0;choices.length<3&&_g<200;_g++){
 const sk=allSkills[~~(Math.random()*allSkills.length)];
 if(!seen.has(sk.id)){seen.add(sk.id);choices.push(sk);}
 }
@@ -9431,6 +9498,600 @@ updateHomeScreen = function () {
     );
 
     console.log('%c DAYCARE, BONDING, LORE, CLASS CHANGE & TUTORIAL PATCH APPLIED', 'color:#22c55e;font-weight:bold;font-size:14px');
+})();
+
+// ═══════════════════════════════════════════════════════════════
+// GRAND DEBUGGER + MAESTRO V3 + TRANSITIONS + WEAPON VIEWER
+// ═══════════════════════════════════════════════════════════════
+(function() {
+    console.log('%c APPLYING GRAND STABILITY & POLISH PATCH...', 'color:#f97316;font-weight:bold;font-size:14px');
+
+    // ─── 1. CANVAS CRASH SAFETY ──────────────────────────────
+    // Wrap CanvasRenderingContext2D.drawImage to never throw
+    const _origDrawImage = CanvasRenderingContext2D.prototype.drawImage;
+    CanvasRenderingContext2D.prototype.drawImage = function(img) {
+        try {
+            if(!img) return;
+            // Check image validity
+            if(img instanceof HTMLImageElement) {
+                if(!img.complete || img.naturalWidth === 0) {
+                    // Draw placeholder
+                    this.fillStyle = '#1a2332';
+                    const w = arguments[3] || arguments[1] || 64;
+                    const h = arguments[4] || arguments[2] || 64;
+                    const x = arguments.length >= 5 ? arguments[1] : 0;
+                    const y = arguments.length >= 5 ? arguments[2] : 0;
+                    this.fillRect(x, y, w, h);
+                    this.fillStyle = '#555';
+                    this.font = `${Math.min(w,h)*0.3}px sans-serif`;
+                    this.textAlign = 'center';
+                    this.fillText('?', x + w/2, y + h/2 + 4);
+                    return;
+                }
+            }
+            _origDrawImage.apply(this, arguments);
+        } catch(e) {
+            // Silently draw placeholder on corrupt images
+            try {
+                this.fillStyle = '#2a1020';
+                const w = arguments[3] || 64;
+                const h = arguments[4] || 64;
+                this.fillRect(arguments[1]||0, arguments[2]||0, w, h);
+            } catch(e2) {}
+        }
+    };
+
+    // ─── 2. MOBILE HARDENING ─────────────────────────────────
+    // Prevent pull-to-refresh on battle canvas
+    document.addEventListener('touchmove', function(e) {
+        if(e.target.closest('#battleCanvas, .dc-garden, #mapWrap')) {
+            e.preventDefault();
+        }
+    }, {passive: false});
+
+    // Prevent double-tap zoom on game elements
+    let _lastTap = 0;
+    document.addEventListener('touchend', function(e) {
+        const now = Date.now();
+        if(now - _lastTap < 300 && e.target.closest('.screen')) {
+            e.preventDefault();
+        }
+        _lastTap = now;
+    }, {passive: false});
+
+    // ─── 3. NULL GUARD WRAPPERS ──────────────────────────────
+    // Safely access special.cd — used in many places
+    const _origMarkActed = markActed;
+    // Guard all special accesses in battle preparation
+    const _origPrepBattleUnit = prepBattleUnit;
+    if(typeof prepBattleUnit === 'function') {
+        window.prepBattleUnit = function(unit, side) {
+            const u = _origPrepBattleUnit(unit, side);
+            if(u && !u.special) {
+                u.special = {name:'None',desc:'No special skill',effect:'none',val:0,cd:99};
+            }
+            u.specialCharges = u.special ? u.special.cd : 0;
+            return u;
+        };
+    }
+
+    // ─── 4. MAESTRO V3: ADAPTIVE DYNAMIC MUSIC ──────────────
+    class MaestroV3 {
+        constructor() {
+            this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+            this.isPlaying = false;
+            this.tempo = 88;
+            this.intensity = 'menu'; // 'menu' | 'player' | 'enemy' | 'victory'
+            this._schedId = null;
+
+            // Scales — Dorian mode for a bittersweet RPG feel
+            this.scales = {
+                dorian:    [0, 2, 3, 5, 7, 9, 10], // D Dorian
+                pentatonic:[0, 2, 4, 7, 9],          // Minor pentatonic
+                harmMinor: [0, 2, 3, 5, 7, 8, 11],   // Harmonic minor
+            };
+            this.scale = this.scales.dorian;
+            this.rootNote = 50; // D3
+
+            // Chord progressions per intensity
+            this.progressions = {
+                menu:    [[0,0],[3,3],[5,5],[3,3]], // i - iv - v - iv (ambient)
+                player:  [[0,0],[5,5],[3,3],[6,6]], // i - v - iv - VII (driving)
+                enemy:   [[0,0],[1,1],[5,5],[4,4]], // i - ii - v - iv- (tension)
+                victory: [[0,0],[5,5],[3,3],[0,0]], // i - v - iv - i (triumph)
+            };
+
+            // Master chain with better routing
+            this.masterGain = this.ctx.createGain();
+            this.masterGain.gain.value = 0.30;
+
+            // Reverb
+            this.reverb = this.ctx.createConvolver();
+            this._buildImpulse(2.2, 2.8);
+            this.reverbSend = this.ctx.createGain();
+            this.reverbSend.gain.value = 0.20;
+            this.dryGain = this.ctx.createGain();
+            this.dryGain.gain.value = 0.80;
+
+            // Delay (dotted 8th for rhythmic interest)
+            this.delay = this.ctx.createDelay(1.0);
+            this.delay.delayTime.value = 60 / this.tempo * 0.75;
+            this.delayFeedback = this.ctx.createGain();
+            this.delayFeedback.gain.value = 0.25;
+            this.delaySend = this.ctx.createGain();
+            this.delaySend.gain.value = 0.12;
+
+            // Routing
+            this.dryGain.connect(this.masterGain);
+            this.reverb.connect(this.reverbSend);
+            this.reverbSend.connect(this.masterGain);
+            this.delay.connect(this.delayFeedback);
+            this.delayFeedback.connect(this.delay);
+            this.delay.connect(this.delaySend);
+            this.delaySend.connect(this.masterGain);
+            this.masterGain.connect(this.ctx.destination);
+
+            // State
+            this.beat = 0;
+            this.chordStep = 0;
+            this.prog = this.progressions.menu;
+            this.nextNoteTime = 0;
+        }
+
+        _buildImpulse(decay, length) {
+            const sr = this.ctx.sampleRate;
+            const len = sr * length;
+            const buf = this.ctx.createBuffer(2, len, sr);
+            for(let ch = 0; ch < 2; ch++) {
+                const d = buf.getChannelData(ch);
+                for(let i = 0; i < len; i++) {
+                    d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, decay);
+                }
+            }
+            this.reverb.buffer = buf;
+        }
+
+        _midi(n) { return 440 * Math.pow(2, (n - 69) / 12); }
+
+        // Scale-aware note picking
+        _scaleNote(degree, octave) {
+            octave = octave || 0;
+            const idx = ((degree % this.scale.length) + this.scale.length) % this.scale.length;
+            const octShift = Math.floor(degree / this.scale.length);
+            return this.rootNote + this.scale[idx] + (octave + octShift) * 12;
+        }
+
+        // Detune-capable oscillator for analog feel
+        _playNote(midi, type, duration, vol, attack, decay, sustain, release, dest) {
+            const now = this.ctx.currentTime;
+            const osc1 = this.ctx.createOscillator();
+            const osc2 = this.ctx.createOscillator(); // Detuned layer
+            const gain = this.ctx.createGain();
+            const filter = this.ctx.createBiquadFilter();
+
+            osc1.type = type;
+            osc2.type = type;
+            osc1.frequency.value = this._midi(midi);
+            osc2.frequency.value = this._midi(midi);
+            osc2.detune.value = (Math.random() - 0.5) * 12 + 6; // 0-12 cents detune
+
+            filter.type = 'lowpass';
+            filter.frequency.value = this.intensity === 'enemy' ? 600 : this.intensity === 'menu' ? 1200 : 1800;
+            filter.Q.value = 1.2;
+
+            const merge = this.ctx.createGain();
+            merge.gain.value = 0.5;
+            osc1.connect(merge);
+            osc2.connect(merge);
+            merge.connect(filter);
+            filter.connect(gain);
+            gain.connect(dest || this.dryGain);
+            gain.connect(this.reverb);
+            gain.connect(this.delay);
+
+            // ADSR
+            gain.gain.setValueAtTime(0, now);
+            gain.gain.linearRampToValueAtTime(vol, now + attack);
+            gain.gain.linearRampToValueAtTime(vol * sustain, now + attack + decay);
+            gain.gain.setValueAtTime(vol * sustain, now + Math.max(0, duration - release));
+            gain.gain.linearRampToValueAtTime(0, now + duration);
+
+            osc1.start(now); osc1.stop(now + duration + 0.05);
+            osc2.start(now); osc2.stop(now + duration + 0.05);
+
+            const cleanupMs = (duration + 0.2) * 1000;
+            setTimeout(() => { try { osc1.disconnect(); osc2.disconnect(); merge.disconnect(); gain.disconnect(); filter.disconnect(); } catch(e){} }, cleanupMs);
+        }
+
+        _playBass(midi, duration) {
+            const now = this.ctx.currentTime;
+            const osc = this.ctx.createOscillator();
+            const sub = this.ctx.createOscillator();
+            const gain = this.ctx.createGain();
+            const filter = this.ctx.createBiquadFilter();
+
+            osc.type = 'sawtooth';
+            sub.type = 'sine';
+            osc.frequency.value = this._midi(midi);
+            sub.frequency.value = this._midi(midi - 12); // Sub-octave
+            filter.type = 'lowpass';
+            filter.frequency.value = 250;
+            filter.Q.value = 3;
+
+            const merge = this.ctx.createGain();
+            merge.gain.value = 0.5;
+            osc.connect(merge); sub.connect(merge);
+            merge.connect(filter);
+            filter.connect(gain);
+            gain.connect(this.dryGain);
+
+            gain.gain.setValueAtTime(0, now);
+            gain.gain.linearRampToValueAtTime(0.14, now + 0.02);
+            gain.gain.exponentialRampToValueAtTime(0.01, now + duration);
+
+            osc.start(now); osc.stop(now + duration + 0.05);
+            sub.start(now); sub.stop(now + duration + 0.05);
+            setTimeout(() => { try { osc.disconnect(); sub.disconnect(); merge.disconnect(); gain.disconnect(); filter.disconnect(); } catch(e){} }, (duration + 0.2) * 1000);
+        }
+
+        _playPerc(vol, type) {
+            const now = this.ctx.currentTime;
+            const dur = type === 'kick' ? 0.1 : 0.04;
+            const buf = this.ctx.createBuffer(1, this.ctx.sampleRate * dur, this.ctx.sampleRate);
+            const d = buf.getChannelData(0);
+            for(let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / d.length, type === 'kick' ? 3 : 8);
+            const src = this.ctx.createBufferSource();
+            const g = this.ctx.createGain();
+            const f = this.ctx.createBiquadFilter();
+            src.buffer = buf;
+            f.type = type === 'kick' ? 'lowpass' : 'highpass';
+            f.frequency.value = type === 'kick' ? 200 : 5000;
+            src.connect(f); f.connect(g); g.connect(this.dryGain);
+            g.gain.setValueAtTime(vol, now);
+            g.gain.exponentialRampToValueAtTime(0.001, now + dur);
+            src.start(now); src.stop(now + dur + 0.01);
+            setTimeout(() => { try { src.disconnect(); g.disconnect(); f.disconnect(); } catch(e){} }, 200);
+        }
+
+        setIntensity(level) {
+            if(this.intensity === level) return;
+            this.intensity = level;
+            this.prog = this.progressions[level] || this.progressions.menu;
+            // Adjust filter and tempo per intensity
+            if(level === 'menu') { this.tempo = 72; this.scale = this.scales.pentatonic; }
+            else if(level === 'player') { this.tempo = 92; this.scale = this.scales.dorian; }
+            else if(level === 'enemy') { this.tempo = 80; this.scale = this.scales.harmMinor; }
+            else if(level === 'victory') { this.tempo = 110; this.scale = this.scales.pentatonic; }
+            this.delay.delayTime.value = 60 / this.tempo * 0.75;
+        }
+
+        start() {
+            if(this.isPlaying) return;
+            try { this.ctx.resume(); } catch(e) {}
+            this.isPlaying = true;
+            this.nextNoteTime = this.ctx.currentTime + 0.1;
+            this.beat = 0;
+            this.chordStep = 0;
+            this._scheduler();
+        }
+
+        stop() {
+            this.isPlaying = false;
+            if(this._schedId) { clearTimeout(this._schedId); this._schedId = null; }
+        }
+
+        _scheduler() {
+            if(!this.isPlaying) return;
+            while(this.nextNoteTime < this.ctx.currentTime + 0.12) {
+                this._playBeat();
+                this.nextNoteTime += (60 / this.tempo) / 2;
+                this.beat++;
+            }
+            this._schedId = setTimeout(() => this._scheduler(), 20);
+        }
+
+        _playBeat() {
+            // Chord change every 16 beats (2 bars)
+            if(this.beat % 16 === 0) {
+                this.chordStep = (this.chordStep + 1) % this.prog.length;
+                if(this.chordStep === 0 && Math.random() > 0.5) {
+                    // Occasionally switch progression
+                    const keys = Object.keys(this.progressions);
+                    // Stay on current intensity progression most of the time
+                }
+            }
+
+            const chord = this.prog[this.chordStep];
+            const root = chord[0];
+
+            const I = this.intensity;
+
+            // ═══ PAD: Lush sustained chords ═══
+            if(this.beat % 16 === 0) {
+                const padDur = (60 / this.tempo) * (I === 'menu' ? 12 : 8);
+                const padVol = I === 'menu' ? 0.07 : 0.05;
+                this._playNote(this._scaleNote(root, -1), 'sine', padDur, padVol, 2.0, 0.5, 0.7, 2.5);
+                this._playNote(this._scaleNote(root, 0), 'sine', padDur, padVol * 0.8, 2.5, 0.5, 0.6, 2.5);
+                this._playNote(this._scaleNote(root + 2, 0), 'sine', padDur, padVol * 0.7, 2.5, 0.5, 0.6, 2.5);
+                this._playNote(this._scaleNote(root + 4, 0), 'sine', padDur, padVol * 0.6, 3.0, 0.5, 0.6, 2.5);
+            }
+
+            // ═══ BASS ═══
+            if(I !== 'menu') {
+                if(this.beat % 4 === 0) {
+                    this._playBass(this._scaleNote(root, -2), (60/this.tempo) * 1.5);
+                }
+                if(this.beat % 8 === 6) {
+                    this._playBass(this._scaleNote(root, -1), (60/this.tempo) * 0.7);
+                }
+            }
+
+            // ═══ ARPEGGIO ═══
+            if(this.beat % 2 === 0) {
+                const arpPool = [0, 2, 4, 5, 7];
+                const arpDeg = arpPool[this.beat % arpPool.length] + root;
+                const octave = (this.beat % 8 < 4) ? 0 : 1;
+                const arpVol = I === 'menu' ? 0.10 : I === 'enemy' ? 0.06 : 0.12;
+                this._playNote(this._scaleNote(arpDeg, octave), 'triangle', 0.22, arpVol, 0.01, 0.04, 0.4, 0.25);
+            }
+
+            // ═══ MELODY (player/enemy phase) ═══
+            if(I !== 'menu' && this.beat % 4 === 0 && Math.random() > 0.45) {
+                const melDeg = [0, 2, 4, 5, 7, 9][~~(Math.random() * 6)] + root;
+                const oct = I === 'enemy' ? 0 : 1;
+                const dur = Math.random() > 0.6 ? 0.65 : 0.35;
+                this._playNote(this._scaleNote(melDeg, oct), 'triangle', dur, 0.16, 0.02, 0.06, 0.35, 0.35);
+            }
+
+            // ═══ COUNTER-MELODY (rare high bell) ═══
+            if(this.beat % 8 === 3 && Math.random() > 0.7) {
+                const bellDeg = [4, 7, 9][~~(Math.random() * 3)] + root;
+                this._playNote(this._scaleNote(bellDeg, 2), 'sine', 0.55, 0.06, 0.01, 0.08, 0.25, 0.45);
+            }
+
+            // ═══ PERCUSSION ═══
+            if(I === 'player' || I === 'enemy') {
+                if(this.beat % 4 === 0) this._playPerc(0.04, 'kick');
+                if(this.beat % 2 === 1 && Math.random() > 0.35) this._playPerc(0.025, 'hat');
+                if(this.beat % 8 === 4) this._playPerc(0.035, 'hat'); // snare position
+            }
+            if(I === 'menu' && this.beat % 8 === 0) {
+                this._playPerc(0.015, 'hat'); // very subtle tick
+            }
+        }
+    }
+
+    // Replace BGM with V3
+    const _wasPlaying = bgm && bgm.isPlaying;
+    const _oldTempo = bgm ? bgm.tempo : 88;
+    if(_wasPlaying && bgm.stop) bgm.stop();
+    window.bgm = new MaestroV3();
+    bgm.tempo = _oldTempo;
+    if(_wasPlaying && S.soundOn) bgm.start();
+
+    // ─── 5. CINEMATIC SCREEN TRANSITIONS ─────────────────────
+    const TRANS_MAP = {
+        battle:   'shutter',
+        gacha:    'light',
+        daycare:  'fade',
+        settings: 'slide-left',
+        barracks: 'slide-right',
+        heroDetail: 'slide-left',
+        modes:    'slide-right',
+        home:     'fade',
+        quests:   'slide-left',
+        campaign: 'slide-right',
+    };
+
+    let _transActive = false;
+    const _origNav = nav;
+    window.nav = function(id) {
+        // Skip transition if already transitioning or if navigating to same screen
+        if(_transActive) return;
+        const currentScreen = document.querySelector('.screen.active');
+        if(currentScreen && currentScreen.id === id) return;
+
+        const transType = TRANS_MAP[id] || 'fade';
+        const layer = document.getElementById('transLayer');
+        if(!layer) { _origNav(id); return; }
+
+        _transActive = true;
+
+        // Build transition DOM
+        let inner = '';
+        if(transType === 'shutter') {
+            inner = '<div class="sbar-l"></div><div class="sbar-r"></div>';
+            layer.className = 'transition-layer active trans-shutter in';
+        } else if(transType === 'light') {
+            inner = '<div class="flash"></div>';
+            layer.className = 'transition-layer active trans-light in';
+        } else if(transType === 'fade') {
+            inner = '<div class="blur"></div>';
+            layer.className = 'transition-layer active trans-fade in';
+        } else if(transType.startsWith('slide')) {
+            inner = '<div class="panel"></div>';
+            layer.className = `transition-layer active trans-slide ${transType} in`;
+        }
+        layer.innerHTML = inner;
+
+        // At midpoint, do the actual screen switch
+        setTimeout(() => {
+            _origNav(id);
+
+            // Reverse animation
+            layer.classList.remove('in');
+            layer.classList.add('out');
+
+            // Cleanup
+            setTimeout(() => {
+                layer.className = 'transition-layer';
+                layer.innerHTML = '';
+                _transActive = false;
+            }, 350);
+        }, 300);
+    };
+
+    // Hook MaestroV3 intensity changes into nav
+    const _origNav2 = window.nav;
+    window.nav = function(id) {
+        // Set music intensity based on destination
+        if(bgm && bgm.setIntensity) {
+            if(id === 'battle') bgm.setIntensity('player');
+            else bgm.setIntensity('menu');
+        }
+        _origNav2(id);
+    };
+
+    // Hook into battle phase changes for music intensity
+    const _origEndPlayerPhase = endPlayerPhase;
+    window.endPlayerPhase = function() {
+        if(bgm && bgm.setIntensity) bgm.setIntensity('enemy');
+        _origEndPlayerPhase.apply(this, arguments);
+    };
+    const _origEndEnemyPhase2 = endEnemyPhase;
+    window.endEnemyPhase = function() {
+        _origEndEnemyPhase2.apply(this, arguments);
+        if(bgm && bgm.setIntensity && B.phase === 'player') bgm.setIntensity('player');
+    };
+
+    // ─── 6. WEAPON VIEWER ────────────────────────────────────
+    // Add weapon info to Hero Detail screen
+    const _origOpenHD4 = openHeroDetail;
+    window.openHeroDetail = function(idx) {
+        _origOpenHD4(idx);
+        const u = S.roster[idx];
+        if(!u) return;
+
+        const hdContent = document.querySelector('.hd-content');
+        if(!hdContent) return;
+
+        // Remove old weapon viewer
+        hdContent.querySelectorAll('.weapon-viewer').forEach(el => el.remove());
+
+        // Build weapon info section
+        const wv = document.createElement('div');
+        wv.className = 'weapon-viewer';
+
+        const wc = WEAPON_COLORS[u.weapon] || '#fff';
+        const moveLabel = MOVE_STATS[u.moveType]?.label || u.moveType;
+        const wRange = typeof getWeaponRange === 'function' ? getWeaponRange(u.weapon) : (['Bow'].includes(u.weapon) ? 2 : 1);
+
+        // Weapon triangle info
+        const beats = WEAPON_TRIANGLE[u.weapon] || 'None';
+        const losesTo = Object.entries(WEAPON_TRIANGLE).find(([k,v]) => v === u.weapon);
+
+        let html = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+            <span style="font-family:var(--display);font-size:.65rem;color:${wc};letter-spacing:1px">${u.weapon.toUpperCase()}</span>
+            <span class="weapon-tag" style="border-color:${wc};color:${wc}">${moveLabel} • Range ${wRange}</span>
+        </div>`;
+
+        // Triangle
+        html += `<div style="font-size:.58rem;color:var(--text2);margin-bottom:4px">
+            <span style="color:#22c55e">Strong vs:</span> ${beats} &nbsp;
+            <span style="color:#ef4444">Weak vs:</span> ${losesTo ? losesTo[0] : 'None'}
+        </div>`;
+
+        // Weapon effect
+        if(u.weaponEffectName) {
+            const effectDesc = u.passives?.find(p => p && p.name && p.name.includes('\u2694'))?.desc || 'Unique weapon effect';
+            html += `<div class="weapon-effect-box">
+                <div style="font-weight:700;color:var(--gold);margin-bottom:2px">${u.weaponEffectName}</div>
+                <div style="color:var(--text2)">${effectDesc}</div>
+            </div>`;
+        } else if(u.weaponEffect) {
+            const we = typeof WEAPON_EFFECTS !== 'undefined' ? WEAPON_EFFECTS.find(w => w.id === u.weaponEffect) : null;
+            if(we) {
+                html += `<div class="weapon-effect-box">
+                    <div style="font-weight:700;color:var(--gold);margin-bottom:2px">${we.name}</div>
+                    <div style="color:var(--text2)">${we.desc}</div>
+                </div>`;
+            }
+        } else {
+            html += `<div style="font-size:.55rem;color:var(--text3);margin-top:4px">Standard ${u.weapon} — No special effect</div>`;
+        }
+
+        // All weapon types reference
+        html += `<details style="margin-top:8px"><summary style="font-size:.55rem;color:var(--text3);cursor:pointer">All Weapon Types</summary>
+        <div style="display:flex;flex-wrap:wrap;gap:3px;margin-top:4px">`;
+        WEAPON_TYPES.forEach(w => {
+            const c = WEAPON_COLORS[w] || '#fff';
+            const active = w === u.weapon;
+            html += `<span class="weapon-tag" style="border-color:${c};color:${active?'#fff':c};${active?'background:'+c:''}font-size:.45rem">${w}</span>`;
+        });
+        html += '</div></details>';
+
+        wv.innerHTML = html;
+
+        // Insert after the stats section
+        const statsSection = hdContent.querySelector('#hdStats');
+        if(statsSection && statsSection.parentElement) {
+            statsSection.parentElement.after(wv);
+        } else {
+            hdContent.appendChild(wv);
+        }
+    };
+
+    // ─── 7. VICTORY MUSIC FLOURISH ───────────────────────────
+    const _origCheckBattleOver = checkBattleOver;
+    window.checkBattleOver = function() {
+        const result = _origCheckBattleOver.apply(this, arguments);
+        if(B.phase === 'over' && bgm && bgm.setIntensity) {
+            const pe = B.pUnits.filter(u => u.hp > 0).length;
+            bgm.setIntensity(pe > 0 ? 'victory' : 'menu');
+        }
+        return result;
+    };
+
+    // ─── 8. ADDITIONAL NULL GUARDS ───────────────────────────
+    // Guard special access in combat resolution
+    const _origPC = performCombat;
+    if(typeof _origPC === 'function') {
+        // Already overridden by bonding patch, so we chain onto the current version
+        const _currentPC = window.performCombat;
+        window.performCombat = function(atker, target, isSpecial, isInitiating) {
+            // Ensure specials exist before combat
+            if(atker && !atker.special) atker.special = {name:'None',desc:'',effect:'none',val:0,cd:99};
+            if(target && !target.special) target.special = {name:'None',desc:'',effect:'none',val:0,cd:99};
+            return _currentPC.apply(this, arguments);
+        };
+    }
+
+    // ─── 9. UI POLISH: BATTLE LOG TIMESTAMPS ─────────────────
+    const _origBlog = typeof bLog === 'function' ? bLog : null;
+    if(_origBlog) {
+        window.bLog = function(msg, type) {
+            _origBlog(msg, type);
+            // Add turn number to latest log entry
+            const logEl = document.getElementById('bLog');
+            if(logEl && logEl.lastChild) {
+                const turnNum = Math.floor((B.turnCount || 0) / 2) + 1;
+                const span = document.createElement('span');
+                span.style.cssText = 'font-size:.4rem;color:var(--text3);margin-left:4px';
+                span.textContent = `T${turnNum}`;
+                logEl.lastChild.appendChild(span);
+            }
+        };
+    }
+
+    // Track turn count
+    if(typeof B !== 'undefined') B.turnCount = 0;
+    const _origEPP = window.endPlayerPhase;
+    window.endPlayerPhase = function() {
+        B.turnCount = (B.turnCount || 0) + 1;
+        _origEPP.apply(this, arguments);
+    };
+
+    console.log('%c GRAND STABILITY & POLISH PATCH APPLIED', 'color:#22c55e;font-weight:bold;font-size:14px');
+    console.log('%c  ✓ Canvas drawImage crash safety', 'color:#22c55e');
+    console.log('%c  ✓ Mobile hardening (pull-to-refresh blocked)', 'color:#22c55e');
+    console.log('%c  ✓ Null guard wrappers for special/combat', 'color:#22c55e');
+    console.log('%c  ✓ MaestroV3: Scale-based adaptive music with detune', 'color:#22c55e');
+    console.log('%c  ✓ Cinematic screen transitions', 'color:#22c55e');
+    console.log('%c  ✓ Weapon viewer in Hero Detail', 'color:#22c55e');
+    console.log('%c  ✓ Save/Load data sanitization', 'color:#22c55e');
+    console.log('%c  ✓ hdDismiss full cleanup', 'color:#22c55e');
+    console.log('%c  ✓ Loop guards on edge-case while loops', 'color:#22c55e');
+    console.log('%c  ✓ Battle log turn timestamps', 'color:#22c55e');
 })();
 
 </script>
