@@ -745,6 +745,13 @@ input[type=range]{accent-color:var(--t0);width:100px}
 /* Ensure banner list consumes available height */
 .gacha-wrap { overflow: hidden !important; display: flex !important; flex-direction: column !important; }
 #fehBannerList { flex: 1; overflow-y: auto; padding-bottom: 20px; }
+/* Auto-Battle button */
+#autoBtn.auto-active { background:var(--accent)!important; color:#fff!important; border-color:var(--accent)!important; box-shadow:0 0 8px var(--accent); }
+/* Inventory filter bar */
+.inv-filters{display:flex;gap:4px;flex-wrap:wrap;margin:6px 0}
+.inv-filters button{font-size:.5rem;padding:2px 6px;border-radius:4px;border:1px solid var(--border);background:transparent;color:var(--text2);cursor:pointer;font-family:var(--body)}
+.inv-filters button.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+.inv-item-grid{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px;max-height:200px;overflow-y:auto}
 </style>
 </head>
 <body>
@@ -993,6 +1000,7 @@ input[type=range]{accent-color:var(--t0);width:100px}
 <div class="hdr-logo">APEX TIER 0</div>
 <div class="turn-ind" id="turnInd">PLAYER PHASE</div>
 <button class="dzone-btn" id="dzoneBtn" onclick="toggleDangerZone()">DANGER</button>
+<button class="dzone-btn" id="autoBtn" onclick="toggleAutoBattle()" style="background:transparent;border:1px solid var(--border);color:var(--text2)">AUTO</button>
 <div class="hdr-nav"><button class="nbtn" onclick="retreat()">RETREAT</button></div>
 </div>
 <div class="battle-layout">
@@ -1185,7 +1193,7 @@ class Maestro {
         this.prog = this.progressions[0];
         this.scheduler();
     }
-    stop() { this.isPlaying = false; }
+    stop() { this.isPlaying = false; if(this._schedId){clearTimeout(this._schedId);this._schedId=null;} }
     playTone(midiNote, type, duration, vol, attack, release) {
         const osc = this.ctx.createOscillator();
         const gain = this.ctx.createGain();
@@ -1203,6 +1211,9 @@ class Maestro {
         gain.gain.setTargetAtTime(0, now + duration + release, release);
         osc.start(now);
         osc.stop(now + duration + release + 0.1);
+        // GC: disconnect nodes after note finishes
+        const cleanupMs = (duration + release + 0.2) * 1000;
+        setTimeout(() => { try { osc.disconnect(); gain.disconnect(); filter.disconnect(); } catch(e){} }, cleanupMs);
     }
     scheduler() {
         if(!this.isPlaying) return;
@@ -1211,7 +1222,7 @@ class Maestro {
             this.nextNoteTime += (60.0 / this.tempo) / 2;
             this.beat++;
         }
-        setTimeout(() => this.scheduler(), 25);
+        this._schedId = setTimeout(() => this.scheduler(), 25);
     }
     playBeat() {
         if (this.beat % 16 === 0) {
@@ -7347,7 +7358,7 @@ class MaestroV2 {
     osc.stop(now + duration + 0.05);
     // Disconnect gain node after note finishes to prevent audio node accumulation
     const cleanupMs = (duration + 0.15) * 1000;
-    setTimeout(() => { try { gain.disconnect(); filter.disconnect(); } catch(e){} }, cleanupMs);
+    setTimeout(() => { try { osc.disconnect(); gain.disconnect(); filter.disconnect(); } catch(e){} }, cleanupMs);
   }
 
   // Dedicated bass oscillator
@@ -7373,7 +7384,7 @@ class MaestroV2 {
 
     osc.start(now);
     osc.stop(now + duration + 0.05);
-    setTimeout(() => { try { gain.disconnect(); filter.disconnect(); } catch(e){} }, (duration + 0.15) * 1000);
+    setTimeout(() => { try { osc.disconnect(); gain.disconnect(); filter.disconnect(); } catch(e){} }, (duration + 0.15) * 1000);
   }
 
   start() {
@@ -7388,7 +7399,7 @@ class MaestroV2 {
     this._scheduler();
   }
 
-  stop() { this.isPlaying = false; }
+  stop() { this.isPlaying = false; if(this._schedId){clearTimeout(this._schedId);this._schedId=null;} }
 
   _scheduler() {
     if (!this.isPlaying) return;
@@ -7397,7 +7408,7 @@ class MaestroV2 {
       this.nextNoteTime += (60.0 / this.tempo) / 2;
       this.beat++;
     }
-    setTimeout(() => this._scheduler(), 20);
+    this._schedId = setTimeout(() => this._scheduler(), 20);
   }
 
   _playBeat() {
@@ -7479,7 +7490,7 @@ class MaestroV2 {
     g.gain.setValueAtTime(vol, now);
     g.gain.exponentialRampToValueAtTime(0.001, now + 0.06);
     src.start(now); src.stop(now + 0.07);
-    setTimeout(() => { try { g.disconnect(); f.disconnect(); } catch(e){} }, 150);
+    setTimeout(() => { try { src.disconnect(); g.disconnect(); f.disconnect(); } catch(e){} }, 150);
   }
 }
 
@@ -8238,6 +8249,340 @@ updateHomeScreen = function () {
     }
     
     console.log('%c APEX TIER 0 HOTFIX v2.2 APPLIED', 'color:#00e5ff;font-weight:bold;font-size:14px');
+})();
+
+// ═══════════════════════════════════════════════════════════════
+// AUTO-BATTLE SYSTEM — "Grind Fix"
+// ═══════════════════════════════════════════════════════════════
+(function() {
+    console.log('%c APPLYING AUTO-BATTLE PATCH...', 'color:#f97316;font-weight:bold');
+
+    B.autoPlay = false;
+
+    window.toggleAutoBattle = function() {
+        B.autoPlay = !B.autoPlay;
+        const btn = document.getElementById('autoBtn');
+        if(btn) {
+            btn.classList.toggle('auto-active', B.autoPlay);
+            btn.textContent = B.autoPlay ? 'AUTO ON' : 'AUTO';
+        }
+        toast(B.autoPlay ? 'Auto-Battle ON — your units will act automatically' : 'Auto-Battle OFF', 'ok');
+        // If toggled on during player phase, start immediately
+        if(B.autoPlay && B.phase === 'player') {
+            runAutoPlayer();
+        }
+    };
+
+    // AI for player units: aggressive — move toward enemies, attack the weakest
+    function autoPlayerAct(unit, done) {
+        if(B.phase === 'over' || !B.autoPlay) { if(done) done(); return; }
+        const enemies = B.eUnits.filter(u => u.hp > 0);
+        if(!enemies.length) { markActed(unit); drawMap(); setTimeout(done, 10); return; }
+        if(unit.frozen) { markActed(unit); setTimeout(done, 10); return; }
+
+        const wRange = getWeaponRange(unit.weapon);
+
+        // Pick best target: prioritize killable, then lowest HP
+        enemies.sort((a, b) => {
+            const ka = a.hp <= calcDmg(unit, a).dmg, kb = b.hp <= calcDmg(unit, b).dmg;
+            if(ka && !kb) return -1; if(kb && !ka) return 1;
+            return a.hp - b.hp;
+        });
+        const target = enemies[0];
+        const dist = Math.abs(target.x - unit.x) + Math.abs(target.y - unit.y);
+
+        // Already in range: attack
+        if(dist <= wRange) {
+            setTimeout(() => {
+                const useSpec = unit.specialCharges === 0;
+                performCombat(unit, target, useSpec, true);
+                markActed(unit); drawMap(); updateBUI();
+                setTimeout(done, CFG.AI_DELAY * 0.3);
+            }, CFG.AI_DELAY * 0.2);
+            return;
+        }
+
+        // Move toward target
+        const reachable = getReachable(unit);
+        let best = null, bestScore = Infinity;
+        for(const cell of reachable) {
+            const d = Math.abs(cell.x - target.x) + Math.abs(cell.y - target.y);
+            const score = d <= wRange ? -500 + d : d;
+            if(score < bestScore) { bestScore = score; best = cell; }
+        }
+        if(!best) { markActed(unit); setTimeout(done, 10); return; }
+
+        const path = astar(unit.x, unit.y, best.x, best.y, unit) || [{x: best.x, y: best.y}];
+        if(!path.length) { markActed(unit); setTimeout(done, 10); return; }
+
+        unit.moved = true;
+        animateMove(unit, path, () => {
+            const nd = Math.abs(target.x - unit.x) + Math.abs(target.y - unit.y);
+            if(nd <= wRange) {
+                setTimeout(() => {
+                    const useSpec = unit.specialCharges === 0;
+                    performCombat(unit, target, useSpec);
+                    markActed(unit); drawMap(); updateBUI();
+                    setTimeout(done, CFG.AI_DELAY * 0.3);
+                }, CFG.AI_DELAY * 0.2);
+            } else {
+                markActed(unit); drawMap(); updateBUI();
+                setTimeout(done, CFG.AI_DELAY * 0.2);
+            }
+        });
+    }
+
+    window.runAutoPlayer = function() {
+        if(!B.autoPlay || B.phase !== 'player') return;
+        const alive = B.pUnits.filter(u => u.hp > 0);
+        if(!alive.length) return;
+
+        const _autoBattleId = B.battleId;
+        function next() {
+            if(B.battleId !== _autoBattleId || B.phase === 'over' || !B.autoPlay) return;
+            const unacted = B.pUnits.filter(u => u.hp > 0 && !u.acted);
+            if(!unacted.length) {
+                // All player units acted — checkTurnEnd will trigger enemy phase
+                checkTurnEnd();
+                return;
+            }
+            const u = unacted[0];
+            autoPlayerAct(u, next);
+        }
+        next();
+    };
+
+    // Hook into the player phase start to auto-play
+    const _origEndEnemyPhase = endEnemyPhase;
+    // We need to hook AFTER the player phase begins.
+    // The player phase code runs at the end of endEnemyPhase, ending at drawMap/updateBUI.
+    // We'll patch the beginning of each player phase by watching for the turnInd change.
+    const _origDrawMap = drawMap;
+    let _autoCheckPending = false;
+    window.drawMap = function() {
+        _origDrawMap.apply(this, arguments);
+        // After map draws, if auto is on and it's player phase, start auto
+        if(B.autoPlay && B.phase === 'player' && !_autoCheckPending) {
+            const hasUnacted = B.pUnits.some(u => u.hp > 0 && !u.acted);
+            if(hasUnacted) {
+                _autoCheckPending = true;
+                setTimeout(() => {
+                    _autoCheckPending = false;
+                    if(B.autoPlay && B.phase === 'player') runAutoPlayer();
+                }, CFG.AI_DELAY * 0.5);
+            }
+        }
+    };
+
+    console.log('%c AUTO-BATTLE PATCH APPLIED', 'color:#22c55e;font-weight:bold');
+})();
+
+// ═══════════════════════════════════════════════════════════════
+// INVENTORY MANAGEMENT UI — Sorting, Filtering, Icons
+// ═══════════════════════════════════════════════════════════════
+(function() {
+    console.log('%c APPLYING INVENTORY UI PATCH...', 'color:#f97316;font-weight:bold');
+
+    const STAT_ICONS = {
+        atk: '⚔️', def: '🛡️', spd: '💨', mag: '✨', res: '🔮',
+        hp: '❤️', crit: '🎯', mov: '👢'
+    };
+
+    const RARITY_ORDER = {T0: 6, S: 5, A: 4, B: 3, C: 2, D: 1};
+    const RARITY_COLORS = {D:'#8e99a4', C:'#00e5ff', B:'#7c4dff', A:'#ff6b35', S:'#ffd700', T0:'#ff2d55'};
+
+    function getItemIcon(item) {
+        if(!item.effect) return '📦';
+        const stat = item.effect.stat || item.effect.type || '';
+        if(stat.includes('atk') || item.effect.type === 'crit_chance' || item.effect.type === 'crit_mult') return STAT_ICONS.atk;
+        if(stat.includes('def') || item.effect.type === 'reflect' || item.effect.type === 'first_hit_shield') return STAT_ICONS.def;
+        if(stat.includes('spd') || item.effect.type === 'mov_boost') return STAT_ICONS.spd;
+        if(stat.includes('mag')) return STAT_ICONS.mag;
+        if(stat.includes('res') || item.effect.type === 'miracle') return STAT_ICONS.res;
+        if(stat.includes('hp') || item.effect.type === 'regen' || item.effect.type === 'lifesteal') return STAT_ICONS.hp;
+        return '📦';
+    }
+
+    // Track current filter/sort state per hero detail session
+    let _invSort = 'rarity'; // 'rarity' | 'stat' | 'name'
+    let _invFilter = 'all';  // 'all' | 'atk' | 'def' | 'spd' | 'hp' | 'utility'
+
+    function filterItems(items) {
+        if(_invFilter === 'all') return items;
+        return items.filter(item => {
+            if(!item.effect) return _invFilter === 'utility';
+            const stat = (item.effect.stat || item.effect.type || '').toLowerCase();
+            if(_invFilter === 'atk') return stat.includes('atk') || stat.includes('crit');
+            if(_invFilter === 'def') return stat.includes('def') || stat.includes('shield') || stat.includes('reflect');
+            if(_invFilter === 'spd') return stat.includes('spd') || stat.includes('mov');
+            if(_invFilter === 'hp') return stat.includes('hp') || stat.includes('heal') || stat.includes('regen') || stat.includes('lifesteal');
+            if(_invFilter === 'utility') return !['atk','def','spd','hp','mag','res'].some(s => stat.includes(s));
+            return true;
+        });
+    }
+
+    function sortItems(items) {
+        return [...items].sort((a, b) => {
+            if(_invSort === 'rarity') return (RARITY_ORDER[b.rarity] || 0) - (RARITY_ORDER[a.rarity] || 0);
+            if(_invSort === 'name') return a.name.localeCompare(b.name);
+            if(_invSort === 'stat') {
+                const va = a.effect?.val || 0, vb = b.effect?.val || 0;
+                return vb - va;
+            }
+            return 0;
+        });
+    }
+
+    // Override the item inventory rendering in openHeroDetail
+    const _origOpenHD2 = openHeroDetail;
+    window.openHeroDetail = function(idx) {
+        _origOpenHD2(idx);
+        const u = S.roster[idx];
+        if(!u) return;
+
+        const hdContent = document.querySelector('.hd-content');
+        if(!hdContent) return;
+
+        // Find existing expansion sections and replace the item one
+        const sections = hdContent.querySelectorAll('.expansion-section');
+        const itemSec = sections[0]; // First expansion section is items
+        if(!itemSec) return;
+
+        function renderInventory() {
+            let html = '<div style="font-family:var(--display);font-size:.65rem;color:var(--gold);letter-spacing:1px;margin-bottom:6px">EQUIPPED ITEM</div>';
+
+            // Equipped item display
+            if(u.equippedItem) {
+                const ic = getItemIcon(u.equippedItem);
+                const rc = RARITY_COLORS[u.equippedItem.rarity] || '#8e99a4';
+                html += `<div style="font-size:.72rem;font-weight:600">${ic} ${u.equippedItem.name} <span style="color:${rc};font-size:.6rem;font-weight:700">${u.equippedItem.rarity}</span></div>`;
+                html += `<div style="font-size:.62rem;color:var(--text2);margin-top:2px">${u.equippedItem.desc}</div>`;
+                html += `<button class="btn2 btn-sm" style="margin-top:6px" onclick="unequipItem(${idx});openHeroDetail(${idx})">Unequip</button>`;
+            } else {
+                html += '<div style="font-size:.62rem;color:var(--text3)">No item equipped</div>';
+            }
+
+            // Inventory with sorting/filtering
+            if(S.itemInventory && S.itemInventory.length > 0) {
+                html += `<div style="margin-top:8px;font-size:.6rem;color:var(--text2)">Inventory (${S.itemInventory.length}):</div>`;
+
+                // Sort buttons
+                html += '<div class="inv-filters">';
+                html += `<span style="font-size:.5rem;color:var(--text3);padding:2px 0">Sort:</span>`;
+                ['rarity','stat','name'].forEach(s => {
+                    html += `<button class="${_invSort===s?'active':''}" onclick="_setInvSort('${s}',${idx})">${s.charAt(0).toUpperCase()+s.slice(1)}</button>`;
+                });
+                html += `<span style="font-size:.5rem;color:var(--text3);padding:2px 4px">|</span>`;
+                // Filter buttons
+                const filters = [
+                    {id:'all', label:'All'},
+                    {id:'atk', label:'⚔️ ATK'},
+                    {id:'def', label:'🛡️ DEF'},
+                    {id:'spd', label:'💨 SPD'},
+                    {id:'hp',  label:'❤️ HP'},
+                    {id:'utility', label:'📦 Util'},
+                ];
+                filters.forEach(f => {
+                    html += `<button class="${_invFilter===f.id?'active':''}" onclick="_setInvFilter('${f.id}',${idx})">${f.label}</button>`;
+                });
+                html += '</div>';
+
+                // Filtered & sorted items
+                let items = filterItems(S.itemInventory);
+                items = sortItems(items);
+
+                html += '<div class="inv-item-grid">';
+                if(items.length === 0) {
+                    html += '<div style="font-size:.55rem;color:var(--text3);padding:4px">No items match filter</div>';
+                }
+                items.forEach(item => {
+                    const rc = RARITY_COLORS[item.rarity] || '#8e99a4';
+                    const ic = getItemIcon(item);
+                    html += `<button class="btn2 btn-sm" style="font-size:.5rem;border-color:${rc};color:${rc}" onclick="equipItem(${idx},'${item.instanceId}');openHeroDetail(${idx})" title="${item.desc}">${ic} ${item.name}</button>`;
+                });
+                html += '</div>';
+            }
+
+            itemSec.innerHTML = html;
+        }
+
+        // Expose sort/filter setters
+        window._setInvSort = function(s, i) { _invSort = s; openHeroDetail(i); };
+        window._setInvFilter = function(f, i) { _invFilter = f; openHeroDetail(i); };
+
+        renderInventory();
+    };
+
+    console.log('%c INVENTORY UI PATCH APPLIED', 'color:#22c55e;font-weight:bold');
+})();
+
+// ═══════════════════════════════════════════════════════════════
+// 11K UNIT VARIETY PATCH — PROCEDURAL WEAPONS & SKILLS
+// ═══════════════════════════════════════════════════════════════
+(function() {
+    console.log('%c APPLYING 11K UNIT VARIETY PATCH...', 'color:#f97316;font-weight:bold');
+
+    const W_PREFIXES = ['Void', 'Star', 'Thunder', 'Blood', 'Iron', 'Ancient', 'Cyber', 'Neon', 'Holy', 'Cursed', 'Royal', 'Savage'];
+    const W_SUFFIXES = ['of Might', 'of Speed', 'of Ruin', 'of Mercy', 'of the Night', 'of the Sun', 'of Storms', 'of Steel', 'of Honor', 'of Chaos'];
+
+    const _origCreateUnit = createUnit;
+    window.createUnit = function(src, name, overrideGrade) {
+        const u = _origCreateUnit(src, name, overrideGrade);
+
+        // INJECT VARIETY: Pick skills from the massive expansion ABILITY_DB (200 skills)
+        // Give A/S/T0 units a 40% chance to start with a Rare ability
+        if(typeof ABILITY_DB !== 'undefined' && ['A','S','T0'].includes(u.grade) && Math.random() < 0.4) {
+            const rareAbilities = ABILITY_DB.filter(a => ['A','S','T0'].includes(a.rarity));
+            if(rareAbilities.length) {
+                const randAb = rareAbilities[~~(Math.random() * rareAbilities.length)];
+                const slot = ['skillA','skillB','skillC'][~~(Math.random()*3)];
+                u[slot] = {
+                    name: randAb.name,
+                    desc: randAb.desc,
+                    trigger: randAb.trigger,
+                    condition: randAb.condition,
+                    effect: randAb.effect
+                };
+            }
+        }
+
+        // GENERATE PROCEDURAL WEAPON (The "Prf" System)
+        // 30% chance for regular units, 100% for T0 units
+        if(u.grade === 'T0' || Math.random() < 0.3) {
+            const prefix = W_PREFIXES[~~(Math.random() * W_PREFIXES.length)];
+            const suffix = W_SUFFIXES[~~(Math.random() * W_SUFFIXES.length)];
+            const weaponBase = u.weapon.replace('Mag', ' Tome');
+            const weaponName = `${prefix} ${weaponBase} ${suffix}`;
+
+            // Apply random stat bump from the weapon
+            const statBump = ['atk','spd','def','res'][~~(Math.random()*4)];
+            u.baseStat[statBump] += 3;
+            u[statBump] += 3;
+
+            // Set the weapon name
+            u.weaponEffectName = weaponName;
+
+            // Attach a random ability from ABILITY_DB as the weapon's inherent effect
+            if(typeof ABILITY_DB !== 'undefined' && ABILITY_DB.length) {
+                const effectSource = ABILITY_DB[~~(Math.random() * ABILITY_DB.length)];
+                u.weaponEffect = effectSource.id || 'prf_weapon';
+                u.passives.push({
+                    name: '\u2694 ' + weaponName,
+                    desc: `Signature weapon. ${effectSource.desc}`,
+                    trigger: effectSource.trigger,
+                    condition: effectSource.condition,
+                    effect: effectSource.effect
+                });
+            }
+        }
+
+        // Rebuild passives list to include weapon passive and updated skill slots
+        u.passives = [u.skillA, u.skillB, u.skillC, u.skillS, ...u.passives.filter(p => p && p.name && p.name.startsWith('\u2694'))].filter(Boolean);
+
+        return u;
+    };
+
+    console.log('%c VARIETY PATCH APPLIED: Procedural Weapons Active', 'color:#22c55e;font-weight:bold');
 })();
 
 </script>
