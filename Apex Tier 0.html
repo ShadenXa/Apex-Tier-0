@@ -1484,14 +1484,16 @@ click:()=>zzfx(.1,800,.005,.01,.05,1),
 // ═══ INFINITE PROCEDURAL MUSIC ENGINE (KH STYLE) ═══
 class Maestro {
     constructor() {
-        this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+        this.ctx = null;
         this.tempo = 90;
         this.isPlaying = false;
         this.progressions = [[5, 1, 0, 4], [5, 3, 0, 4],[1, 4, 5, 3], [5, 4, 1, 3]];
         this.scale =[45, 47, 48, 50, 52, 53, 55, 57, 59, 60, 62, 64, 65, 67];
     }
+    _ensureCtx() { if(!this.ctx) this.ctx = new (window.AudioContext || window.webkitAudioContext)(); return this.ctx; }
     start() {
         if(this.isPlaying) return;
+        this._ensureCtx();
         this.ctx.resume();
         this.isPlaying = true;
         this.nextNoteTime = this.ctx.currentTime + 0.1;
@@ -1595,12 +1597,12 @@ const CLASSES=['Warden','Striker','Support','Duelist','Ravager','Sentinel','Tric
 const FACTION_SYNERGIES={
 Infernal:{2:{desc:'+8 Burn Dmg',apply:(u)=>u._burnBonus=8},4:{desc:'All attacks inflict Burn',apply:(u)=>u._alwaysBurn=true}},
 Cyber:   {2:{desc:'+5 SPD',apply:(u)=>u.factionSpdBuff=(u.factionSpdBuff||0)+5},4:{desc:'+10 SPD, immune to freeze',apply:(u)=>{u.factionSpdBuff=(u.factionSpdBuff||0)+10;u._immuneFreeze=true;}}}, // Bug #39: use factionSpdBuff
-Mystic:  {2:{desc:'+6 RES',apply:(u)=>{}},4:{desc:'Specials charge 1 faster',apply:(u)=>u.specialCharges=Math.max(0,(u.specialCharges||0)-1)}},
-Abyssal: {2:{desc:'+8 ATK',apply:(u)=>{}},4:{desc:'Crits deal 2× instead of 1.5×',apply:(u)=>u._megaCrit=true}},
-Verdant: {2:{desc:'Heals 8 HP/turn',apply:(u)=>{}},4:{desc:'Forest gives +4 DEF/+4 ATK',apply:(u)=>{}}},
-Celestial:{2:{desc:'+5 DEF/RES',apply:(u)=>{}},4:{desc:'Start turn with Shield active',apply:(u)=>u.shielded=true}},
-Ironclad:{2:{desc:'+10 DEF',apply:(u)=>{}},4:{desc:'All attacks reduce incoming damage 20%',apply:(u)=>u._shieldPct=0.2}},
-Phantom: {2:{desc:'Ignore terrain penalties',apply:(u)=>{}},4:{desc:'Can always counter regardless of range',apply:(u)=>u._distantCounter=true}},
+Mystic:  {2:{desc:'+6 RES',apply:(u)=>{u.res+=6;}},4:{desc:'Specials charge 1 faster',apply:(u)=>u.specialCharges=Math.max(0,(u.specialCharges||0)-1)}},
+Abyssal: {2:{desc:'+8 ATK',apply:(u)=>{u.atk+=8;}},4:{desc:'Crits deal 2× instead of 1.5×',apply:(u)=>u._megaCrit=true}},
+Verdant: {2:{desc:'Heals 8 HP/turn',apply:(u)=>{u._verdantHeal=8;}},4:{desc:'Forest gives +4 DEF/+4 ATK',apply:(u)=>{u._verdantForestAtk=4;u._verdantForestDef=4;}}},
+Celestial:{2:{desc:'+5 DEF/RES',apply:(u)=>{u.def+=5;u.res+=5;}},4:{desc:'Start turn with Shield active',apply:(u)=>u.shielded=true}},
+Ironclad:{2:{desc:'+10 DEF',apply:(u)=>{u.def+=10;}},4:{desc:'All attacks reduce incoming damage 20%',apply:(u)=>u._shieldPct=0.2}},
+Phantom: {2:{desc:'Ignore terrain penalties',apply:(u)=>{u._ignoreTerrainPenalty=true;}},4:{desc:'Can always counter regardless of range',apply:(u)=>u._distantCounter=true}},
 };
 const CLASS_SYNERGIES={
 Warden:  {2:{desc:'+6 DEF, fortify bonus ×2',apply:(u)=>{u.def+=6;}},3:{desc:'Allies in range get DEF+4',apply:(u)=>{u.def+=6;}}},
@@ -1737,7 +1739,7 @@ const C_SKILLS=[
 {id:'drive_atk',name:'Drive ATK 2',slot:'skillC',desc:'Grants nearby allies ATK+2 during combat',trigger:'Aura',condition:'Always',effect:{tag:'buff_atk',val:2}},
 {id:'threaten_spd',name:'Threaten SPD 3',slot:'skillC',desc:'Inflicts SPD-4 on foes within 2 spaces at start of turn',trigger:'TurnStart',condition:'Always',effect:{tag:'threat_spd',val:4}},
 {id:'hone_spd',name:'Hone SPD 3',slot:'skillC',desc:'Grants adjacent allies SPD+4 at start of turn',trigger:'TurnStart',condition:'Always',effect:{tag:'buff_spd',val:4}},
-{id:'fortify_res',name:'Fortify RES 3',slot:'skillC',desc:'Grants adjacent allies RES+4 at start of turn',trigger:'TurnStart',condition:'Always',effect:{tag:'buff_def',val:4}},
+{id:'fortify_res',name:'Fortify RES 3',slot:'skillC',desc:'Grants adjacent allies RES+4 at start of turn',trigger:'TurnStart',condition:'Always',effect:{tag:'buff_res',val:4}},
 {id:'goad_cav',name:'Goad Cavalry',slot:'skillC',desc:'Grants Cavalry allies ATK/SPD+4 during combat',trigger:'Aura',condition:'IsCavalry',effect:{tag:'spectrum',val:4}},
 {id:'ward_cav',name:'Ward Cavalry',slot:'skillC',desc:'Grants Cavalry allies DEF/RES+4 during combat',trigger:'Aura',condition:'IsCavalry',effect:{tag:'buff_def',val:4}},
 ];
@@ -2076,9 +2078,10 @@ const ctx=c.getContext('2d');
 c.width=window.innerWidth;c.height=window.innerHeight;
 const stars=Array.from({length:80},()=>({x:Math.random()*c.width,y:Math.random()*c.height,r:.3+Math.random()*1.5,s:.5+Math.random()*2,a:Math.random()}));
 function draw(){
+requestAnimationFrame(draw);
+if(document.hidden)return;
 ctx.fillStyle='rgba(6,8,14,.15)';ctx.fillRect(0,0,c.width,c.height);
 stars.forEach(s=>{s.a+=s.s*.008;ctx.fillStyle=`rgba(200,210,240,${.1+Math.sin(s.a)*.35})`;ctx.beginPath();ctx.arc(s.x,s.y,s.r,0,Math.PI*2);ctx.fill();});
-requestAnimationFrame(draw);
 }draw();
 window.addEventListener('resize',()=>{c.width=window.innerWidth;c.height=window.innerHeight;});
 })();
@@ -2088,6 +2091,8 @@ window.addEventListener('resize',()=>{c.width=window.innerWidth;c.height=window.
 const c=document.getElementById('homeEmblem'),ctx=c.getContext('2d');
 let t=0;
 function draw(){
+requestAnimationFrame(draw);
+if(document.hidden)return;
 ctx.clearRect(0,0,240,240);
 t+=.015;
 // Outer ring
@@ -2106,7 +2111,6 @@ ctx.restore();
 const grd=ctx.createRadialGradient(120,120,5,120,120,50);
 grd.addColorStop(0,`rgba(255,45,85,${.3+Math.sin(t*2)*.2})`);grd.addColorStop(1,'transparent');
 ctx.fillStyle=grd;ctx.fillRect(70,70,100,100);
-requestAnimationFrame(draw);
 }draw();
 })();
 
@@ -2115,6 +2119,8 @@ requestAnimationFrame(draw);
 const c=document.getElementById('orbCanvas'),ctx=c.getContext('2d');
 let t=0;
 function draw(){
+requestAnimationFrame(draw);
+if(document.hidden)return;
 ctx.clearRect(0,0,200,200);t+=.02;
 const g=ctx.createRadialGradient(70,60,10,100,100,90);
 g.addColorStop(0,'#fff8e0');g.addColorStop(.3,'#ffd700');g.addColorStop(.7,'#8a6000');g.addColorStop(1,'#3a2500');
@@ -2124,7 +2130,6 @@ ctx.fillStyle=`rgba(255,255,255,${.1+Math.sin(t*3)*.08})`;
 ctx.beginPath();ctx.ellipse(75,65,30,15,-.4,0,Math.PI*2);ctx.fill();
 // Shadow
 ctx.fillStyle='rgba(0,0,0,.3)';ctx.beginPath();ctx.ellipse(100,185,50,8,0,0,Math.PI*2);ctx.fill();
-requestAnimationFrame(draw);
 }draw();
 })();
 
@@ -2201,7 +2206,7 @@ card.style.cssText=`background:var(--panel);border:${isActive?'2px solid var(--g
 card.innerHTML=`
 <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;">
 <div>
-<div style="font-family:var(--display);font-size:.8rem;color:${isActive?'var(--gold)':'var(--text)'};letter-spacing:1px;font-weight:700">${isActive?'★ ':''}${label}</div>
+<div style="font-family:var(--display);font-size:.8rem;color:${isActive?'var(--gold)':'var(--text)'};letter-spacing:1px;font-weight:700">${isActive?'★ ':''}${esc(label)}</div>
 <div style="font-size:.6rem;color:var(--text2);font-family:var(--mono);margin-top:2px">${banner.isStandard?'All images equally weighted':focusImages.length+' focus heroes (4× rate)'}</div>
 </div>
 <div style="text-align:right;font-family:var(--mono);font-size:.55rem;line-height:1.6;">
@@ -2213,9 +2218,9 @@ card.innerHTML=`
 <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;">${thumbsHTML||'<span style="font-size:.6rem;color:var(--text3)">Upload images to populate</span>'}</div>
 <div style="display:flex;gap:8px;flex-wrap:wrap;">
 ${!banner.isStandard&&!banner.isAuto?`<button class="btn-t0" style="font-size:.68rem;padding:6px 14px" onclick="setActiveBanner('${banner.id}');refreshGacha()">SET ACTIVE</button>`:''}
-<button class="btn2 btn-sm" onclick="activeBannerIndex=${idx};${banner.isStandard||banner.isAuto?'S.activeBannerId=null;':''}startSession()">SESSION (5 AP)</button>
-<button class="btn2 btn-sm" onclick="activeBannerIndex=${idx};pull1()">1 PULL (5 AP)</button>
-<button class="btn2 btn-sm" onclick="activeBannerIndex=${idx};pull10()">10 PULL (40 AP)</button>
+<button class="btn2 btn-sm" onclick="setActiveBanner('${banner.id}');startSession()">SESSION (5 AP)</button>
+<button class="btn2 btn-sm" onclick="setActiveBanner('${banner.id}');pull1()">1 PULL (5 AP)</button>
+<button class="btn2 btn-sm" onclick="setActiveBanner('${banner.id}');pull10()">10 PULL (40 AP)</button>
 </div>
 ${isActive?'<div style="position:absolute;top:0;left:0;right:0;height:2px;background:var(--t0g);background-size:200% 200%;animation:t0shift 3s ease infinite"></div>':''}`;
 listEl.appendChild(card);
@@ -2262,7 +2267,7 @@ const gain=CFG.PLUS_PER_DUP;
 const before=existing.plus;
 existing.plus=Math.min(CFG.MAX_PLUS,existing.plus+gain);
 const gained=existing.plus-before;
-if(gained>0){const stats=['maxHp','atk','def','mag','res','spd'];stats.forEach(s=>{const boost=Math.ceil(gained/stats.length);existing[s]+=boost;const bsKey=s==='maxHp'?'hp':s;if(existing.baseStat)existing.baseStat[bsKey]+=boost;});}
+if(gained>0){const stats=['maxHp','atk','def','mag','res','spd'];for(let g=0;g<gained;g++){const s=stats[~~(Math.random()*stats.length)];existing[s]=(existing[s]||0)+1;const bsKey=s==='maxHp'?'hp':s;if(existing.baseStat)existing.baseStat[bsKey]=(existing.baseStat[bsKey]||0)+1;}}
 return{dup:true,unit:existing,gained};
 }
 const unit=createUnit(img.src,img.name,grade);
@@ -2514,7 +2519,7 @@ const container=mc.parentNode;const old=container.querySelector('.animated-portr
 const ti=new Image();ti.onload=()=>{u.img=ti;drawUnitPortrait(mc,u,140);};ti.src=u.src;
 drawUnitPortrait(mc,u,140);
 }
-document.getElementById('mName').textContent=esc(u.name)+(u.plus>0?` (+${u.plus})`:'');
+document.getElementById('mName').textContent=u.name+(u.plus>0?' (+'+u.plus+')':'');
 const gEl=document.getElementById('mGrade');gEl.textContent=GRADE_LABEL[u.grade];gEl.className='ucard-grade grade-'+u.grade;
 document.getElementById('mRole').textContent=u.role;
 document.getElementById('mWeapon').textContent=u.weapon;
@@ -2569,6 +2574,7 @@ if(modalIdx<0)return;
 if(!confirm(`Dismiss ${S.roster[modalIdx].name}?`))return;
 const ti=S.team.indexOf(modalIdx);if(ti>=0)S.team.splice(ti,1);
 S.team=S.team.map(t=>t>modalIdx?t-1:t);
+if(S.teamPresets)S.teamPresets=S.teamPresets.map(p=>{if(!p||!p.team)return p;return{...p,team:p.team.filter(t=>t!==modalIdx).map(t=>t>modalIdx?t-1:t)};});
 S.roster.splice(modalIdx,1);
 closeModal();save(true);refreshBarracks();toast('Dismissed.');
 }
@@ -2823,7 +2829,7 @@ B.hover={x:-1,y:-1};B.shaking=false;
 B.isCampaign=!!campaignData;B.campaignId=campaignData?.id||0;
 
 B.pUnits=pRoster.slice(0,CFG.TEAM_SIZE).map((u,i)=>{
-const bu=prepUnit(u,'player');bu.x=0;bu.y=Math.min(i,ms-1);return bu;
+const bu=prepUnit(u,'player');bu.x=Math.floor(i/ms);bu.y=i%ms;return bu;
 }).filter(u=>u.hp>0); // Bug #19: filter out zombie units (0 HP from Tempest carry-over)
 const eCnt=campaignData?campaignData.enemyCount:Math.max(1,B.pUnits.length);
 const eMult=campaignData?campaignData.enemyMult:1.0;
@@ -3124,7 +3130,8 @@ function getAtkRange(unit){
 const range=(['Bow','Dagger','Sniper'].includes(unit.weapon)||unit.role==='Sniper')?2:1; // Bug #20: add Dagger
 const cells=[];
 for(let dy=-range;dy<=range;dy++)for(let dx=-range;dx<=range;dx++){
-const d=Math.abs(dx)+Math.abs(dy);if(d===0||(range===2&&d===1)||d>range)continue;
+const d=Math.abs(dx)+Math.abs(dy);if(d===0||d>range)continue;
+if(d<range&&unit.weapon==='Bow')continue; // Bows are 2-only, daggers/snipers hit at 1 and 2
 const nx=unit.x+dx,ny=unit.y+dy;
 if(nx<0||ny<0||nx>=B.mapW||ny>=B.mapH)continue;
 const t=unitAt(nx,ny);
@@ -3163,7 +3170,7 @@ B.dangerCells=[...cells].map(k=>{const[x,y]=k.split(',');return{x:+x,y:+y};});
 }
 
 // ═══ DAMAGE CALC ════════════════════════════════════════════
-function calcDmg(atker,target,isSpecial=false){
+function calcDmg(atker,target,isSpecial=false,forecastMode=false){
 const isPhys=!['LightMag','DarkMag','AnimaMag'].includes(atker.weapon);
 let atkStat=isPhys?atker.atk:atker.mag;
 let defStat=isPhys?target.def:target.res;
@@ -3204,7 +3211,7 @@ if(p.effect.tag==='spectrum'){localAtkBuff+=p.effect.val;defStat-=p.effect.val*0
 });
 target.passives?.forEach(p=>{
 if((p.trigger==='OnDefend'||p.trigger==='TurnStart')&&evalCondition(p.condition,target,atker)){
-if(p.effect.tag==='buff_def')localDefBuff+=p.effect.val;
+if(p.effect.tag==='buff_def'||p.effect.tag==='buff_res')localDefBuff+=p.effect.val;
 // Bug #38: guard and dodge applied at end as final damage reduction, not stat modification
 if(p.effect.tag==='guard')target._guardReduction=(target._guardReduction||0)+p.effect.val;
 if(p.effect.tag==='spd_reduction'&&evalCondition('Speed>Target',target,atker)){target._dodgeReduction=0.35;}
@@ -3225,7 +3232,7 @@ if(p.effect.tag==='spectrum'){localAtkBuff+=p.effect.val;localSpdBuff+=p.effect.
 }
 // Buff defender if this adjacent unit is an ally of the target
 if(nearby.side===target.side&&Math.abs(nearby.x-target.x)+Math.abs(nearby.y-target.y)===1&&evalCondition(p.condition,nearby,target)){
-if(p.effect.tag==='buff_def')localDefBuff+=p.effect.val;
+if(p.effect.tag==='buff_def'||p.effect.tag==='buff_res')localDefBuff+=p.effect.val;
 if(p.effect.tag==='spectrum')localDefBuff+=p.effect.val;
 }
 });
@@ -3273,9 +3280,9 @@ if(atker._itemDefPierce){const itemDefStat=isPhys?target.def:target.res;dmg+=Mat
 if(target._itemFirstHitShield&&!target._firstHitTaken){dmg=Math.round(dmg*(1-target._itemFirstHitShield));target._firstHitTaken=true;}
 // Crit chance (Killing Edge: boosted crit)
 const critBonus=atker.weaponEffect==='killing_edge'?0.07:0;
-const crit=Math.random()<(.1+critBonus);
+const crit=forecastMode?false:Math.random()<(.1+critBonus);
 if(crit)dmg*=1.5;
-dmg*=.92+Math.random()*.16;
+if(!forecastMode)dmg*=.92+Math.random()*.16;
 return{dmg:Math.max(1,Math.round(dmg)),crit};
 }
 
@@ -3308,9 +3315,10 @@ function showFC(atker,target,isSpec,e){
 if(!S.forecastOn)return;
 // Save and restore _tempSpd to prevent stacking on repeated hover
 const savedAtkerSpd=atker._tempSpd;const savedTargetSpd=target._tempSpd;
+const savedGuard=target._guardReduction;const savedDodge=target._dodgeReduction;
 atker._tempSpd=0;target._tempSpd=0;
 const fc=document.getElementById('forecast');
-const d=calcDmg(atker,target,isSpec);
+const d=calcDmg(atker,target,isSpec,true);
 const dbl=doubles(atker,target);
 const wAdv=WEAPON_TRIANGLE[atker.weapon]===target.weapon;
 const wDis=WEAPON_TRIANGLE[target.weapon]===atker.weapon;
@@ -3325,11 +3333,12 @@ if(dbl)html+=`<div style="font-size:.55rem;color:var(--gold)">Double attack!</di
 html+=`<hr style="border:none;border-top:1px solid var(--border);margin:3px 0">`;
 html+=`<div style="font-size:.55rem;color:var(--text2)">${target.name} HP: ${target.hp}/${target.maxHp}</div>`;
 if(canCounter){
-const cd=calcDmg(target,atker,false);
+const cd=calcDmg(target,atker,false,true);
 html+=`<div class="fc-row"><span class="fc-lbl" style="font-size:.55rem">Counter</span><span class="fc-val" style="color:#f97316">${cd.dmg}</span></div>`;
 }
-// Restore saved speed buffs — don't let the forecast mutate combat state
+// Restore saved state — don't let the forecast mutate combat state
 atker._tempSpd=savedAtkerSpd;target._tempSpd=savedTargetSpd;
+target._guardReduction=savedGuard;target._dodgeReduction=savedDodge;
 fc.innerHTML=html;fc.classList.add('show');
 // Bug #4: Position forecast relative to viewport to prevent clipping
 let tx=e.clientX+10,ty=e.clientY-10;
@@ -4295,6 +4304,7 @@ function setTeamSize(val){
     save(true);
     // Trim current team if we shrank the size
     if(S.team.length>CFG.TEAM_SIZE)S.team=S.team.slice(0,CFG.TEAM_SIZE);
+    if(S.teamPresets)S.teamPresets=S.teamPresets.map(p=>p?{...p,team:p.team.slice(0,CFG.TEAM_SIZE)}:p);
     refreshBarracks();
 }
 
@@ -4376,7 +4386,9 @@ questProgress:d.questProgress??{},
 ghbCleared:d.ghbCleared??[],
 teamSize:d.teamSize??4,
 itemInventory:d.itemInventory??[],
-unlockedAbilities:d.unlockedAbilities??[]});
+unlockedAbilities:d.unlockedAbilities??[],
+teamPresets:d.teamPresets??[null,null,null,null,null],
+activePreset:d.activePreset??0});
 if(d.uid)uid=d.uid;
 if(d.currentBattleMode)currentBattleMode=d.currentBattleMode;
 if(d.currentBattleConfig)currentBattleConfig=d.currentBattleConfig;
@@ -4463,7 +4475,10 @@ refreshSettings();updateEloDisplay();
 
 function exportJSON(){
 const clean=S.roster.map(({img,...r})=>r);
-const data={...S,roster:clean,images:S.images.filter(i=>!i.isDefault)};
+const imgData=S.images.filter(i=>!i.isDefault);
+const totalSize=JSON.stringify(imgData).length;
+if(totalSize>5000000&&!confirm('Export includes '+(totalSize/1048576).toFixed(1)+'MB of images. Continue?'))return;
+const data={...S,roster:clean,images:imgData};
 const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
 const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='apex_tier0_save.json';a.click();
 toast('Exported!','ok');
@@ -4477,7 +4492,7 @@ const reader=new FileReader();reader.onload=ev=>{
 try{
 const d=JSON.parse(ev.target.result);
 if(d.roster)S.roster=d.roster;if(d.team)S.team=d.team;if(d.images)d.images.forEach(i=>{if(!S.images.find(x=>x.name===i.name))S.images.push(i);});
-if(d.elo!==undefined)S.elo=d.elo;if(d.ap!==undefined)S.ap=d.ap;
+if(d.elo!==undefined)S.elo=Math.max(0,Math.min(99999,d.elo||0));if(d.ap!==undefined)S.ap=Math.max(0,Math.min(99999,d.ap||0));
 // Bug #49: Sync uid to highest roster id to prevent collisions
 uid=Math.max(uid,...S.roster.map(u=>u.id||0));
 save(true);refreshSettings();updateEloDisplay();toast('Imported!','ok');
@@ -4493,7 +4508,11 @@ try{const db=await openIDB();db.transaction(IDB_STORE,'readwrite').objectStore(I
 S={ap:CFG.BASE_AP,pullCount:0,roster:[],team:[],images:[],elo:0,wins:0,totalBattles:0,soundOn:false,forecastOn:true,campaignDone:[],shards:0,teamSize:4,
 banners:[],activeBannerId:null,seals:[],trainingFloor:1,arenaScore:0,arenaWeek:0,
 loginStreak:0,lastLoginDate:'',quests:{daily:[],story:[],lastDailyDate:''},questProgress:{},gachaSession:null,
-itemInventory:[],unlockedAbilities:[]};
+itemInventory:[],unlockedAbilities:[],
+teamPresets:[null,null,null,null,null],activePreset:0,
+daycareSlots:[null,null],daycareBond:0,supportMap:{},fusionChildren:[],
+achievements:[],compendium:[],_fishCaught:0,
+apexTokens:0,apexMeter:0,profileTitle:'Rookie',unlockedTitles:['Rookie'],flapHighScore:0,kartWins:0};
 uid=0;initPlaceholders();toast('Reset complete');nav('home');
 }
 
@@ -4533,6 +4552,7 @@ const STORY_QUEST_DEFS=[
 function initQuests(){
 const today=new Date().toDateString();
 if(S.quests.lastDailyDate!==today){
+S.questProgress={};
 S.quests.daily=DAILY_QUEST_DEFS.slice(0,3).map(d=>({defId:d.id,progress:0,completed:false,claimed:false}));
 S.quests.lastDailyDate=today;
 }
@@ -5264,8 +5284,11 @@ if(el)el.classList.add('show');
 
 function claimLoginBonus(){
 const today=new Date().toDateString();
+const now=Date.now();
 if(S.lastLoginDate===today){document.getElementById('loginBonusModal').classList.remove('show');return;}
+if(S._lastLoginTs&&now-S._lastLoginTs<72000000){document.getElementById('loginBonusModal').classList.remove('show');return;}
 S.lastLoginDate=today;
+S._lastLoginTs=now;
 S.loginStreak=(S.loginStreak||0)+1;
 const ap=Math.min(5+S.loginStreak*2,30);
 S.ap+=ap;
@@ -5358,7 +5381,8 @@ if(grid){
 S.images.filter(i=>!i.isDefault).forEach((img,rawIdx)=>{
 const actualIdx=S.images.indexOf(img);
 const card=document.createElement('div');card.className='img-card';
-card.innerHTML=`<img src="${img.src}" title="${esc(img.name)}" draggable="false" style="width:100%;height:100%;object-fit:cover;pointer-events:none;">`
+const safeSrc=img.src&&img.src.startsWith('data:image/')?img.src:'';
+card.innerHTML=`<img src="${safeSrc}" title="${esc(img.name)}" draggable="false" style="width:100%;height:100%;object-fit:cover;pointer-events:none;">`
 +`${img.isAnimated?`<div class="img-card-anim-badge">GIF</div>`:''}<div class="img-card-name">${esc(img.name)}</div>
 <button class="img-card-del" onclick="event.stopPropagation();removeImage(${actualIdx})" title="Remove">✕</button>`;
 grid.appendChild(card);
@@ -5488,7 +5512,7 @@ const isActive=b.id===S.activeBannerId;
 const d=document.createElement('div');
 d.className='banner-list-item'+(isActive?' active-banner':'');
 d.innerHTML=`<div>
-  <div class="banner-list-item-name">${isActive?'★ ':''}${b.name}</div>
+  <div class="banner-list-item-name">${isActive?'★ ':''}${esc(b.name)}</div>
   <div class="banner-list-item-info">${b.heroNames?.length||0} focus heroes${isActive?' · ACTIVE':''}</div>
 </div>
 <div class="banner-actions">
@@ -6397,7 +6421,7 @@ B.phase='player';B.mode='select';B.sel=null;B.highlights=[];
 B.dangerZone=false;B.dangerCells=[];B.hover={x:-1,y:-1};B.shaking=false;
 let pRoster=S.team.map(i=>S.roster[i]).filter(Boolean);
 if(!pRoster.length)pRoster=S.roster.slice(0,4);
-B.pUnits=pRoster.slice(0,CFG.TEAM_SIZE).map((u,i)=>{const bu=prepUnit(u,'player');bu.x=0;bu.y=Math.min(i,ms-1);return bu;});
+B.pUnits=pRoster.slice(0,CFG.TEAM_SIZE).map((u,i)=>{const bu=prepUnit(u,'player');bu.x=Math.floor(i/ms);bu.y=i%ms;return bu;});
 B.eUnits=base.units.map((ud,i)=>{
 // Use stored spawn positions if present, otherwise default to right column
 const u={...ud,hp:ud.maxHp,x:ud.x??ms-1,y:ud.y??Math.min(i,ms-1),acted:false,moved:false,
@@ -7649,7 +7673,8 @@ renderSettingsImages = function(body) {
       const actualIdx = S.images.indexOf(img);
       const card = document.createElement('div');
       card.className = 'img-card';
-      card.innerHTML = `<img src="${img.src}" title="${esc(img.name)}" draggable="false" style="width:100%;height:100%;object-fit:cover;pointer-events:none;">`
+      const safeSrc=img.src&&img.src.startsWith('data:image/')?img.src:'';
+      card.innerHTML = `<img src="${safeSrc}" title="${esc(img.name)}" draggable="false" style="width:100%;height:100%;object-fit:cover;pointer-events:none;">`
         + `${img.isAnimated ? `<div class="img-card-anim-badge">GIF</div>` : ''}<div class="img-card-name">${esc(img.name)}</div>
         <button class="img-card-del" onclick="event.stopPropagation();removeImage(${actualIdx})" title="Remove">✕</button>`;
       grid.appendChild(card);
@@ -9865,7 +9890,7 @@ updateHomeScreen = function () {
     // ─── 4. MAESTRO V3: ADAPTIVE DYNAMIC MUSIC ──────────────
     class MaestroV3 {
         constructor() {
-            this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+            try { this.ctx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e) { this.ctx = null; }
             this.isPlaying = false;
             this.tempo = 88;
             this.intensity = 'menu'; // 'menu' | 'player' | 'enemy' | 'victory'
@@ -9888,27 +9913,34 @@ updateHomeScreen = function () {
                 victory: [[0,0],[5,5],[3,3],[0,0]], // i - v - iv - i (triumph)
             };
 
-            // Master chain with better routing
+            this._audioReady = false;
+            if(this.ctx) this._initAudio();
+
+            // State
+            this.beat = 0;
+            this.chordStep = 0;
+            this.prog = this.progressions.menu;
+            this.nextNoteTime = 0;
+        }
+
+        _initAudio() {
+            if(this._audioReady) return;
+            if(!this.ctx) try { this.ctx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e) { return; }
+            this._audioReady = true;
             this.masterGain = this.ctx.createGain();
             this.masterGain.gain.value = 0.30;
-
-            // Reverb
             this.reverb = this.ctx.createConvolver();
             this._buildImpulse(2.2, 2.8);
             this.reverbSend = this.ctx.createGain();
             this.reverbSend.gain.value = 0.20;
             this.dryGain = this.ctx.createGain();
             this.dryGain.gain.value = 0.80;
-
-            // Delay (dotted 8th for rhythmic interest)
             this.delay = this.ctx.createDelay(1.0);
             this.delay.delayTime.value = 60 / this.tempo * 0.75;
             this.delayFeedback = this.ctx.createGain();
             this.delayFeedback.gain.value = 0.25;
             this.delaySend = this.ctx.createGain();
             this.delaySend.gain.value = 0.12;
-
-            // Routing
             this.dryGain.connect(this.masterGain);
             this.reverb.connect(this.reverbSend);
             this.reverbSend.connect(this.masterGain);
@@ -9917,12 +9949,6 @@ updateHomeScreen = function () {
             this.delay.connect(this.delaySend);
             this.delaySend.connect(this.masterGain);
             this.masterGain.connect(this.ctx.destination);
-
-            // State
-            this.beat = 0;
-            this.chordStep = 0;
-            this.prog = this.progressions.menu;
-            this.nextNoteTime = 0;
         }
 
         _buildImpulse(decay, length) {
@@ -10054,6 +10080,8 @@ updateHomeScreen = function () {
 
         start() {
             if(this.isPlaying) return;
+            this._initAudio();
+            if(!this.ctx) return;
             try { this.ctx.resume(); } catch(e) {}
             this.isPlaying = true;
             this.nextNoteTime = this.ctx.currentTime + 0.1;
@@ -11470,22 +11498,40 @@ updateHomeScreen = function () {
         if(!code){toast('Enter a code first!','err');return;}
         try {
             const pack = JSON.parse(decodeURIComponent(atob(code)));
+            // Whitelist allowed unit properties to prevent prototype pollution
+            const UNIT_KEYS=['name','grade','role','weapon','moveType','maxHp','atk','def','mag','res','spd',
+                'baseStat','growthRates','level','exp','sp','plus','totalPulls','shards','special','passives',
+                'skillA','skillB','skillC','skillS','assist','boon','bane','weaponEffect','weaponEffectName',
+                'faction','unitClass','storyText','equippedItem','equippedAbilities','bonusStats',
+                'isAnimated','format','hue','originalImageName'];
+            function sanitizeUnit(raw) {
+                const u = {};
+                UNIT_KEYS.forEach(k => { if(raw[k] !== undefined) u[k] = raw[k]; });
+                ['name','role','weapon','moveType','storyText'].forEach(k => { if(typeof u[k]==='string') u[k]=esc(u[k]); });
+                ['maxHp','atk','def','mag','res','spd'].forEach(s => {
+                    u[s] = Math.max(1, Math.min(999, u[s] || 1));
+                    if(u.baseStat) { const bk=s==='maxHp'?'hp':s; u.baseStat[bk]=Math.max(1,Math.min(999,u.baseStat[bk]||1)); }
+                });
+                return u;
+            }
             if(pack.type==='APEX_UNIT') {
-                if(!S.images.find(i=>i.src===pack.img)) S.images.push({src:pack.img,name:pack.u.name,isDefault:false});
-                const newU=pack.u; uid++; newU.id=uid; newU.src=pack.img;
+                if(!S.images.find(i=>i.src===pack.img)) S.images.push({src:pack.img,name:esc(pack.u.name||''),isDefault:false});
+                const newU=sanitizeUnit(pack.u); uid++; newU.id=uid; newU.src=pack.img;
                 if(newU.equippedItem){newU.equippedItem.instanceId='item_'+uid+'_'+Date.now();}
                 S.roster.push(newU);
                 if(!S.compendium.includes(newU.name)) S.compendium.push(newU.name);
                 toast('Imported Unit: '+newU.name+'!','gold'); sfx('summon');
             } else if(pack.type==='APEX_BANNER') {
-                (pack.images||[]).forEach(img=>{if(!S.images.find(i=>i.src===img.src)) S.images.push({src:img.src,name:img.name,isDefault:false});});
+                (pack.images||[]).forEach(img=>{if(!S.images.find(i=>i.src===img.src)) S.images.push({src:img.src,name:esc(img.name||''),isDefault:false});});
                 const nb=pack.banner; nb.id='banner_'+Date.now(); nb.createdAt=Date.now();
+                nb.name=esc(nb.name||'Unnamed');
+                if(nb.heroNames)nb.heroNames=nb.heroNames.map(n=>esc(n));
                 if(!S.banners) S.banners=[];
                 S.banners.push(nb);
                 toast('Imported Banner: '+nb.name+'! (3 days)','gold'); sfx('victory');
             } else if(pack.type==='APEX_MERC') {
-                if(!S.images.find(i=>i.src===pack.img)) S.images.push({src:pack.img,name:pack.u.name,isDefault:false});
-                const merc=pack.u; uid++; merc.id=uid; merc.src=pack.img; merc.isMercenary=true;
+                if(!S.images.find(i=>i.src===pack.img)) S.images.push({src:pack.img,name:esc(pack.u.name||''),isDefault:false});
+                const merc=sanitizeUnit(pack.u); uid++; merc.id=uid; merc.src=pack.img; merc.isMercenary=true;
                 if(merc.equippedItem){merc.equippedItem.instanceId='item_'+uid+'_'+Date.now();}
                 S.roster.push(merc);
                 toast('Mercenary '+merc.name+' joined for 1 battle!','gold'); sfx('summon');
@@ -11583,15 +11629,12 @@ updateHomeScreen = function () {
     };
 
     // ─── 14. ADD V3.5 FIELDS TO SAVE DATA ───
-    // Ensure the save serialization includes new fields
-    const _origSaveData_v35 = window.save;
-    // The save function already serializes everything on S, but we need to ensure these keys persist:
-    // They are added to S initialization and the override ensures they exist before save runs.
+    // The save function already serializes everything on S.
+    // v3.5 fields are added to S initialization and persist automatically.
 
     console.log('%c  ✓ v3.5 APEX HQ Expansion loaded', 'color:#22c55e');
 })();
 
-</content>
-</invoke></script>
+</script>
 </body>
 </html>
