@@ -9889,6 +9889,12 @@ updateHomeScreen = function () {
             else if(id === 'home') bgm.setIntensity('menu');
         }
 
+        // Cancel map animation RAF immediately when leaving battle (don't wait for transition)
+        if(id !== 'battle' && typeof _mapAnimRAF !== 'undefined' && _mapAnimRAF) {
+            cancelAnimationFrame(_mapAnimRAF);
+            _mapAnimRAF = 0;
+        }
+
         const transType = TRANS_MAP[id] || 'fade';
         const layer = document.getElementById('transLayer');
         if(!layer) { _origNav(id); return; }
@@ -9915,13 +9921,20 @@ updateHomeScreen = function () {
 
         // At midpoint (450ms), do the actual screen switch
         setTimeout(() => {
-            _origNav(id);
+            try {
+                _origNav(id);
+
+                // Fix: Recalculate canvas after battle screen becomes visible
+                if(id === 'battle' && typeof resizeCanvas === 'function') resizeCanvas();
+            } catch(e) {
+                console.warn('Nav transition error:', e);
+            }
 
             // Reverse animation
             layer.classList.remove('in');
             layer.classList.add('out');
 
-            // Cleanup
+            // Cleanup — guaranteed to run even if _origNav threw
             setTimeout(() => {
                 layer.className = 'transition-layer';
                 layer.innerHTML = '';
