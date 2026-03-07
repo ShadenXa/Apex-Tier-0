@@ -1951,8 +1951,8 @@ const ASSIST_SKILLS=[
 
 // ═══ UNIT CREATION ══════════════════════════════════════════
 function rollGrade(guaranteeHigh=false){
-if(guaranteeHigh){S.pullCount=0;return Math.random()<.2?'T0':Math.random()<.5?'S':'A';} // Bug #17: reset pity on guaranteed
 if(S.pullCount>=CFG.PITY){S.pullCount=0;return Math.random()<.15?'T0':Math.random()<.4?'S':'A';}
+if(guaranteeHigh){return Math.random()<.2?'T0':Math.random()<.5?'S':'A';} // 10-pull guarantee (no pity reset)
 const r=Math.random()*100;let acc=0;
 for(const g of GRADES){acc+=GRADE_WEIGHTS[g];if(r<acc)return g;}
 return'D';
@@ -2447,6 +2447,8 @@ function clearTeam(){S.team=[];refreshBarracks();}
 
 function renameUnit(idx){
 const u=S.roster[idx];if(!u)return;
+// Preserve original image name so portraits survive rename+save round-trips
+if(!u.originalImageName){const matchedImg=S.images.find(i=>i.src===u.src);if(matchedImg)u.originalImageName=matchedImg.name;}
 const newName=prompt('Rename unit:',u.name);
 if(newName&&newName.trim()){u.name=newName.trim();refreshBarracks();save(true);}
 }
@@ -3253,6 +3255,9 @@ if(sp.effect==='def_to_dmg')dmg+=atker.def*sp.val;
 if(sp.effect==='res_to_dmg')dmg+=atker.res*sp.val;
 if(sp.effect==='def_ignore')dmg+=defStat*sp.val;
 if(sp.effect==='lowHp_boost')dmg*=(1+((atker.maxHp-atker.hp)/atker.maxHp)*sp.val*4);
+if(sp.effect==='multi_hit')dmg*=sp.val;
+if(sp.effect==='teleport_attack')dmg*=sp.val;
+if(sp.effect==='instant_kill')dmg=Math.random()<sp.val?9999:Math.round(dmg*3);
 // Wo Dao weapon effect: +10 DMG on specials
 if(atker.weaponEffect==='wo_dao')dmg+=10;
 }
@@ -3262,6 +3267,10 @@ if(target.shielded)dmg*=.5;
 if(target._guardReduction)dmg=Math.round(dmg*(1-Math.min(0.5,target._guardReduction)));
 if(target._dodgeReduction)dmg=Math.round(dmg*(1-target._dodgeReduction));
 delete target._guardReduction;delete target._dodgeReduction;
+// Item effects: def pierce adds % of target def as damage
+if(atker._itemDefPierce){const itemDefStat=isPhys?target.def:target.res;dmg+=Math.round(itemDefStat*atker._itemDefPierce);}
+// First hit shield: reduce first hit damage by item %
+if(target._itemFirstHitShield&&!target._firstHitTaken){dmg=Math.round(dmg*(1-target._itemFirstHitShield));target._firstHitTaken=true;}
 // Crit chance (Killing Edge: boosted crit)
 const critBonus=atker.weaponEffect==='killing_edge'?0.07:0;
 const crit=Math.random()<(.1+critBonus);
@@ -3288,6 +3297,8 @@ return true;
 }
 
 function doubles(atker,target){
+if(target&&target._itemAntiDouble)return false;
+if(atker&&atker._itemAlwaysDouble)return true;
 const spdBonus=(atker._tempSpd||0);
 return(atker.spd+spdBonus)>=target.spd+5;
 }
@@ -3454,6 +3465,9 @@ function markActed(u){u.acted=u.moved=true;delete u._tempSpd;}
 // ═══ COMBAT EXECUTION ═══════════════════════════════════════
 function performCombat(atker,target,isSpecial=false,isInitiating=true){
 if(!atker||!target)return;
+// Reset per-combat item flags
+if(atker){atker._firstHitTaken=false;atker._miracleUsed=false;}
+if(target&&target!==atker){target._firstHitTaken=false;target._miracleUsed=false;}
 const isSelf=atker===target;
 
 if(isSpecial&&isSelf){
@@ -3484,6 +3498,8 @@ bumpAnim(a,d);
 fireProjectile(a,d);
 const result=calcDmg(a,d,spec);
 d.hp=Math.max(0,d.hp-result.dmg);
+// Miracle item: survive one lethal hit per combat
+if(d.hp<=0&&d._itemMiracle&&!d._miracleUsed){d.hp=1;d._miracleUsed=true;if(typeof floatTxt==='function')floatTxt(d.x,d.y,'MIRACLE!','#00e5ff');bLog(`${d.name} survived by a miracle!`,'spec');}
 
 if(result.crit){
 screenShake();sfx('crit');
@@ -4315,7 +4331,8 @@ async function save(silent=false){
 try{
 // Bug #10: Strip src (image data) from roster to reduce save size
 // Bug #11: Filter out temporary Forma units and remap team indices
-const teamIds=S.team.map(idx=>S.roster[idx]?.id).filter(Boolean);
+// During HoF, use savedTeamIds so we don't wipe the original team
+const teamIds=(typeof hofState!=='undefined'&&hofState&&hofState.savedTeamIds)?hofState.savedTeamIds:S.team.map(idx=>S.roster[idx]?.id).filter(Boolean);
 const clean=S.roster.filter(u=>!u.isForma).map(({img,src,...r})=>({...r,equippedItem:r.equippedItem||null,equippedAbilities:r.equippedAbilities||[null,null]}));
 const cleanTeam=teamIds.map(id=>clean.findIndex(u=>u.id===id)).filter(idx=>idx>=0);
 const cleanPresets=S.teamPresets?S.teamPresets.map(p=>{if(!p||!p.team)return p;const pIds=p.team.map(idx=>S.roster[idx]?.id).filter(Boolean);return{...p,team:pIds.map(id=>clean.findIndex(u=>u.id===id)).filter(idx=>idx>=0)};}):S.teamPresets;
@@ -4412,9 +4429,9 @@ if(!u.faction&&typeof assignFactionClass==='function')assignFactionClass(u);
 u.equippedItem=u.equippedItem??null;
 u.equippedAbilities=u.equippedAbilities??[null,null];
 u.passives=[u.skillA,u.skillB,u.skillC,u.skillS].filter(Boolean);
-// Bug #10: Reconstruct src from images by name
+// Bug #10: Reconstruct src from images by name (try originalImageName first for renamed units)
 if(!u.src){
-const imgMatch=S.images.find(i=>i.name===u.name);
+const imgMatch=S.images.find(i=>i.name===(u.originalImageName||u.name));
 if(imgMatch)u.src=imgMatch.src;
 }
 });
@@ -6011,8 +6028,8 @@ ctx.fillText('★'.repeat(Math.min(u.prestige,3)),px+CS/2,py+1);
 
 // Override drawMap with enhanced version + self-sustaining RAF loop
 let _mapAnimRAF=0;
-const _origDrawMap=drawMap;
-function drawMap(){
+const _origDrawMap=window.drawMap;
+window.drawMap=function(){
 if(!B.ctx)return;
 try{drawMapEnhanced();}catch(e){_origDrawMap();}
 // Auto-start animation loop while battle is active so water/lava keep animating
@@ -6024,7 +6041,7 @@ _mapAnimRAF=requestAnimationFrame(_animLoop);
 }else{_mapAnimRAF=0;}
 });
 }
-}
+};
 
 // ═══ IV SYSTEM (BOONS / BANES) ═══════════════════════════════
 function applyIVs(unit){
@@ -7311,7 +7328,7 @@ openHeroDetail = function(idx) {
 // Allow right-clicking barracks cards to inspect full stats
 document.addEventListener('contextmenu', function(e) {
     const card = e.target.closest('.ucard');
-    if(card && !B.phase) {
+    if(card && (!B.phase || B.phase === 'over')) {
         e.preventDefault();
         const idx = [...card.parentNode.children].indexOf(card);
         const sorted = getSorted();
@@ -7329,7 +7346,7 @@ document.addEventListener('contextmenu', function(e) {
     let _brkLPCard = null;
     document.addEventListener('touchstart', function(e) {
         const card = e.target.closest('.ucard');
-        if(!card || B.phase) return;
+        if(!card || (B.phase && B.phase !== 'over')) return;
         _brkLPCard = card;
         _brkLPTimer = setTimeout(function() {
             // Show long-press ring feedback
@@ -9353,9 +9370,11 @@ updateHomeScreen = function () {
         // Create the fusion child via createUnit with the primary's image
         const child = createUnit(primary.src, childName, childGrade);
 
-        // Override stats: (parentA + parentB) / 1.8
+        // Override stats: (parentA + parentB) / 1.8 — guard against NaN from missing baseStat entries
         ['hp','atk','def','mag','res','spd'].forEach(stat => {
-            const fused = Math.round((uA.baseStat[stat] + uB.baseStat[stat]) / CHILD_STAT_DIVISOR);
+            const a = uA.baseStat[stat] || 0;
+            const b = uB.baseStat[stat] || 0;
+            const fused = Math.round((a + b) / CHILD_STAT_DIVISOR) || 15;
             child.baseStat[stat] = fused;
             child[stat] = fused;
             if(stat === 'hp') child.maxHp = fused;
@@ -10727,15 +10746,19 @@ updateHomeScreen = function () {
 
     const _origPrepUnit_v35 = window.prepUnit;
     window.prepUnit = function(unit, side) {
+        const hadTempestHp = unit.tempestHp !== undefined;
         const u = _origPrepUnit_v35.apply(this, arguments);
         if(u && side === 'player') {
             const bonusMult = 1 + getCompendiumBonus();
             if(bonusMult > 1) {
-                const oldMax = u.maxHp;
                 ['atk','def','mag','res','spd'].forEach(s => { u[s] = Math.floor(u[s] * bonusMult); });
                 u.maxHp = Math.floor(u.maxHp * bonusMult);
-                // Scale HP proportionally to preserve Tempest Trials carryover damage
-                u.hp = Math.floor(u.hp * (u.maxHp / oldMax));
+                // Only scale current HP if NOT carrying over from Tempest (already multiplied)
+                if(!hadTempestHp) {
+                    u.hp = u.maxHp;
+                }
+                // Clamp carryover HP to new maxHp
+                u.hp = Math.min(u.hp, u.maxHp);
             }
         }
         return u;
@@ -10764,7 +10787,7 @@ updateHomeScreen = function () {
     // ─── 5. FISHING (upgraded) ───
     let fishingState = 'idle';
     let fishTimer = null;
-    window._cleanupFishing = function() { fishingState = 'idle'; };
+    window._cleanupFishing = function() { if(fishTimer){clearTimeout(fishTimer);fishTimer=null;} fishingState = 'idle'; };
 
     const FISH_TITLES = ['Pond Scum','Lake Lurker','River Rat','Deep Diver','Kraken Slayer','Leviathan','Poseidon'];
 
@@ -11074,6 +11097,10 @@ updateHomeScreen = function () {
     window._cleanupFlap = function() { if(flapRAF){cancelAnimationFrame(flapRAF);flapRAF=0;} if(flapState)flapState.alive=false; };
 
     window.startFlap = function() {
+        // Cancel any existing game loop to prevent multiple overlapping loops
+        if(flapRAF) { cancelAnimationFrame(flapRAF); flapRAF = 0; }
+        if(flapState) flapState.alive = false;
+
         const unitSel = document.getElementById('flapUnit');
         const unitIdx = unitSel ? parseInt(unitSel.value) : -1;
         const unit = S.roster[unitIdx] || null;
@@ -11340,8 +11367,11 @@ updateHomeScreen = function () {
 
             // Grade: banner T0 chance tripled for focus
             let grade;
-            if(guaranteeHigh || S.pullCount >= CFG.PITY) {
+            if(S.pullCount >= CFG.PITY) {
                 S.pullCount = 0;
+                if(isFocus) grade = Math.random() < 0.45 ? 'T0' : Math.random() < 0.6 ? 'S' : 'A';
+                else grade = Math.random() < 0.15 ? 'T0' : Math.random() < 0.4 ? 'S' : 'A';
+            } else if(guaranteeHigh) {
                 if(isFocus) grade = Math.random() < 0.45 ? 'T0' : Math.random() < 0.6 ? 'S' : 'A';
                 else grade = Math.random() < 0.15 ? 'T0' : Math.random() < 0.4 ? 'S' : 'A';
             } else {
