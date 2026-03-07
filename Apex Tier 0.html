@@ -4314,9 +4314,12 @@ r.onsuccess=()=>res(r.result||[]);r.onerror=()=>rej(r.error);
 async function save(silent=false){
 try{
 // Bug #10: Strip src (image data) from roster to reduce save size
-// Bug #11: Filter out temporary Forma units
+// Bug #11: Filter out temporary Forma units and remap team indices
+const teamIds=S.team.map(idx=>S.roster[idx]?.id).filter(Boolean);
 const clean=S.roster.filter(u=>!u.isForma).map(({img,src,...r})=>({...r,equippedItem:r.equippedItem||null,equippedAbilities:r.equippedAbilities||[null,null]}));
-const sd={ap:S.ap,pullCount:S.pullCount,roster:clean,team:S.team,teamPresets:S.teamPresets,activePreset:S.activePreset,elo:S.elo,wins:S.wins,totalBattles:S.totalBattles,
+const cleanTeam=teamIds.map(id=>clean.findIndex(u=>u.id===id)).filter(idx=>idx>=0);
+const cleanPresets=S.teamPresets?S.teamPresets.map(p=>{if(!p||!p.team)return p;const pIds=p.team.map(idx=>S.roster[idx]?.id).filter(Boolean);return{...p,team:pIds.map(id=>clean.findIndex(u=>u.id===id)).filter(idx=>idx>=0)};}):S.teamPresets;
+const sd={ap:S.ap,pullCount:S.pullCount,roster:clean,team:cleanTeam,teamPresets:cleanPresets,activePreset:S.activePreset,elo:S.elo,wins:S.wins,totalBattles:S.totalBattles,
 soundOn:S.soundOn,musicTempo:bgm?bgm.tempo:90,forecastOn:S.forecastOn,campaignDone:S.campaignDone,shards:S.shards,uid,
 banners:S.banners,activeBannerId:S.activeBannerId,seals:S.seals,
 trainingFloor:S.trainingFloor,arenaScore:S.arenaScore,arenaWeek:S.arenaWeek,
@@ -4456,7 +4459,7 @@ const f=e.target.files[0];if(!f)return;
 const reader=new FileReader();reader.onload=ev=>{
 try{
 const d=JSON.parse(ev.target.result);
-if(d.roster)S.roster=d.roster;if(d.team)S.team=d.team;if(d.images)d.images.forEach(i=>S.images.push(i));
+if(d.roster)S.roster=d.roster;if(d.team)S.team=d.team;if(d.images)d.images.forEach(i=>{if(!S.images.find(x=>x.name===i.name))S.images.push(i);});
 if(d.elo!==undefined)S.elo=d.elo;if(d.ap!==undefined)S.ap=d.ap;
 // Bug #49: Sync uid to highest roster id to prevent collisions
 uid=Math.max(uid,...S.roster.map(u=>u.id||0));
@@ -7462,6 +7465,7 @@ toast('Content Expansion loaded!', 'gold');
     };
 
     // stack_spd (Haste) + item regen at turn boundary
+    // Player units regen at start of player phase (end of enemy phase)
     const _origEEP = endEnemyPhase;
     endEnemyPhase = function(){
         B.allUnits.filter(u=>u.hp>0).forEach(u=>{
@@ -7471,11 +7475,21 @@ toast('Content Expansion loaded!', 'gold');
                     if(u._stackedSpd<12){ const add=Math.min(p.effect.val,12-u._stackedSpd); u.spd+=add; u._stackedSpd+=add; }
                 }
             });
-            if(u._itemRegen&&u._itemRegen>0&&u.hp<u.maxHp){
+            if(u.side==='player'&&u._itemRegen&&u._itemRegen>0&&u.hp<u.maxHp){
                 const h=Math.min(u._itemRegen,u.maxHp-u.hp); u.hp+=h; floatTxt(u.x,u.y,'+'+h,'#22c55e');
             }
         });
         _origEEP();
+    };
+    // Enemy units regen at start of enemy phase (end of player phase)
+    const _origEPPRegen = endPlayerPhase;
+    endPlayerPhase = function(){
+        B.allUnits.filter(u=>u.hp>0&&u.side==='enemy').forEach(u=>{
+            if(u._itemRegen&&u._itemRegen>0&&u.hp<u.maxHp){
+                const h=Math.min(u._itemRegen,u.maxHp-u.hp); u.hp+=h; floatTxt(u.x,u.y,'+'+h,'#22c55e');
+            }
+        });
+        _origEPPRegen.apply(this,arguments);
     };
 
     // post_combat_debuff_atk + on-hit item effects + lifesteal + reflect
@@ -10159,9 +10173,9 @@ updateHomeScreen = function () {
 
         // Kill minigame loops when leaving APEX HQ
         if(id !== 'tavern') {
-            if(typeof kartRAF !== 'undefined' && kartRAF) { cancelAnimationFrame(kartRAF); kartRAF = 0; if(typeof kartState !== 'undefined' && kartState) kartState.finished = true; }
-            if(typeof flapRAF !== 'undefined' && flapRAF) { cancelAnimationFrame(flapRAF); flapRAF = 0; if(typeof flapState !== 'undefined' && flapState) flapState.alive = false; }
-            if(typeof fishingState !== 'undefined') fishingState = 'idle';
+            if(typeof _cleanupKart === 'function') _cleanupKart();
+            if(typeof _cleanupFlap === 'function') _cleanupFlap();
+            if(typeof _cleanupFishing === 'function') _cleanupFishing();
         }
 
         const transType = TRANS_MAP[id] || 'fade';
@@ -10750,6 +10764,7 @@ updateHomeScreen = function () {
     // ─── 5. FISHING (upgraded) ───
     let fishingState = 'idle';
     let fishTimer = null;
+    window._cleanupFishing = function() { fishingState = 'idle'; };
 
     const FISH_TITLES = ['Pond Scum','Lake Lurker','River Rat','Deep Diver','Kraken Slayer','Leviathan','Poseidon'];
 
@@ -10845,6 +10860,7 @@ updateHomeScreen = function () {
     let kartState = null;
     let kartRAF = 0;
     window.kartInput = {left:false,right:false,brake:false,drift:false,item:false};
+    window._cleanupKart = function() { if(kartRAF){cancelAnimationFrame(kartRAF);kartRAF=0;} if(kartState)kartState.finished=true; };
 
     window.startKart = function() {
         const trackSel = document.getElementById('kartTrack');
@@ -11055,6 +11071,7 @@ updateHomeScreen = function () {
     // ─── 7. APEX FLAP ───
     let flapState = null;
     let flapRAF = 0;
+    window._cleanupFlap = function() { if(flapRAF){cancelAnimationFrame(flapRAF);flapRAF=0;} if(flapState)flapState.alive=false; };
 
     window.startFlap = function() {
         const unitSel = document.getElementById('flapUnit');
@@ -11426,6 +11443,7 @@ updateHomeScreen = function () {
             if(pack.type==='APEX_UNIT') {
                 if(!S.images.find(i=>i.src===pack.img)) S.images.push({src:pack.img,name:pack.u.name,isDefault:false});
                 const newU=pack.u; uid++; newU.id=uid; newU.src=pack.img;
+                if(newU.equippedItem){newU.equippedItem.instanceId='item_'+uid+'_'+Date.now();}
                 S.roster.push(newU);
                 if(!S.compendium.includes(newU.name)) S.compendium.push(newU.name);
                 toast('Imported Unit: '+newU.name+'!','gold'); sfx('summon');
@@ -11438,6 +11456,7 @@ updateHomeScreen = function () {
             } else if(pack.type==='APEX_MERC') {
                 if(!S.images.find(i=>i.src===pack.img)) S.images.push({src:pack.img,name:pack.u.name,isDefault:false});
                 const merc=pack.u; uid++; merc.id=uid; merc.src=pack.img; merc.isMercenary=true;
+                if(merc.equippedItem){merc.equippedItem.instanceId='item_'+uid+'_'+Date.now();}
                 S.roster.push(merc);
                 toast('Mercenary '+merc.name+' joined for 1 battle!','gold'); sfx('summon');
             } else { toast('Unrecognized Code Format.','err'); }
@@ -11508,17 +11527,22 @@ updateHomeScreen = function () {
         if(B.phase === 'over') {
             const mercs = S.roster.filter(u => u.isMercenary);
             if(mercs.length > 0) {
-                // Save current team IDs to survive the roster shift
+                // Save current team/preset IDs BEFORE filtering to survive the roster shift
                 const teamIds = S.team.map(idx => S.roster[idx]?.id).filter(Boolean);
+                const presetIds = S.teamPresets ? S.teamPresets.map(p => {
+                    if(!p || !p.team) return null;
+                    return {...p, _ids: p.team.map(idx => S.roster[idx]?.id).filter(Boolean)};
+                }) : null;
                 S.roster = S.roster.filter(u => !u.isMercenary);
                 // Remap team indices
                 S.team = teamIds.map(id => S.roster.findIndex(u => u.id === id)).filter(idx => idx >= 0);
                 // Remap preset indices
-                if(S.teamPresets) {
-                    S.teamPresets = S.teamPresets.map(p => {
-                        if(!p || !p.team) return null;
-                        const pIds = p.team.map(idx => S.roster[idx]?.id).filter(Boolean);
-                        return {...p, team: pIds.map(id => S.roster.findIndex(u => u.id === id)).filter(idx => idx >= 0)};
+                if(presetIds) {
+                    S.teamPresets = presetIds.map(p => {
+                        if(!p) return null;
+                        const team = p._ids.map(id => S.roster.findIndex(u => u.id === id)).filter(idx => idx >= 0);
+                        const {_ids, ...rest} = p;
+                        return {...rest, team};
                     });
                 }
                 save(true);
