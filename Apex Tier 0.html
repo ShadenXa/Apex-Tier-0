@@ -786,37 +786,32 @@ input[type=range]{accent-color:var(--t0);width:100px}
 .class-btn:hover{border-color:var(--accent);color:var(--accent)}
 .class-btn.current{background:var(--accent);color:#fff;border-color:var(--accent);cursor:default}
 /* ═══ SCREEN TRANSITIONS ═══ */
-.transition-layer{position:fixed;top:0;left:0;width:100%;height:100%;z-index:9999;pointer-events:none;display:none}
+.transition-layer{position:fixed;inset:0;z-index:10000;pointer-events:none;display:none}
 .transition-layer.active{display:block;pointer-events:all}
-/* Cyber Shutter (battle) */
-.trans-shutter{background:transparent}
-.trans-shutter .sbar-l,.trans-shutter .sbar-r{position:absolute;width:100%;height:50%;background:var(--bg);left:0}
+/* Cyber Shutter (battle) — glowing neon borders */
+.trans-shutter .sbar-l,.trans-shutter .sbar-r{position:absolute;left:0;width:100%;height:50.5%;background:#0a0e18;border:1px solid var(--t0);box-shadow:0 0 30px rgba(255,45,85,.4)}
 .trans-shutter .sbar-l{top:0;transform:translateY(-100%)}
 .trans-shutter .sbar-r{bottom:0;transform:translateY(100%)}
-.trans-shutter.in .sbar-l{animation:shutterIn .3s ease-out forwards}
-.trans-shutter.in .sbar-r{animation:shutterIn .3s ease-out forwards}
-.trans-shutter.out .sbar-l{animation:shutterOut .3s ease-in forwards}
-.trans-shutter.out .sbar-r{animation:shutterOut .3s ease-in forwards}
-@keyframes shutterIn{to{transform:translateY(0)}}
-@keyframes shutterOut{to{transform:translateY(-100%)}}
-.trans-shutter.out .sbar-r{animation-name:shutterOutR}
-@keyframes shutterOutR{to{transform:translateY(100%)}}
-/* Gate of Light (summon) */
-.trans-light{background:transparent}
-.trans-light .flash{position:absolute;top:0;left:0;width:100%;height:100%;background:radial-gradient(circle,#ffd70088,#fff 40%,#ffd70066);opacity:0}
+.trans-shutter.in .sbar-l,.trans-shutter.in .sbar-r{animation:shutIn .4s cubic-bezier(.7,0,.3,1) forwards}
+.trans-shutter.out .sbar-l{animation:shutOutL .4s cubic-bezier(.7,0,.3,1) forwards}
+.trans-shutter.out .sbar-r{animation:shutOutR .4s cubic-bezier(.7,0,.3,1) forwards}
+@keyframes shutIn{to{transform:translateY(0)}}
+@keyframes shutOutL{from{transform:translateY(0)}to{transform:translateY(-100%)}}
+@keyframes shutOutR{from{transform:translateY(0)}to{transform:translateY(100%)}}
+/* Gate of Light (summon) — bright white flash */
+.trans-light .flash{position:absolute;inset:0;background:#fff;opacity:0}
 .trans-light.in .flash{animation:lightFlash .5s ease-out forwards}
-.trans-light.out .flash{animation:lightFadeOut .3s ease-in forwards}
-@keyframes lightFlash{0%{opacity:0;transform:scale(0.5)}40%{opacity:1;transform:scale(1.2)}100%{opacity:1;transform:scale(1)}}
-@keyframes lightFadeOut{to{opacity:0;transform:scale(1.5)}}
-/* Soft Fade (daycare/settings) */
-.trans-fade{background:transparent}
-.trans-fade .blur{position:absolute;top:0;left:0;width:100%;height:100%;background:var(--bg);opacity:0}
-.trans-fade.in .blur{animation:fadeIn .3s ease-out forwards}
-.trans-fade.out .blur{animation:fadeOutT .3s ease-in forwards}
+.trans-light.out .flash{animation:lightFadeOut .4s ease-in forwards}
+@keyframes lightFlash{0%{opacity:0}100%{opacity:1}}
+@keyframes lightFadeOut{from{opacity:1}to{opacity:0}}
+/* Soft Fade — visible black overlay */
+.trans-fade .blur{position:absolute;inset:0;background:#000;opacity:0}
+.trans-fade.in .blur{animation:fadeIn .35s ease-out forwards}
+.trans-fade.out .blur{animation:fadeOutT .35s ease-in forwards}
 @keyframes fadeIn{to{opacity:1}}
 @keyframes fadeOutT{from{opacity:1}to{opacity:0}}
 /* Slide (barracks/settings) */
-.trans-slide{background:transparent;overflow:hidden}
+.trans-slide{overflow:hidden}
 .trans-slide .panel{position:absolute;top:0;width:100%;height:100%;background:var(--bg)}
 .trans-slide.slide-left .panel{left:100%}
 .trans-slide.slide-right .panel{right:100%}
@@ -4139,7 +4134,11 @@ if(d.uid)uid=d.uid;
 if(d.currentBattleMode)currentBattleMode=d.currentBattleMode;
 if(d.currentBattleConfig)currentBattleConfig=d.currentBattleConfig;
 if(d.currentDifficulty)currentDifficulty=d.currentDifficulty;
-// gachaPendingRefund removed — AP is deducted directly on orb pick, no refund needed
+// Restore daycare & support systems from save
+if(d.daycareSlots)S.daycareSlots=d.daycareSlots;
+if(d.daycareBond!==undefined)S.daycareBond=d.daycareBond;
+if(d.supportMap)S.supportMap=d.supportMap;
+if(d.fusionChildren)S.fusionChildren=d.fusionChildren;
 }else if(idbImgs.length)S.images=idbImgs;
 // Migrate all roster units
 // Restore team size from save
@@ -4183,11 +4182,6 @@ if(!S.banners)S.banners=[];
 if(!S.activeBannerId)S.activeBannerId=null;
 if(!S.seals)S.seals=[];
 if(!S.teamPresets||!Array.isArray(S.teamPresets))S.teamPresets=[null,null,null,null,null];
-// Restore daycare & support systems
-if(d.daycareSlots)S.daycareSlots=d.daycareSlots;
-if(d.daycareBond!==undefined)S.daycareBond=d.daycareBond;
-if(d.supportMap)S.supportMap=d.supportMap;
-if(d.fusionChildren)S.fusionChildren=d.fusionChildren;
 // Sanitize team — remove indices that point beyond roster length
 S.team=S.team.filter(idx=>idx>=0&&idx<S.roster.length);
 // Sanitize daycare — remove unit IDs that no longer exist
@@ -9560,17 +9554,15 @@ updateHomeScreen = function () {
     }, {passive: false});
 
     // ─── 3. NULL GUARD WRAPPERS ──────────────────────────────
-    // Safely access special.cd — used in many places
-    const _origMarkActed = markActed;
     // Guard all special accesses in battle preparation
-    const _origPrepBattleUnit = prepBattleUnit;
-    if(typeof prepBattleUnit === 'function') {
-        window.prepBattleUnit = function(unit, side) {
-            const u = _origPrepBattleUnit(unit, side);
+    if(typeof prepUnit === 'function') {
+        const _origPrepUnit = prepUnit;
+        window.prepUnit = function(unit, side) {
+            const u = _origPrepUnit(unit, side);
             if(u && !u.special) {
                 u.special = {name:'None',desc:'No special skill',effect:'none',val:0,cd:99};
             }
-            u.specialCharges = u.special ? u.special.cd : 0;
+            if(u) u.specialCharges = u.special ? u.special.cd : 0;
             return u;
         };
     }
@@ -9891,11 +9883,18 @@ updateHomeScreen = function () {
         const currentScreen = document.querySelector('.screen.active');
         if(currentScreen && currentScreen.id === id) return;
 
+        // Set music intensity based on destination
+        if(bgm && bgm.setIntensity) {
+            if(id === 'battle') bgm.setIntensity('player');
+            else if(id === 'home') bgm.setIntensity('menu');
+        }
+
         const transType = TRANS_MAP[id] || 'fade';
         const layer = document.getElementById('transLayer');
         if(!layer) { _origNav(id); return; }
 
         _transActive = true;
+        layer.innerHTML = '';
 
         // Build transition DOM
         let inner = '';
@@ -9914,7 +9913,7 @@ updateHomeScreen = function () {
         }
         layer.innerHTML = inner;
 
-        // At midpoint, do the actual screen switch
+        // At midpoint (450ms), do the actual screen switch
         setTimeout(() => {
             _origNav(id);
 
@@ -9927,19 +9926,8 @@ updateHomeScreen = function () {
                 layer.className = 'transition-layer';
                 layer.innerHTML = '';
                 _transActive = false;
-            }, 350);
-        }, 300);
-    };
-
-    // Hook MaestroV3 intensity changes into nav
-    const _origNav2 = window.nav;
-    window.nav = function(id) {
-        // Set music intensity based on destination
-        if(bgm && bgm.setIntensity) {
-            if(id === 'battle') bgm.setIntensity('player');
-            else bgm.setIntensity('menu');
-        }
-        _origNav2(id);
+            }, 500);
+        }, 450);
     };
 
     // Hook into battle phase changes for music intensity
@@ -10092,6 +10080,22 @@ updateHomeScreen = function () {
     console.log('%c  ✓ hdDismiss full cleanup', 'color:#22c55e');
     console.log('%c  ✓ Loop guards on edge-case while loops', 'color:#22c55e');
     console.log('%c  ✓ Battle log turn timestamps', 'color:#22c55e');
+
+    // ─── 10. AUTO-LORE GENERATION ON HERO DETAIL ─────────────
+    // Ensure lore is always populated even if storyText is empty
+    const _origOpenHDFinal = openHeroDetail;
+    window.openHeroDetail = function(idx) {
+        _origOpenHDFinal(idx);
+        const u = S.roster[idx];
+        const loreEl = document.getElementById('hdLore');
+        if(u && loreEl && typeof generateLore === 'function') {
+            if(!u.storyText || u.storyText.trim() === '') {
+                loreEl.textContent = generateLore(u);
+            }
+        }
+    };
+
+    console.log('%c  ✓ Auto-lore generation on hero detail', 'color:#22c55e');
 })();
 
 </script>
