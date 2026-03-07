@@ -10157,6 +10157,13 @@ updateHomeScreen = function () {
             _mapAnimRAF = 0;
         }
 
+        // Kill minigame loops when leaving APEX HQ
+        if(id !== 'tavern') {
+            if(typeof kartRAF !== 'undefined' && kartRAF) { cancelAnimationFrame(kartRAF); kartRAF = 0; if(typeof kartState !== 'undefined' && kartState) kartState.finished = true; }
+            if(typeof flapRAF !== 'undefined' && flapRAF) { cancelAnimationFrame(flapRAF); flapRAF = 0; if(typeof flapState !== 'undefined' && flapState) flapState.alive = false; }
+            if(typeof fishingState !== 'undefined') fishingState = 'idle';
+        }
+
         const transType = TRANS_MAP[id] || 'fade';
         const layer = document.getElementById('transLayer');
         if(!layer) { _origNav(id); return; }
@@ -10710,9 +10717,11 @@ updateHomeScreen = function () {
         if(u && side === 'player') {
             const bonusMult = 1 + getCompendiumBonus();
             if(bonusMult > 1) {
+                const oldMax = u.maxHp;
                 ['atk','def','mag','res','spd'].forEach(s => { u[s] = Math.floor(u[s] * bonusMult); });
                 u.maxHp = Math.floor(u.maxHp * bonusMult);
-                u.hp = u.maxHp;
+                // Scale HP proportionally to preserve Tempest Trials carryover damage
+                u.hp = Math.floor(u.hp * (u.maxHp / oldMax));
             }
         }
         return u;
@@ -11499,8 +11508,19 @@ updateHomeScreen = function () {
         if(B.phase === 'over') {
             const mercs = S.roster.filter(u => u.isMercenary);
             if(mercs.length > 0) {
-                mercs.forEach(m => { const idx = S.team.indexOf(S.roster.indexOf(m)); if(idx >= 0) S.team.splice(idx, 1); });
+                // Save current team IDs to survive the roster shift
+                const teamIds = S.team.map(idx => S.roster[idx]?.id).filter(Boolean);
                 S.roster = S.roster.filter(u => !u.isMercenary);
+                // Remap team indices
+                S.team = teamIds.map(id => S.roster.findIndex(u => u.id === id)).filter(idx => idx >= 0);
+                // Remap preset indices
+                if(S.teamPresets) {
+                    S.teamPresets = S.teamPresets.map(p => {
+                        if(!p || !p.team) return null;
+                        const pIds = p.team.map(idx => S.roster[idx]?.id).filter(Boolean);
+                        return {...p, team: pIds.map(id => S.roster.findIndex(u => u.id === id)).filter(idx => idx >= 0)};
+                    });
+                }
                 save(true);
                 toast(mercs.length === 1 ? 'Mercenary ' + mercs[0].name + ' departed.' : mercs.length + ' mercs departed.', '');
             }
