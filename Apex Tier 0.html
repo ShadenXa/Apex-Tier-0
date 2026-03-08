@@ -854,7 +854,7 @@ input[type=range]{accent-color:var(--t0);width:100px}
   .dc-slot{padding:14px;min-height:140px}
 }
 
-/* ═══ v3.0 — ACHIEVEMENTS, COMPENDIUM, FISHING, TRADES ═══ */
+/* ═══ v3.0 — ACHIEVEMENTS, COMPENDIUM, TRADES ═══ */
 .achieve-toast{position:fixed;top:-100px;left:50%;transform:translateX(-50%);background:linear-gradient(135deg,rgba(251,191,36,.95),rgba(255,107,53,.95));border:2px solid #fff;border-radius:8px;padding:12px 20px;color:#fff;z-index:11000;box-shadow:0 10px 30px rgba(0,0,0,.8);text-align:center;transition:top .4s cubic-bezier(.34,1.56,.64,1);pointer-events:none}
 .achieve-toast.show{top:20px}
 .achieve-title{font-family:var(--display);font-size:1rem;font-weight:900;letter-spacing:2px;text-shadow:0 2px 4px rgba(0,0,0,.5)}
@@ -862,10 +862,6 @@ input[type=range]{accent-color:var(--t0);width:100px}
 .compendium-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(60px,1fr));gap:6px;margin-top:12px}
 .comp-slot{width:60px;height:60px;border-radius:8px;border:2px solid var(--border);background:var(--panel2);opacity:.4;filter:grayscale(100%);transition:all .3s;object-fit:cover}
 .comp-slot.unlocked{opacity:1;filter:grayscale(0%);border-color:var(--gold);box-shadow:0 0 10px rgba(251,191,36,.3)}
-.fishing-pond{width:100%;height:200px;background:linear-gradient(180deg,#0a1828,#0f223a);border:2px solid var(--blue);border-radius:12px;position:relative;overflow:hidden;margin-bottom:12px}
-.fish-bobber{width:16px;height:16px;background:var(--red);border:2px solid #fff;border-radius:50%;position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);transition:top .1s}
-.fish-ripple{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:0;height:0;border:2px solid rgba(0,229,255,.5);border-radius:50%;animation:ripple 1.5s infinite}
-@keyframes ripple{0%{width:10px;height:10px;opacity:1}100%{width:80px;height:80px;opacity:0}}
 .code-textarea{width:100%;height:80px;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:var(--mono);font-size:.6rem;padding:8px;border-radius:6px;resize:none;margin-bottom:8px}
 /* HQ Tabs */
 .hq-tab{display:none;flex:1;overflow:hidden}
@@ -904,7 +900,7 @@ input[type=range]{accent-color:var(--t0);width:100px}
 <button class="btn2" style="flex:1" onclick="nav('modes')" data-tip="Training Tower, Arena, GHB, Tempest Trials, Hall of Forms, and more">MODES</button>
 </div>
 <button class="btn2" onclick="chooseDifficulty(()=>{currentBattleMode='ladder';currentBattleConfig=null;startBattle();})" data-tip="Quick battle to climb the ELO ladder and earn AP">LADDER BATTLE</button>
-<button class="btn2" style="border-color:#00e5ff;color:#00e5ff" onclick="nav('tavern')" data-tip="Minigames, racing, achievements, trades, compendium, profile titles">APEX HQ</button>
+<button class="btn2" style="border-color:#00e5ff;color:#00e5ff" onclick="nav('tavern')" data-tip="Tokens, achievements, trades, compendium, profile titles">APEX HQ</button>
 <button class="btn2" onclick="nav('settings')" data-tip="Upload images, configure battle options, manage banners and save data">SETTINGS</button>
 </div>
 <div style="font-family:var(--mono);font-size:.65rem;color:var(--text3);max-width:280px;line-height:1.7">Upload images to create Infinite Units. Climb the Elo ladder from Iron to Tier 0.</div>
@@ -1187,7 +1183,7 @@ input[type=range]{accent-color:var(--t0);width:100px}
 </div>
 </div>
 
-<!-- APEX HQ (Minigames & Social) -->
+<!-- APEX HQ (Tokens & Social) -->
 <div class="screen" id="tavern">
 <div class="hdr"><div class="hdr-logo">APEX HQ</div>
 <div style="font-family:var(--mono);font-size:.6rem;color:var(--gold);margin-left:8px" id="hqTokens">0 AT</div>
@@ -1195,7 +1191,7 @@ input[type=range]{accent-color:var(--t0);width:100px}
 
 <!-- Tabs -->
 <div class="settings-tabs" id="hqTabs">
-<button class="stab active" onclick="setHQTab('minigames')">GAMES</button>
+<button class="stab active" onclick="setHQTab('minigames')">TOKENS</button>
 <button class="stab" onclick="setHQTab('achievements')">MEDALS</button>
 <button class="stab" onclick="setHQTab('multiplayer')">MULTI</button>
 <button class="stab" onclick="setHQTab('compendium')">CODEX</button>
@@ -1218,57 +1214,10 @@ input[type=range]{accent-color:var(--t0);width:100px}
 </div>
 <div style="font-family:var(--display);font-size:1rem;color:var(--gold)" id="atCount">0</div>
 </div>
-<p style="font-size:.6rem;color:var(--text2)">Earn meter from minigames &amp; battles. At 100% you earn 1 Apex Token — spend it to get a free copy of any unit you own!</p>
+<p style="font-size:.6rem;color:var(--text2)">Earn meter from battles &amp; summons. At 100% you earn 1 Apex Token — spend it to get a guaranteed duplicate of any unit you own!</p>
 <button class="btn-t0" style="width:100%;background:linear-gradient(135deg,#ffd700,#ff6b35)" onclick="spendApexToken()" id="atRedeemBtn" disabled>REDEEM TOKEN (Select Unit in Barracks)</button>
 </div>
 
-<!-- FISHING -->
-<div class="settings-section">
-<h2 style="color:var(--blue)">APEX FISHING</h2>
-<p style="font-size:.68rem;color:var(--text2);margin-bottom:8px">Cost: 5 AP. Wait for the bobber to dip, then tap! Catch currency, items, profile titles, and Apex Token meter progress.</p>
-<div class="fishing-pond" id="fishPond" onclick="catchFish()">
-<div class="fish-ripple"></div>
-<div class="fish-bobber" id="fishBobber"></div>
-</div>
-<button class="btn-t0" id="fishBtn" style="width:100%;background:linear-gradient(135deg,#00e5ff,#3b82f6)" onclick="startFishing()">CAST LINE (5 AP)</button>
-</div>
-
-<!-- APEX KART -->
-<div class="settings-section">
-<h2 style="color:#00e5ff">APEX KART</h2>
-<p style="font-size:.68rem;color:var(--text2);margin-bottom:8px">Race through 16 tracks using your units! Drift around corners and use unit skills as items. Earn Apex Tokens &amp; AP!</p>
-<canvas id="kartCanvas" width="400" height="300" style="width:100%;border-radius:8px;border:1px solid var(--border);background:#1a1a2e;display:none"></canvas>
-<div id="kartUI">
-<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px">
-<select id="kartTrack" class="code-textarea" style="height:36px;font-size:.65rem"></select>
-<select id="kartUnit" class="code-textarea" style="height:36px;font-size:.65rem"></select>
-</div>
-<button class="btn-t0" style="width:100%;background:linear-gradient(135deg,#00e5ff,#7c4dff)" onclick="startKart()">START RACE (Free)</button>
-</div>
-<div id="kartControls" style="display:none;margin-top:8px">
-<div style="display:flex;gap:6px;justify-content:center">
-<button class="abtn" style="flex:1;height:52px;font-size:1rem" ontouchstart="kartInput.left=true" ontouchend="kartInput.left=false" onmousedown="kartInput.left=true" onmouseup="kartInput.left=false">&#9664;</button>
-<button class="abtn" style="flex:1;height:52px;font-size:.7rem" ontouchstart="kartInput.brake=true" ontouchend="kartInput.brake=false" onmousedown="kartInput.brake=true" onmouseup="kartInput.brake=false">BRAKE</button>
-<button class="abtn" style="flex:1;height:52px;font-size:1rem" ontouchstart="kartInput.right=true" ontouchend="kartInput.right=false" onmousedown="kartInput.right=true" onmouseup="kartInput.right=false">&#9654;</button>
-</div>
-<div style="display:flex;gap:6px;margin-top:4px">
-<button class="abtn" style="flex:1;height:44px;font-size:.65rem;color:var(--gold)" ontouchstart="kartInput.drift=true" ontouchend="kartInput.drift=false" onmousedown="kartInput.drift=true" onmouseup="kartInput.drift=false">DRIFT</button>
-<button class="abtn" style="flex:1;height:44px;font-size:.65rem;color:var(--green)" ontouchstart="kartInput.item=true" ontouchend="kartInput.item=false" onmousedown="kartInput.item=true" onmouseup="kartInput.item=false" id="kartItemBtn">SKILL</button>
-</div>
-</div>
-</div>
-
-<!-- APEX FLAP -->
-<div class="settings-section">
-<h2 style="color:var(--green)">APEX FLAP</h2>
-<p style="font-size:.68rem;color:var(--text2);margin-bottom:8px">Fly through barriers! Each unit has a unique ability. Score earns AP &amp; Apex Token meter. Beat your high score!</p>
-<canvas id="flapCanvas" width="320" height="400" style="width:100%;max-width:320px;margin:0 auto;display:block;border-radius:8px;border:1px solid var(--border);background:#0a0e18;cursor:pointer"></canvas>
-<div style="display:flex;gap:6px;align-items:center;margin-top:8px">
-<select id="flapUnit" class="code-textarea" style="height:36px;font-size:.65rem;flex:1"></select>
-<button class="btn-t0" style="background:linear-gradient(135deg,#22c55e,#00e5ff)" onclick="startFlap()">FLY! (Free)</button>
-</div>
-<div style="font-family:var(--mono);font-size:.6rem;color:var(--text2);margin-top:4px">High Score: <span id="flapHigh">0</span> | Tap/Click to flap</div>
-</div>
 
 </div>
 </div>
@@ -1321,7 +1270,7 @@ input[type=range]{accent-color:var(--t0);width:100px}
 <div class="settings-section">
 <h2 style="color:var(--t0)">PROFILE TITLE</h2>
 <div style="font-family:var(--display);font-size:.9rem;color:var(--gold);margin-bottom:8px;letter-spacing:2px" id="currentTitle">Rookie</div>
-<p style="font-size:.65rem;color:var(--text2);margin-bottom:10px">Earn titles through fishing, racing, and achievements. Mix and match!</p>
+<p style="font-size:.65rem;color:var(--text2);margin-bottom:10px">Earn titles through achievements and gameplay. Mix and match!</p>
 <div id="titleGrid" style="display:grid;grid-template-columns:1fr 1fr;gap:6px"></div>
 </div>
 </div>
@@ -1900,8 +1849,8 @@ quests:{daily:[],story:[],lastDailyDate:''},questProgress:{},
 ghbCleared:[],
 gachaSession:null,
 currentBattleMode:'ladder',currentBattleConfig:null,currentDifficulty:'normal',
-achievements:[],compendium:[],_fishCaught:0,
-apexTokens:0,apexMeter:0,profileTitle:'Rookie',unlockedTitles:['Rookie'],flapHighScore:0,kartWins:0,
+achievements:[],compendium:[],
+apexTokens:0,apexMeter:0,profileTitle:'Rookie',unlockedTitles:['Rookie'],
 };
 let uid=0;
 let sortMode='grade';
@@ -4381,8 +4330,8 @@ itemInventory:S.itemInventory||[],
 unlockedAbilities:S.unlockedAbilities||[],
 teamSize:S.teamSize||4,currentBattleMode:currentBattleMode||'ladder',currentBattleConfig:currentBattleConfig,currentDifficulty:currentDifficulty||'normal',
 daycareSlots:S.daycareSlots||[null,null],daycareBond:S.daycareBond||0,supportMap:S.supportMap||{},fusionChildren:S.fusionChildren||[],
-achievements:S.achievements||[],compendium:S.compendium||[],_fishCaught:S._fishCaught||0,
-apexTokens:S.apexTokens||0,apexMeter:S.apexMeter||0,profileTitle:S.profileTitle||'Rookie',unlockedTitles:S.unlockedTitles||['Rookie'],flapHighScore:S.flapHighScore||0,kartWins:S.kartWins||0};
+achievements:S.achievements||[],compendium:S.compendium||[],
+apexTokens:S.apexTokens||0,apexMeter:S.apexMeter||0,profileTitle:S.profileTitle||'Rookie',unlockedTitles:S.unlockedTitles||['Rookie']};
 localStorage.setItem(SAVE_KEY,JSON.stringify(sd));
 await saveIDB(S.images);
 if(!silent)toast('Saved!','ok');refreshSettings();
@@ -4424,13 +4373,10 @@ if(d.fusionChildren)S.fusionChildren=d.fusionChildren;
 // v3.5 expansion data
 if(d.achievements)S.achievements=d.achievements;
 if(d.compendium)S.compendium=d.compendium;
-if(d._fishCaught)S._fishCaught=d._fishCaught;
 if(d.apexTokens)S.apexTokens=d.apexTokens;
 if(d.apexMeter)S.apexMeter=d.apexMeter;
 if(d.profileTitle)S.profileTitle=d.profileTitle;
 if(d.unlockedTitles)S.unlockedTitles=d.unlockedTitles;
-if(d.flapHighScore)S.flapHighScore=d.flapHighScore;
-if(d.kartWins)S.kartWins=d.kartWins;
 }else if(idbImgs.length)S.images=idbImgs;
 // Migrate all roster units
 // Restore team size from save
@@ -4534,8 +4480,8 @@ loginStreak:0,lastLoginDate:'',quests:{daily:[],story:[],lastDailyDate:''},quest
 itemInventory:[],unlockedAbilities:[],
 teamPresets:[null,null,null,null,null],activePreset:0,
 daycareSlots:[null,null],daycareBond:0,supportMap:{},fusionChildren:[],
-achievements:[],compendium:[],_fishCaught:0,
-apexTokens:0,apexMeter:0,profileTitle:'Rookie',unlockedTitles:['Rookie'],flapHighScore:0,kartWins:0};
+achievements:[],compendium:[],
+apexTokens:0,apexMeter:0,profileTitle:'Rookie',unlockedTitles:['Rookie']};
 uid=0;initPlaceholders();toast('Reset complete');nav('home');
 }
 
@@ -10246,12 +10192,6 @@ updateHomeScreen = function () {
             _mapAnimRAF = 0;
         }
 
-        // Kill minigame loops when leaving APEX HQ
-        if(id !== 'tavern') {
-            if(typeof _cleanupKart === 'function') _cleanupKart();
-            if(typeof _cleanupFlap === 'function') _cleanupFlap();
-            if(typeof _cleanupFishing === 'function') _cleanupFishing();
-        }
 
         const transType = TRANS_MAP[id] || 'fade';
         const layer = document.getElementById('transLayer');
@@ -10604,7 +10544,7 @@ updateHomeScreen = function () {
 
 // ╔══════════════════════════════════════════════════════════════╗
 // ║  APEX TIER 0 — v3.5 APEX HQ EXPANSION                      ║
-// ║  Achievements, Compendium, Fishing, Kart, Flap, Trades,     ║
+// ║  Achievements, Compendium, Trades, Tokens, Titles            ║
 // ║  Profile Titles, Apex Tokens, Banner Expiry & Boost         ║
 // ╚══════════════════════════════════════════════════════════════╝
 (function() {
@@ -10614,13 +10554,10 @@ updateHomeScreen = function () {
     // ─── 1. INITIALIZE DATA ───
     if(!S.achievements) S.achievements = [];
     if(!S.compendium) S.compendium = [];
-    if(!S._fishCaught) S._fishCaught = 0;
     if(!S.apexTokens) S.apexTokens = 0;
     if(!S.apexMeter) S.apexMeter = 0;
     if(!S.profileTitle) S.profileTitle = 'Rookie';
     if(!S.unlockedTitles) S.unlockedTitles = ['Rookie'];
-    if(!S.flapHighScore) S.flapHighScore = 0;
-    if(!S.kartWins) S.kartWins = 0;
 
     // ─── HQ TAB SYSTEM ───
     window.setHQTab = function(tab) {
@@ -10724,14 +10661,7 @@ updateHomeScreen = function () {
         { id:'a_campaign5', name:'Adventurer', desc:'Complete 5 campaign chapters.', req:()=>(S.campaignDone&&S.campaignDone.length>=5), reward:40 },
         { id:'a_campaign20', name:'Veteran', desc:'Complete 20 campaign chapters.', req:()=>(S.campaignDone&&S.campaignDone.length>=20), reward:100 },
         { id:'a_rich', name:'War Chest', desc:'Have 500 AP at once.', req:()=>S.ap>=500, reward:50 },
-        { id:'a_fish1', name:'First Catch', desc:'Catch your first fish.', req:()=>S._fishCaught>=1, reward:15 },
-        { id:'a_fish10', name:'Angler', desc:'Catch 10 fish.', req:()=>S._fishCaught>=10, reward:50 },
-        { id:'a_fish50', name:'Master Fisher', desc:'Catch 50 fish.', req:()=>S._fishCaught>=50, reward:150, title:'Sea King' },
         { id:'a_daycare', name:'Matchmaker', desc:'Place two units in Daycare.', req:()=>S.daycareSlots&&S.daycareSlots[0]&&S.daycareSlots[1], reward:30 },
-        { id:'a_kart1', name:'Pole Position', desc:'Win your first kart race.', req:()=>S.kartWins>=1, reward:20, title:'Speed Demon' },
-        { id:'a_kart10', name:'Grand Prix', desc:'Win 10 kart races.', req:()=>S.kartWins>=10, reward:100, title:'Apex Racer' },
-        { id:'a_flap20', name:'High Flyer', desc:'Score 20 in Apex Flap.', req:()=>S.flapHighScore>=20, reward:50, title:'Sky Walker' },
-        { id:'a_flap50', name:'Bird of Prey', desc:'Score 50 in Apex Flap.', req:()=>S.flapHighScore>=50, reward:150, title:'Untouchable' },
         { id:'a_token1', name:'Token Collector', desc:'Earn your first Apex Token.', req:()=>S.apexTokens>=1||(S.apexMeter>0&&S._tokenEverEarned), reward:30 },
     ];
 
@@ -10778,7 +10708,7 @@ updateHomeScreen = function () {
         const res = _origCBO_v35.apply(this, arguments);
         if(B.phase === 'over') {
             checkAchievements();
-            addApexMeter(25); // battles give meter
+            addApexMeter(50); // battles give meter
         }
         return res;
     };
@@ -10790,7 +10720,7 @@ updateHomeScreen = function () {
         if(res && res.unit && !res.overMax) {
             if(!S.compendium.includes(res.unit.name)) S.compendium.push(res.unit.name);
         }
-        addApexMeter(5); // summons give small meter
+        addApexMeter(15); // summons give meter
         checkAchievements();
         return res;
     };
@@ -10840,498 +10770,10 @@ updateHomeScreen = function () {
         });
     };
 
-    // ─── 5. FISHING (upgraded) ───
-    let fishingState = 'idle';
-    let fishTimer = null;
-    window._cleanupFishing = function() { if(fishTimer){clearTimeout(fishTimer);fishTimer=null;} fishingState = 'idle'; };
-
-    const FISH_TITLES = ['Pond Scum','Lake Lurker','River Rat','Deep Diver','Kraken Slayer','Leviathan','Poseidon'];
-
-    window.startFishing = function() {
-        if(S.ap < 5) { toast('Not enough AP!', 'err'); return; }
-        if(fishingState !== 'idle') return;
-        S.ap -= 5; save(true);
-        fishingState = 'waiting';
-        const fb = document.getElementById('fishBtn');
-        if(fb) { fb.textContent = 'WAIT FOR A BITE...'; fb.style.opacity = '0.5'; }
-        const waitTime = 2000 + Math.random() * 4000;
-        fishTimer = setTimeout(() => {
-            fishingState = 'bite';
-            const bobber = document.getElementById('fishBobber');
-            if(bobber) bobber.style.top = '75%';
-            const fb2 = document.getElementById('fishBtn');
-            if(fb2) { fb2.textContent = 'TAP NOW!!'; fb2.style.opacity = '1'; fb2.style.background = 'var(--red)'; }
-            fishTimer = setTimeout(() => {
-                if(fishingState === 'bite') { fishingState = 'idle'; resetFishUI('THE FISH GOT AWAY!', 'err'); }
-            }, 800);
-        }, waitTime);
-    };
-
-    window.catchFish = function() {
-        if(fishingState === 'bite') {
-            clearTimeout(fishTimer); fishingState = 'idle';
-            S._fishCaught = (S._fishCaught || 0) + 1;
-            sfx('crit');
-            addApexMeter(15); // fishing gives meter
-            const r = Math.random();
-            let msg = '';
-            if(r < 0.05) {
-                // Rare title unlock
-                const available = FISH_TITLES.filter(t => !S.unlockedTitles.includes(t));
-                if(available.length > 0) {
-                    const title = available[~~(Math.random()*available.length)];
-                    S.unlockedTitles.push(title);
-                    msg = 'Caught a LEGENDARY fish! Title unlocked: ' + title;
-                } else { S.ap += 25; msg = 'Caught a Golden Fish! (+25 AP)'; }
-            } else if(r < 0.15 && typeof ITEM_DB !== 'undefined') {
-                const pool = ITEM_DB.filter(i => i.rarity === 'S' || i.rarity === 'A');
-                if(pool.length) {
-                    const itm = {...pool[~~(Math.random()*pool.length)]}; itm.instanceId = 'itm_' + Date.now();
-                    if(!S.itemInventory) S.itemInventory = [];
-                    S.itemInventory.push(itm);
-                    msg = 'Caught a Rare Item: ' + itm.name + '!';
-                } else { S.ap += 15; msg = 'Caught an AP Fish! (+15 AP)'; }
-            } else if(r < 0.4) {
-                const amt = 1 + ~~(Math.random() * 3);
-                S.shards = (S.shards || 0) + amt;
-                msg = 'Caught ' + amt + ' Shards!';
-            } else {
-                const amt = 5 + ~~(Math.random() * 10);
-                S.ap += amt;
-                msg = 'Caught an AP Fish! (+' + amt + ' AP)';
-            }
-            save(true); checkAchievements();
-            resetFishUI(msg, 'ok');
-        } else if(fishingState === 'waiting') {
-            clearTimeout(fishTimer); fishingState = 'idle';
-            resetFishUI('Reeled in too early!', 'err');
-        }
-    };
-
-    function resetFishUI(msg, type) {
-        toast(msg, type);
-        const bobber = document.getElementById('fishBobber');
-        if(bobber) bobber.style.top = '50%';
-        const fb = document.getElementById('fishBtn');
-        if(fb) { fb.textContent = 'CAST LINE (5 AP)'; fb.style.opacity = '1'; fb.style.background = 'linear-gradient(135deg,#00e5ff,#3b82f6)'; }
-    }
-
-    // ─── 6. APEX KART (Mode-7 style top-down racing) ───
-    const KART_TRACKS = [
-        {name:'Apex Circuit',color:'#1a1a2e',road:'#333',len:800},
-        {name:'Neon Speedway',color:'#0a0020',road:'#4a0080',len:900},
-        {name:'Frost Peak',color:'#0a1828',road:'#446688',len:750},
-        {name:'Lava Flow',color:'#1a0800',road:'#553300',len:850},
-        {name:'Starlight Strip',color:'#050510',road:'#222244',len:700},
-        {name:'Thunder Dome',color:'#101020',road:'#444422',len:950},
-        {name:'Crystal Cavern',color:'#001818',road:'#006666',len:800},
-        {name:'Sandstorm Rally',color:'#1a1400',road:'#665522',len:850},
-        {name:'Void Rift',color:'#080008',road:'#330033',len:1000},
-        {name:'Ocean Drive',color:'#001020',road:'#003355',len:750},
-        {name:'Shadow Lane',color:'#0a0a0a',road:'#222222',len:900},
-        {name:'Golden Gate',color:'#141000',road:'#554400',len:800},
-        {name:'Blizzard Blvd',color:'#0f1520',road:'#334455',len:850},
-        {name:'Magma Core',color:'#100000',road:'#442200',len:950},
-        {name:'Hyper Loop',color:'#000818',road:'#002255',len:1100},
-        {name:'Final Apex',color:'#0f0008',road:'#440022',len:1200}
-    ];
-
-    let kartState = null;
-    let kartRAF = 0;
-    window.kartInput = {left:false,right:false,brake:false,drift:false,item:false};
-    window._cleanupKart = function() { if(kartRAF){cancelAnimationFrame(kartRAF);kartRAF=0;} if(kartState)kartState.finished=true; };
-
-    window.startKart = function() {
-        const trackSel = document.getElementById('kartTrack');
-        const unitSel = document.getElementById('kartUnit');
-        if(!trackSel || !unitSel) return;
-        const trackIdx = parseInt(trackSel.value) || 0;
-        const unitIdx = parseInt(unitSel.value);
-        const unit = S.roster[unitIdx];
-        const track = KART_TRACKS[trackIdx];
-        if(!track) return;
-
-        const cvs = document.getElementById('kartCanvas');
-        cvs.style.display = 'block';
-        document.getElementById('kartUI').querySelector('button').style.display = 'none';
-        document.getElementById('kartControls').style.display = 'block';
-
-        // Generate track as a series of segments with curves
-        const segments = [];
-        const segCount = track.len;
-        for(let i = 0; i < segCount; i++) {
-            const curve = Math.sin(i * 0.02) * 3 + Math.sin(i * 0.007) * 5;
-            const hill = Math.sin(i * 0.01) * 1500;
-            segments.push({curve, y: hill, color: i % 6 < 3 ? track.road : '#' + (parseInt(track.road.slice(1),16) + 0x111111).toString(16).slice(-6)});
-        }
-
-        kartState = {
-            track, segments, pos: 0, speed: 0, x: 0, drift: 0,
-            maxSpeed: 6 + (unit ? unit.spd/15 : 0),
-            accel: 0.08 + (unit ? unit.atk/800 : 0),
-            handling: 1 + (unit ? unit.spd/100 : 0),
-            lap: 0, laps: 3, time: 0, finished: false,
-            opponents: [{pos:0,speed:3+Math.random()*2,x:-.5,name:'CPU 1'},{pos:50,speed:3.5+Math.random()*2,x:.5,name:'CPU 2'},{pos:100,speed:4+Math.random()*1.5,x:0,name:'CPU 3'}],
-            itemReady: true, itemCooldown: 0,
-            unit, unitName: unit ? unit.name : 'Driver',
-            boostTimer: 0
-        };
-
-        kartRAF = requestAnimationFrame(kartLoop);
-    };
-
-    function kartLoop() {
-        if(!kartState || kartState.finished) return;
-        const ks = kartState;
-        const cvs = document.getElementById('kartCanvas');
-        if(!cvs) return;
-        const ctx = cvs.getContext('2d');
-        const W = cvs.width, H = cvs.height;
-
-        // Input
-        const turnStr = ks.handling * (kartInput.drift ? 1.5 : 1);
-        if(kartInput.left) ks.x -= 0.03 * turnStr;
-        if(kartInput.right) ks.x += 0.03 * turnStr;
-        if(kartInput.drift) ks.drift = Math.min(ks.drift + 0.05, 1);
-        else { if(ks.drift > 0.5) { ks.boostTimer = 30; } ks.drift = Math.max(ks.drift - 0.1, 0); }
-        if(kartInput.brake) ks.speed = Math.max(0, ks.speed - 0.15);
-        else ks.speed = Math.min(ks.maxSpeed + (ks.boostTimer > 0 ? 3 : 0), ks.speed + ks.accel);
-
-        // Item use
-        if(kartInput.item && ks.itemReady) {
-            ks.itemReady = false;
-            ks.itemCooldown = 180;
-            // Unit skill effect
-            if(ks.unit) {
-                const wep = (ks.unit.weapon || '').toLowerCase();
-                if(wep.includes('sword') || wep.includes('axe')) { ks.boostTimer = 60; toast(ks.unitName + ' uses Power Strike! BOOST!', ''); }
-                else if(wep.includes('bow') || wep.includes('sniper')) { ks.opponents.forEach(o => o.speed *= 0.7); toast(ks.unitName + ' fires arrows! Opponents slowed!', ''); setTimeout(() => ks.opponents.forEach(o => o.speed /= 0.7), 3000); }
-                else if(wep.includes('staff') || wep.includes('tome')) { ks.speed = ks.maxSpeed + 5; toast(ks.unitName + ' casts Warp! Teleport boost!', ''); }
-                else { ks.boostTimer = 45; toast(ks.unitName + ' uses skill! Boost!', ''); }
-            }
-            document.getElementById('kartItemBtn').textContent = '...';
-            kartInput.item = false;
-        }
-        if(!ks.itemReady) { ks.itemCooldown--; if(ks.itemCooldown <= 0) { ks.itemReady = true; document.getElementById('kartItemBtn').textContent = 'SKILL'; } }
-        if(ks.boostTimer > 0) ks.boostTimer--;
-
-        // Apply road curve to player
-        const seg = ks.segments[Math.floor(ks.pos) % ks.segments.length];
-        ks.x += seg.curve * ks.speed * 0.0002;
-        ks.x = Math.max(-1.5, Math.min(1.5, ks.x));
-        // Off road penalty
-        if(Math.abs(ks.x) > 1) ks.speed *= 0.97;
-
-        // Position
-        ks.pos += ks.speed;
-        ks.time++;
-        if(ks.pos >= ks.segments.length) { ks.pos -= ks.segments.length; ks.lap++; if(ks.lap >= ks.laps) { endKart(true); return; } toast('Lap ' + (ks.lap + 1) + '/' + ks.laps, ''); }
-
-        // Opponents
-        ks.opponents.forEach(o => {
-            const oSeg = ks.segments[Math.floor(o.pos) % ks.segments.length];
-            o.x += oSeg.curve * o.speed * 0.0003;
-            o.x = Math.max(-1, Math.min(1, o.x));
-            o.pos += o.speed;
-            if(o.pos >= ks.segments.length) o.pos -= ks.segments.length;
-        });
-
-        // Render pseudo-3D road
-        ctx.fillStyle = ks.track.color;
-        ctx.fillRect(0, 0, W, H);
-
-        for(let i = H; i > H/3; i--) {
-            const depth = (i - H/3) / (H * 0.67);
-            const segIdx = Math.floor(ks.pos + (1 - depth) * 80) % ks.segments.length;
-            const s = ks.segments[segIdx];
-            const roadW = depth * W * 0.8;
-            const cx = W/2 + s.curve * depth * 300 - ks.x * depth * W * 0.4;
-            // Road
-            ctx.fillStyle = s.color;
-            ctx.fillRect(cx - roadW/2, i, roadW, 1);
-            // Rumble strips
-            if(segIdx % 8 < 4) {
-                ctx.fillStyle = '#ff2d55';
-                ctx.fillRect(cx - roadW/2 - 4, i, 4, 1);
-                ctx.fillRect(cx + roadW/2, i, 4, 1);
-            }
-            // Center line
-            if(segIdx % 12 < 6) {
-                ctx.fillStyle = '#ffffff44';
-                ctx.fillRect(cx - 1, i, 2, 1);
-            }
-        }
-
-        // Draw opponents
-        ks.opponents.forEach(o => {
-            const relPos = o.pos - ks.pos;
-            const norm = relPos < -ks.segments.length/2 ? relPos + ks.segments.length : relPos > ks.segments.length/2 ? relPos - ks.segments.length : relPos;
-            if(norm > 0 && norm < 80) {
-                const depth = 1 - norm/80;
-                const sz = depth * 20;
-                const oSeg = ks.segments[Math.floor(o.pos) % ks.segments.length];
-                const ox = W/2 + (o.x - ks.x) * depth * W * 0.3 + oSeg.curve * depth * 200;
-                const oy = H/3 + (1 - depth) * (H * 0.67);
-                ctx.fillStyle = '#ff6b35';
-                ctx.fillRect(ox - sz/2, oy - sz, sz, sz);
-                ctx.fillStyle = '#fff';
-                ctx.font = Math.max(6, sz * 0.4) + 'px sans-serif';
-                ctx.textAlign = 'center';
-                ctx.fillText(o.name, ox, oy - sz - 2);
-            }
-        });
-
-        // Player kart
-        ctx.fillStyle = ks.boostTimer > 0 ? '#ffd700' : '#00e5ff';
-        const kartW = 24, kartH = 16;
-        const kx = W/2, ky = H - 40;
-        ctx.fillRect(kx - kartW/2, ky - kartH, kartW, kartH);
-        if(ks.drift > 0) {
-            ctx.fillStyle = 'rgba(255,255,255,0.3)';
-            for(let sp = 0; sp < 3; sp++) {
-                ctx.fillRect(kx - 2 + Math.random()*4, ky + sp * 3, 2, 3);
-            }
-        }
-
-        // HUD
-        ctx.fillStyle = 'rgba(0,0,0,0.6)';
-        ctx.fillRect(0, 0, W, 28);
-        ctx.fillStyle = '#fff';
-        ctx.font = 'bold 11px monospace';
-        ctx.textAlign = 'left';
-        ctx.fillText('Lap ' + (ks.lap+1) + '/' + ks.laps, 8, 18);
-        ctx.textAlign = 'center';
-        ctx.fillText(Math.floor(ks.speed * 20) + ' km/h', W/2, 18);
-        ctx.textAlign = 'right';
-        const timeS = (ks.time / 60).toFixed(1);
-        ctx.fillText(timeS + 's', W - 8, 18);
-        if(ks.drift > 0.3) { ctx.fillStyle = '#ffd700'; ctx.textAlign = 'center'; ctx.fillText('DRIFT!', W/2, H - 55); }
-        if(ks.boostTimer > 0) { ctx.fillStyle = '#ff2d55'; ctx.textAlign = 'center'; ctx.fillText('BOOST!', W/2, 42); }
-
-        kartRAF = requestAnimationFrame(kartLoop);
-    }
-
-    function endKart(won) {
-        kartState.finished = true;
-        cancelAnimationFrame(kartRAF);
-        const cvs = document.getElementById('kartCanvas');
-        if(cvs) cvs.style.display = 'none';
-        document.getElementById('kartControls').style.display = 'none';
-        const btn = document.getElementById('kartUI').querySelector('button');
-        if(btn) btn.style.display = 'block';
-        if(won) {
-            S.kartWins = (S.kartWins || 0) + 1;
-            const apReward = 10 + ~~(Math.random() * 15);
-            S.ap += apReward;
-            addApexMeter(40);
-            toast('Race complete! +' + apReward + ' AP, +40 Meter', 'gold');
-            sfx('victory');
-        }
-        save(true);
-        checkAchievements();
-    }
-
-    // Keyboard controls for kart
-    document.addEventListener('keydown', e => {
-        if(!kartState || kartState.finished) return;
-        if(e.key === 'ArrowLeft' || e.key === 'a') kartInput.left = true;
-        if(e.key === 'ArrowRight' || e.key === 'd') kartInput.right = true;
-        if(e.key === 'ArrowDown' || e.key === 's') kartInput.brake = true;
-        if(e.key === 'Shift') kartInput.drift = true;
-        if(e.key === ' ' || e.key === 'z') { kartInput.item = true; e.preventDefault(); }
-    });
-    document.addEventListener('keyup', e => {
-        if(e.key === 'ArrowLeft' || e.key === 'a') kartInput.left = false;
-        if(e.key === 'ArrowRight' || e.key === 'd') kartInput.right = false;
-        if(e.key === 'ArrowDown' || e.key === 's') kartInput.brake = false;
-        if(e.key === 'Shift') kartInput.drift = false;
-    });
-
-    // ─── 7. APEX FLAP ───
-    let flapState = null;
-    let flapRAF = 0;
-    window._cleanupFlap = function() { if(flapRAF){cancelAnimationFrame(flapRAF);flapRAF=0;} if(flapState)flapState.alive=false; };
-
-    window.startFlap = function() {
-        // Cancel any existing game loop to prevent multiple overlapping loops
-        if(flapRAF) { cancelAnimationFrame(flapRAF); flapRAF = 0; }
-        if(flapState) flapState.alive = false;
-
-        const unitSel = document.getElementById('flapUnit');
-        const unitIdx = unitSel ? parseInt(unitSel.value) : -1;
-        const unit = S.roster[unitIdx] || null;
-        const cvs = document.getElementById('flapCanvas');
-        if(!cvs) return;
-
-        flapState = {
-            bird: {y: 200, vy: 0, x: 60},
-            pipes: [],
-            score: 0, frame: 0, alive: true, started: false,
-            gravity: 0.35, flapForce: -6,
-            unit, unitName: unit ? unit.name : 'Bird',
-            ability: unit ? getUnitFlapAbility(unit) : null,
-            abilityCooldown: 0, abilityReady: true,
-            gapSize: 100 + (unit && unit.spd > 35 ? 15 : 0), // faster units get wider gaps
-            speed: 2.5
-        };
-
-        cvs.onclick = flapTap;
-        cvs.ontouchstart = function(e) { e.preventDefault(); flapTap(); };
-        flapRAF = requestAnimationFrame(flapLoop);
-    };
-
-    function getUnitFlapAbility(unit) {
-        const wep = (unit.weapon || '').toLowerCase();
-        if(wep.includes('sword') || wep.includes('lance')) return {name:'Slash', desc:'Destroy next pipe', type:'destroy'};
-        if(wep.includes('bow') || wep.includes('sniper')) return {name:'Slow Time', desc:'Slow pipes down', type:'slow'};
-        if(wep.includes('staff') || wep.includes('tome')) return {name:'Phase', desc:'Pass through 1 pipe', type:'phase'};
-        if(wep.includes('axe')) return {name:'Smash', desc:'Widen next gap', type:'widen'};
-        return {name:'Boost', desc:'Tiny upward boost', type:'boost'};
-    }
-
-    function flapTap() {
-        if(!flapState) return;
-        if(!flapState.started) flapState.started = true;
-        if(!flapState.alive) { startFlap(); return; }
-        flapState.bird.vy = flapState.flapForce;
-        // Use ability with double-tap detection
-        if(flapState.ability && flapState.abilityReady && flapState.bird.vy < -4) {
-            flapState.abilityReady = false;
-            flapState.abilityCooldown = 300;
-            const ab = flapState.ability;
-            if(ab.type === 'destroy' && flapState.pipes.length) flapState.pipes.shift();
-            if(ab.type === 'slow') { flapState.speed = 1.2; setTimeout(() => { if(flapState) flapState.speed = 2.5; }, 3000); }
-            if(ab.type === 'phase') flapState.phaseFrames = 60;
-            if(ab.type === 'widen') { flapState.pipes.forEach(p => p.gap += 30); }
-            if(ab.type === 'boost') flapState.bird.vy = -8;
-            toast(flapState.unitName + ': ' + ab.name + '!', '');
-        }
-    }
-
-    function flapLoop() {
-        if(!flapState) return;
-        const fs = flapState;
-        const cvs = document.getElementById('flapCanvas');
-        if(!cvs) return;
-        const ctx = cvs.getContext('2d');
-        const W = cvs.width, H = cvs.height;
-
-        // Background
-        ctx.fillStyle = '#0a0e18';
-        ctx.fillRect(0, 0, W, H);
-        // Stars
-        for(let i = 0; i < 20; i++) {
-            const sx = (i * 97 + fs.frame * 0.3) % W;
-            const sy = (i * 73) % H;
-            ctx.fillStyle = 'rgba(255,255,255,' + (0.3 + Math.sin(fs.frame * 0.05 + i) * 0.2) + ')';
-            ctx.fillRect(sx, sy, 1, 1);
-        }
-
-        if(fs.started && fs.alive) {
-            fs.frame++;
-            fs.bird.vy += fs.gravity;
-            fs.bird.y += fs.bird.vy;
-            if(fs.phaseFrames > 0) fs.phaseFrames--;
-            if(!fs.abilityReady) { fs.abilityCooldown--; if(fs.abilityCooldown <= 0) fs.abilityReady = true; }
-
-            // Spawn pipes
-            if(fs.frame % 90 === 0) {
-                const gapY = 60 + Math.random() * (H - 160);
-                fs.pipes.push({x: W + 20, gapY, gap: fs.gapSize});
-            }
-
-            // Move pipes
-            fs.pipes.forEach(p => p.x -= fs.speed);
-            fs.pipes = fs.pipes.filter(p => p.x > -40);
-
-            // Score
-            fs.pipes.forEach(p => {
-                if(!p.scored && p.x < fs.bird.x) { p.scored = true; fs.score++; sfx('crit'); }
-            });
-
-            // Collision
-            if(fs.bird.y < 0 || fs.bird.y > H - 16) { fs.alive = false; }
-            if(fs.phaseFrames <= 0) {
-                fs.pipes.forEach(p => {
-                    if(fs.bird.x + 12 > p.x && fs.bird.x - 12 < p.x + 30) {
-                        if(fs.bird.y - 8 < p.gapY - p.gap/2 || fs.bird.y + 8 > p.gapY + p.gap/2) {
-                            fs.alive = false;
-                        }
-                    }
-                });
-            }
-        }
-
-        // Draw pipes
-        fs.pipes.forEach(p => {
-            const topH = p.gapY - p.gap/2;
-            const botY = p.gapY + p.gap/2;
-            ctx.fillStyle = fs.phaseFrames > 0 ? 'rgba(0,229,255,0.3)' : '#22c55e';
-            ctx.fillRect(p.x, 0, 30, topH);
-            ctx.fillRect(p.x, botY, 30, H - botY);
-            ctx.fillStyle = '#166534';
-            ctx.fillRect(p.x - 2, topH - 8, 34, 8);
-            ctx.fillRect(p.x - 2, botY, 34, 8);
-        });
-
-        // Draw bird
-        ctx.fillStyle = fs.phaseFrames > 0 ? 'rgba(0,229,255,0.5)' : (fs.alive ? '#ffd700' : '#ff2d55');
-        ctx.beginPath();
-        ctx.arc(fs.bird.x, fs.bird.y, 10, 0, Math.PI * 2);
-        ctx.fill();
-        // Wing
-        const wingAngle = Math.sin(fs.frame * 0.3) * 5;
-        ctx.fillStyle = fs.alive ? '#ff6b35' : '#880000';
-        ctx.fillRect(fs.bird.x - 14, fs.bird.y - 2 + wingAngle, 8, 6);
-
-        // HUD
-        ctx.fillStyle = '#fff';
-        ctx.font = 'bold 24px var(--display, monospace)';
-        ctx.textAlign = 'center';
-        ctx.fillText(fs.score, W/2, 40);
-
-        if(fs.ability) {
-            ctx.font = '10px monospace';
-            ctx.fillStyle = fs.abilityReady ? '#00e5ff' : '#555';
-            ctx.textAlign = 'left';
-            ctx.fillText(fs.ability.name + (fs.abilityReady ? ' [READY]' : ''), 8, H - 10);
-        }
-
-        if(!fs.alive) {
-            ctx.fillStyle = 'rgba(0,0,0,0.6)';
-            ctx.fillRect(0, H/2 - 40, W, 80);
-            ctx.fillStyle = '#ff2d55';
-            ctx.font = 'bold 20px monospace';
-            ctx.textAlign = 'center';
-            ctx.fillText('GAME OVER', W/2, H/2 - 8);
-            ctx.fillStyle = '#ffd700';
-            ctx.font = '14px monospace';
-            ctx.fillText('Score: ' + fs.score + ' | Tap to retry', W/2, H/2 + 20);
-
-            if(fs.score > S.flapHighScore) {
-                S.flapHighScore = fs.score;
-                document.getElementById('flapHigh').textContent = S.flapHighScore;
-            }
-            addApexMeter(Math.min(fs.score * 3, 60));
-            save(true);
-            checkAchievements();
-            return;
-        }
-
-        if(!fs.started) {
-            ctx.fillStyle = '#fff';
-            ctx.font = '14px monospace';
-            ctx.textAlign = 'center';
-            ctx.fillText('Tap to Start!', W/2, H/2);
-        }
-
-        flapRAF = requestAnimationFrame(flapLoop);
-    }
+    // ─── 5. (Minigames removed) ───
 
     // ─── 8. PROFILE TITLES ───
     const ALL_TITLES = ['Rookie','Warrior','Commander','Strategist','Phantom','Overlord',
-        'Sea King','Speed Demon','Apex Racer','Sky Walker','Untouchable',
-        'Pond Scum','Lake Lurker','River Rat','Deep Diver','Kraken Slayer','Leviathan','Poseidon',
         'Collector','Legend','Tier Zero'];
 
     window.renderTitles = function() {
@@ -11573,23 +11015,6 @@ updateHomeScreen = function () {
     window.refreshTavern = function() {
         updateTokenUI();
         renderAchievements();
-        // Populate kart track selector
-        const trackSel = document.getElementById('kartTrack');
-        if(trackSel && trackSel.options.length === 0) {
-            KART_TRACKS.forEach((t,i) => { const o = document.createElement('option'); o.value = i; o.textContent = t.name; trackSel.appendChild(o); });
-        }
-        // Populate unit selectors
-        ['kartUnit','flapUnit'].forEach(id => {
-            const sel = document.getElementById(id);
-            if(sel) {
-                sel.innerHTML = '';
-                S.roster.forEach((u,i) => { const o = document.createElement('option'); o.value = i; o.textContent = u.name + ' (' + u.weapon + ')'; sel.appendChild(o); });
-                if(S.roster.length === 0) { const o = document.createElement('option'); o.value = -1; o.textContent = 'No units'; sel.appendChild(o); }
-            }
-        });
-        // Update high score
-        const fh = document.getElementById('flapHigh');
-        if(fh) fh.textContent = S.flapHighScore || 0;
         checkAchievements();
     };
 
@@ -11598,13 +11023,10 @@ updateHomeScreen = function () {
     window.save = function(quiet) {
         if(!S.achievements) S.achievements=[];
         if(!S.compendium) S.compendium=[];
-        if(!S._fishCaught) S._fishCaught=0;
         if(!S.apexTokens) S.apexTokens=0;
         if(!S.apexMeter) S.apexMeter=0;
         if(!S.profileTitle) S.profileTitle='Rookie';
         if(!S.unlockedTitles) S.unlockedTitles=['Rookie'];
-        if(!S.flapHighScore) S.flapHighScore=0;
-        if(!S.kartWins) S.kartWins=0;
         return _origSave_v35.apply(this, arguments);
     };
 
@@ -11613,13 +11035,10 @@ updateHomeScreen = function () {
         const result = _origLoadGame_v35.apply(this, arguments);
         if(!S.achievements) S.achievements=[];
         if(!S.compendium) S.compendium=[];
-        if(!S._fishCaught) S._fishCaught=0;
         if(!S.apexTokens) S.apexTokens=0;
         if(!S.apexMeter) S.apexMeter=0;
         if(!S.profileTitle) S.profileTitle='Rookie';
         if(!S.unlockedTitles) S.unlockedTitles=['Rookie'];
-        if(!S.flapHighScore) S.flapHighScore=0;
-        if(!S.kartWins) S.kartWins=0;
         S.roster.forEach(u=>{if(u.name&&!S.compendium.includes(u.name))S.compendium.push(u.name);});
         return result;
     };
