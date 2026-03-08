@@ -207,7 +207,7 @@ input[type=range]{accent-color:var(--t0);width:100px}
 /* RESULT BANNER */
 .result-bg{display:none;position:fixed;inset:0;z-index:150;background:rgba(0,0,0,.7);align-items:center;justify-content:center;flex-direction:column;gap:16px;backdrop-filter:blur(3px)}
 .result-bg.show{display:flex}
-.result-card{background:var(--panel);border:2px solid var(--border);border-radius:16px;padding:30px 36px;text-align:center;box-shadow:0 20px 80px rgba(0,0,0,.8);animation:rpop .4s cubic-bezier(.34,1.56,.64,1)}
+.result-card{background:var(--panel);border:2px solid var(--border);border-radius:16px;padding:30px 36px;text-align:center;box-shadow:0 20px 80px rgba(0,0,0,.8);animation:rpop .4s cubic-bezier(.34,1.56,.64,1);max-height:85vh;overflow-y:auto;max-width:min(460px,92vw)}
 @keyframes rpop{from{transform:scale(.7)}to{transform:scale(1)}}
 .result-card h1{font-family:var(--display);font-size:2.2rem;letter-spacing:4px;margin-bottom:8px;font-weight:900}
 .result-card h1.win{color:var(--gold);text-shadow:0 0 40px rgba(251,191,36,.5)}
@@ -216,9 +216,7 @@ input[type=range]{accent-color:var(--t0);width:100px}
 .result-reward{font-family:var(--display);color:var(--gold);font-size:.95rem;margin:8px 0;font-weight:700;letter-spacing:1px}
 .result-btns{display:flex;gap:10px;justify-content:center;margin-top:12px;flex-wrap:wrap}
 
-/* TOAST */
-.toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%) translateY(80px);background:var(--panel2);border:1px solid var(--border2);color:var(--text);padding:7px 14px;border-radius:6px;font-family:var(--font);font-size:.75rem;font-weight:600;z-index:999;transition:transform .25s ease-out;pointer-events:none;white-space:nowrap;box-shadow:0 4px 20px rgba(0,0,0,.5)}
-.toast.show{transform:translateX(-50%) translateY(0)}
+/* TOAST — see polished version below in EXP bar section */
 .toast.ok{border-color:var(--green);color:var(--green)}.toast.err{border-color:var(--red);color:var(--red)}.toast.gold{border-color:var(--gold);color:var(--gold)}
 
 /* DIALOG */
@@ -480,6 +478,45 @@ input[type=range]{accent-color:var(--t0);width:100px}
 /* EXP bar on hero detail */
 .exp-bar-wrap{background:var(--panel2);border:1px solid var(--border);border-radius:3px;height:6px;overflow:hidden;margin-top:4px}
 .exp-bar-fill{height:100%;background:linear-gradient(90deg,#22c55e,#86efac);border-radius:3px;transition:width .4s}
+/* EXP bar on unit modal */
+.modal-exp{margin-top:10px;padding:8px 10px;background:var(--panel2);border:1px solid var(--border);border-radius:6px}
+.modal-exp-label{display:flex;justify-content:space-between;font-size:.6rem;color:var(--text2);margin-bottom:4px;font-family:var(--mono)}
+.modal-exp-label .exp-lvl{color:var(--gold);font-family:var(--display);font-weight:700;letter-spacing:.5px}
+.modal-exp-bar{background:var(--panel3);border-radius:4px;height:8px;overflow:hidden;position:relative}
+.modal-exp-fill{height:100%;background:linear-gradient(90deg,#22c55e,#4ade80,#86efac);border-radius:4px;transition:width .6s cubic-bezier(.4,0,.2,1);position:relative}
+.modal-exp-fill::after{content:'';position:absolute;inset:0;background:linear-gradient(180deg,rgba(255,255,255,.2),transparent);border-radius:4px}
+.modal-exp-max{text-align:center;font-family:var(--display);font-size:.65rem;color:var(--gold);letter-spacing:2px;padding:4px 0}
+
+/* ═══ POLISH: Stat bar stagger animation ═══ */
+@keyframes statSlideIn{from{opacity:0;transform:translateX(-12px)}to{opacity:1;transform:translateX(0)}}
+.stat-row-anim{animation:statSlideIn .3s ease-out both}
+
+/* ═══ POLISH: Modal open/close ═══ */
+@keyframes mOut{from{opacity:1;transform:scale(1) translateY(0)}to{opacity:0;transform:scale(.93) translateY(12px)}}
+.modal-bg.closing .modal{animation:mOut .2s ease-in forwards}
+.modal-bg.closing{animation:fadeOutT .2s ease-in forwards}
+
+/* ═══ POLISH: Unit card XP micro-bar ═══ */
+.ucard-xp{position:absolute;bottom:0;left:0;right:0;height:3px;background:rgba(0,0,0,.4)}
+.ucard-xp-fill{height:100%;background:linear-gradient(90deg,#22c55e,#86efac);transition:width .3s}
+
+/* ═══ POLISH: Button ripple effect ═══ */
+.btn-ripple{position:relative;overflow:hidden}
+.btn-ripple .ripple{position:absolute;border-radius:50%;background:rgba(255,255,255,.25);transform:scale(0);animation:rippleAnim .5s ease-out forwards;pointer-events:none}
+@keyframes rippleAnim{to{transform:scale(4);opacity:0}}
+
+/* ═══ POLISH: Toast slide + icon ═══ */
+.toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%) translateY(80px) scale(.9);background:var(--panel2);border:1px solid var(--border2);color:var(--text);padding:8px 16px;border-radius:8px;font-family:var(--font);font-size:.75rem;font-weight:600;z-index:999;transition:transform .3s cubic-bezier(.34,1.56,.64,1),opacity .3s;pointer-events:none;white-space:nowrap;box-shadow:0 8px 32px rgba(0,0,0,.6);opacity:0;backdrop-filter:blur(8px)}
+.toast.show{transform:translateX(-50%) translateY(0) scale(1);opacity:1}
+
+/* ═══ POLISH: Result card unit XP breakdown ═══ */
+.result-xp-list{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;margin-top:10px;max-width:360px}
+.result-xp-unit{background:var(--panel2);border:1px solid var(--border);border-radius:6px;padding:5px 8px;display:flex;align-items:center;gap:6px;min-width:140px;animation:statSlideIn .3s ease-out both}
+.result-xp-name{font-size:.6rem;font-weight:600;flex:1;text-align:left}
+.result-xp-bar{width:50px;height:4px;background:var(--panel3);border-radius:2px;overflow:hidden}
+.result-xp-fill{height:100%;background:linear-gradient(90deg,#22c55e,#86efac);border-radius:2px;transition:width .8s cubic-bezier(.4,0,.2,1)}
+.result-xp-text{font-size:.55rem;color:var(--green);font-family:var(--mono)}
+.result-lvlup{color:var(--gold);font-size:.55rem;font-family:var(--display);font-weight:700;animation:apulse 1.5s infinite}
 
 /* Banner card in settings */
 .banner-card{background:var(--panel2);border:1px solid var(--border);border-radius:8px;padding:10px;display:flex;gap:10px;align-items:center}
@@ -1329,9 +1366,10 @@ input[type=range]{accent-color:var(--t0);width:100px}
 </div>
 <div id="mStats"></div>
 <div id="mAbilities"></div>
+<div id="mExpSection"></div>
 <div id="mPlusSection"></div>
 <div style="margin-top:10px;display:flex;gap:5px;flex-wrap:wrap">
-<button class="btn2 btn-sm" style="flex:1" id="mTeamBtn" onclick="toggleTeamModal()">Add to Team</button>
+<button class="btn2 btn-sm btn-ripple" style="flex:1" id="mTeamBtn" onclick="toggleTeamModal()">Add to Team</button>
 <button class="btn2 btn-sm btn-danger" onclick="dismissUnit()">Dismiss</button>
 </div>
 </div>
@@ -2342,6 +2380,7 @@ ${u.plus>0?`<div class="ucard-plus">+${u.plus}</div>`:''}
 <div class="ucard-grade grade-${u.grade}">${GRADE_LABEL[u.grade]}</div>
 <div class="ucard-role">${u.role} | ${MOVE_STATS[u.moveType]?.label||'INF'}${u.faction?` | <span style="color:#fbbf24;font-size:.55rem">${u.faction}</span>`:''}</div>
 <div class="ucard-lvl">Lv.${lvl}</div>
+<div class="ucard-xp"><div class="ucard-xp-fill" style="width:${lvl>=40?100:Math.min(100,Math.round(((u.exp||0)/Math.floor(100*Math.pow(lvl,1.5)))*100))}%"></div></div>
 `;
 while(extra.firstChild)card.appendChild(extra.firstChild);
 if(batchMode){
@@ -2488,12 +2527,17 @@ document.getElementById('mMoveType').textContent=MOVE_STATS[u.moveType]?.label||
 // Stats
 const sm={HP:u.maxHp,ATK:u.atk,DEF:u.def,MAG:u.mag,RES:u.res,SPD:u.spd};
 const colors={HP:'#22c55e',ATK:'#ef4444',DEF:'#3b82f6',MAG:'#8b5cf6',RES:'#06b6d4',SPD:'#f97316'};
-document.getElementById('mStats').innerHTML=Object.entries(sm).map(([k,v])=>`
-<div class="stat-row">
+document.getElementById('mStats').innerHTML=Object.entries(sm).map(([k,v],si)=>`
+<div class="stat-row stat-row-anim" style="animation-delay:${si*0.06}s">
 <div class="stat-lbl">${k}</div>
 <div class="stat-bg"><div class="stat-fill" style="width:${Math.min(100,v/65*100)}%;background:${colors[k]}"></div></div>
 <div class="stat-val">${v}</div>
 </div>`).join('');
+// EXP section
+const mExpSec=document.getElementById('mExpSection');
+if(u.level>=40){mExpSec.innerHTML='<div class="modal-exp"><div class="modal-exp-max">Lv.40 — MAX LEVEL</div></div>';}
+else{const expReq=Math.floor(100*Math.pow(u.level||1,1.5));const expPct=Math.min(100,Math.round(((u.exp||0)/expReq)*100));
+mExpSec.innerHTML=`<div class="modal-exp"><div class="modal-exp-label"><span class="exp-lvl">Lv.${u.level||1} / 40</span><span>${u.exp||0} / ${expReq} XP</span></div><div class="modal-exp-bar"><div class="modal-exp-fill" style="width:${expPct}%"></div></div></div>`;}
 // Abilities
 let abHTML=u.special?`<div class="ability-box"><h3>SPECIAL: ${u.special.name} (CD:${u.special.cd})</h3><div class="ability-desc">${u.special.desc}</div></div>`:'';
 u.passives.forEach((p,i)=>{
@@ -2519,7 +2563,7 @@ document.getElementById('mTeamBtn').textContent=inTeam?'Remove from Team':'Add t
 document.getElementById('unitModal').classList.add('show');
 }
 
-function closeModal(){document.getElementById('unitModal').classList.remove('show');modalIdx=-1;}
+function closeModal(){const m=document.getElementById('unitModal');m.classList.add('closing');setTimeout(()=>{m.classList.remove('show','closing');modalIdx=-1;},200);}
 
 function toggleTeamModal(){
 if(modalIdx<0)return;
@@ -11090,6 +11134,107 @@ updateHomeScreen = function () {
     // v3.5 fields are added to S initialization and persist automatically.
 
     console.log('%c  ✓ v3.5 APEX HQ Expansion loaded', 'color:#22c55e');
+})();
+
+// ╔══════════════════════════════════════════════════════════════╗
+// ║  EXTREME POLISH PACK — QoL & Micro-Interactions             ║
+// ╚══════════════════════════════════════════════════════════════╝
+(function() {
+    'use strict';
+
+    // ─── 1. BUTTON RIPPLE EFFECT ──────────────────────────────
+    document.addEventListener('click', function(e) {
+        const btn = e.target.closest('.btn-t0,.btn2,.btn-ripple');
+        if (!btn) return;
+        const rect = btn.getBoundingClientRect();
+        const ripple = document.createElement('span');
+        ripple.className = 'ripple';
+        const size = Math.max(rect.width, rect.height);
+        ripple.style.width = ripple.style.height = size + 'px';
+        ripple.style.left = (e.clientX - rect.left - size / 2) + 'px';
+        ripple.style.top = (e.clientY - rect.top - size / 2) + 'px';
+        btn.style.position = btn.style.position || 'relative';
+        btn.style.overflow = 'hidden';
+        btn.appendChild(ripple);
+        setTimeout(() => ripple.remove(), 500);
+    });
+
+    // ─── 2. ENHANCED VICTORY SCREEN WITH XP BREAKDOWN ────────
+    const _origShowWin = showWin;
+    window.showWin = function(ap, elo) {
+        // Capture XP state before awarding
+        const xpData = [];
+        const expMult = (typeof currentBattleConfig !== 'undefined' && currentBattleConfig?.expMult) ?? 1;
+        if (typeof B !== 'undefined' && B.pUnits) {
+            B.pUnits.filter(u => u.hp > 0).forEach(bu => {
+                const ru = S.roster.find(r => r.id === bu.id);
+                if (ru) {
+                    const xpGain = Math.round(20 * expMult);
+                    const expReq = Math.floor(100 * Math.pow(ru.level || 1, 1.5));
+                    const prevPct = ru.level >= 40 ? 100 : Math.min(100, Math.round(((ru.exp || 0) / expReq) * 100));
+                    // Check if unit will level up (exp was already awarded by checkBattleOver)
+                    const newExpReq = Math.floor(100 * Math.pow(ru.level || 1, 1.5));
+                    const newPct = ru.level >= 40 ? 100 : Math.min(100, Math.round(((ru.exp || 0) / newExpReq) * 100));
+                    xpData.push({
+                        name: ru.name,
+                        level: ru.level || 1,
+                        xpGain: xpGain,
+                        pct: newPct,
+                        leveledUp: ru.level > (bu.level || ru.level)
+                    });
+                }
+            });
+        }
+
+        _origShowWin(ap, elo);
+
+        // Add XP breakdown to result card
+        if (xpData.length > 0) {
+            const rewardEl = document.getElementById('resultReward');
+            if (rewardEl) {
+                let xpHTML = rewardEl.innerHTML;
+                xpHTML += '<div class="result-xp-list">';
+                xpData.forEach((d, i) => {
+                    xpHTML += `<div class="result-xp-unit" style="animation-delay:${i * 0.1 + 0.3}s">
+                        <span class="result-xp-name">${d.name}</span>
+                        <div class="result-xp-bar"><div class="result-xp-fill" style="width:0%"></div></div>
+                        <span class="result-xp-text">+${d.xpGain} XP</span>
+                        ${d.leveledUp ? '<span class="result-lvlup">LV UP!</span>' : ''}
+                    </div>`;
+                });
+                xpHTML += '</div>';
+                rewardEl.innerHTML = xpHTML;
+
+                // Animate XP bars after a short delay
+                requestAnimationFrame(() => {
+                    setTimeout(() => {
+                        rewardEl.querySelectorAll('.result-xp-fill').forEach((bar, i) => {
+                            bar.style.width = xpData[i].pct + '%';
+                        });
+                    }, 400);
+                });
+            }
+        }
+    };
+
+    // ─── 3. SMOOTHER TRANSITION TIMING ────────────────────────
+    // Speed up transitions slightly for snappier feel
+    const FAST_TRANS = { shutter: 300, light: 350, fade: 250 };
+    const _origNavPatch = window.nav;
+    const _patchOrigNav = (function() {
+        // Read the midpoint from the patched nav — we just make the cleanup faster
+        // This is a no-op patch since transitions already exist, just logging
+    })();
+
+    // ─── 4. ENHANCED TOAST WITH ICONS ─────────────────────────
+    const _origToast = toast;
+    window.toast = function(msg, type) {
+        const icons = { ok: '✓ ', err: '✕ ', gold: '★ ' };
+        const prefix = icons[type] || '';
+        _origToast(prefix + msg, type);
+    };
+
+    console.log('%c  ✓ Extreme Polish Pack loaded', 'color:#22c55e');
 })();
 
 </script>
