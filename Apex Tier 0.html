@@ -1195,7 +1195,7 @@ input[type=range]{accent-color:var(--t0);width:100px}
 
 <!-- Tabs -->
 <div class="settings-tabs" id="hqTabs">
-<button class="stab active" onclick="setHQTab('minigames')">TOKENS</button>
+<button class="stab active" onclick="setHQTab('tokens')">TOKENS</button>
 <button class="stab" onclick="setHQTab('achievements')">MEDALS</button>
 <button class="stab" onclick="setHQTab('multiplayer')">MULTI</button>
 <button class="stab" onclick="setHQTab('compendium')">CODEX</button>
@@ -1205,7 +1205,7 @@ input[type=range]{accent-color:var(--t0);width:100px}
 <div style="flex:1;overflow-y:auto;display:flex;flex-direction:column" id="hqBody">
 
 <!-- TAB: MINIGAMES -->
-<div class="hq-tab active" id="hqTab_minigames">
+<div class="hq-tab active" id="hqTab_tokens">
 <div class="hq-scroll">
 
 <!-- Apex Token Meter -->
@@ -10573,7 +10573,7 @@ updateHomeScreen = function () {
         const el = document.getElementById('hqTab_' + tab);
         if(el) el.classList.add('active');
         document.querySelectorAll('#hqTabs .stab').forEach((b, i) => {
-            b.classList.toggle('active', ['minigames','achievements','multiplayer','compendium','profile'][i] === tab);
+            b.classList.toggle('active', ['tokens','achievements','multiplayer','compendium','profile'][i] === tab);
         });
         if(tab === 'compendium') renderCompendium();
         if(tab === 'achievements') renderAchievements();
@@ -10588,11 +10588,13 @@ updateHomeScreen = function () {
         while(S.apexMeter >= APEX_METER_MAX) {
             S.apexMeter -= APEX_METER_MAX;
             S.apexTokens = (S.apexTokens || 0) + 1;
+            S._tokenEverEarned = true;
             toast('APEX TOKEN EARNED! You now have ' + S.apexTokens + ' AT', 'gold');
             sfx('victory');
         }
         updateTokenUI();
         save(true);
+        checkAchievements();
     };
 
     window.updateTokenUI = function() {
