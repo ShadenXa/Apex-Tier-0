@@ -954,9 +954,11 @@ input[type=range]{accent-color:var(--t0);width:100px}
 <div class="screen" id="gacha">
 <div class="hdr">
     <div class="hdr-logo">SUMMON GATE</div>
-    <div class="hdr-nav">
-        <div class="cur-bar" style="background:transparent;border:none;padding:0;">
-            <div class="cur-icon"></div><span class="cur-val" id="orbCount">50</span><span style="color:var(--text2);font-size:.6rem;margin-left:2px">AP</span>
+    <div class="hdr-nav" style="gap:6px;">
+        <div style="display:flex;gap:8px;align-items:center;margin-right:4px;">
+            <div style="display:flex;align-items:center;gap:2px;font-family:var(--mono);font-size:.65rem;"><span style="color:var(--gold);">&#9733;</span><span class="cur-val" id="orbCount">50</span><span style="color:var(--text2);font-size:.5rem">AP</span></div>
+            <div style="display:flex;align-items:center;gap:2px;font-family:var(--mono);font-size:.65rem;"><span style="color:#7c4dff;">&#9830;</span><span id="gachaShardsCount">0</span><span style="color:var(--text2);font-size:.5rem">SH</span></div>
+            <div style="display:flex;align-items:center;gap:2px;font-family:var(--mono);font-size:.65rem;"><span style="color:#ff6b35;">&#9679;</span><span id="gachaTokenCount">0</span><span style="color:var(--text2);font-size:.5rem">AT</span></div>
         </div>
         <button class="nbtn" onclick="nav('home')">HOME</button>
         <button class="nbtn" onclick="nav('barracks')">BARRACKS</button>
@@ -966,6 +968,8 @@ input[type=range]{accent-color:var(--t0);width:100px}
 <div style="padding:10px;background:var(--panel);border-bottom:1px solid var(--border);">
     <div class="pity-lbl"><span>Guaranteed A+ Pity Rate</span><span id="pityText">0/50</span></div>
     <div class="pity-trk"><div class="pity-fill" id="pityFill" style="width:0%"></div></div>
+    <div class="pity-lbl" style="margin-top:6px"><span>Apex Token Meter</span><span id="gachaMeterText">0/1000</span></div>
+    <div class="pity-trk"><div class="pity-fill" id="gachaMeterFill" style="width:0%;background:linear-gradient(90deg,var(--gold),#ff6b35)"></div></div>
 </div>
 <!-- FEH Style Banner List -->
 <div id="fehBannerList" style="flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:20px;background:var(--bg2);">
@@ -2127,6 +2131,10 @@ function getPool(){const u=S.images.filter(i=>!i.isDefault);return u.length?u:S.
 
 function refreshGacha(){
 document.getElementById('orbCount').textContent=S.ap;
+const _shEl=document.getElementById('gachaShardsCount');if(_shEl)_shEl.textContent=S.shards||0;
+const _atEl=document.getElementById('gachaTokenCount');if(_atEl)_atEl.textContent=S.apexTokens||0;
+const _mfEl=document.getElementById('gachaMeterFill');if(_mfEl)_mfEl.style.width=Math.min(100,(S.apexMeter||0)/10)+'%';
+const _mtEl=document.getElementById('gachaMeterText');if(_mtEl)_mtEl.textContent=(S.apexMeter||0)+'/1000';
 const pct=Math.min(100,(S.pullCount/CFG.PITY)*100);
 document.getElementById('pityFill').style.width=pct+'%';
 document.getElementById('pityText').textContent=`${S.pullCount}/${CFG.PITY}`;
