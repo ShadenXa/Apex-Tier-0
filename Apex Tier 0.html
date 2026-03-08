@@ -1605,14 +1605,14 @@ Ironclad:{2:{desc:'+10 DEF',apply:(u)=>{u.def+=10;}},4:{desc:'All attacks reduce
 Phantom: {2:{desc:'Ignore terrain penalties',apply:(u)=>{u._ignoreTerrainPenalty=true;}},4:{desc:'Can always counter regardless of range',apply:(u)=>u._distantCounter=true}},
 };
 const CLASS_SYNERGIES={
-Warden:  {2:{desc:'+6 DEF, fortify bonus ×2',apply:(u)=>{u.def+=6;}},3:{desc:'Allies in range get DEF+4',apply:(u)=>{u.def+=6;}}},
-Striker: {2:{desc:'+6 ATK when initiating',apply:(u)=>{u.atk+=6;}},3:{desc:'Always guaranteed follow-up',apply:(u)=>{u.atk+=6;}}},
-Support: {2:{desc:'Assist range +1',apply:(u)=>{u._assistRange=(u._assistRange||1)+1;}},3:{desc:'Assists refresh attacker and mover',apply:(u)=>{u._assistRange=(u._assistRange||1)+1;}}},
-Duelist: {2:{desc:'+5 SPD, +5 ATK when Solo',apply:(u)=>{u.spd+=5;u.atk+=5;}},3:{desc:'Double attacks always deal +8',apply:(u)=>{u.spd+=5;u.atk+=5;}}},
-Ravager: {2:{desc:'+10% crit rate',apply:(u)=>{u._bonusCrit=(u._bonusCrit||0)+0.1;}},3:{desc:'Crits leave target with 1 HP min',apply:(u)=>{u._bonusCrit=(u._bonusCrit||0)+0.1;}}},
-Sentinel:{2:{desc:'+8 DEF when defending',apply:(u)=>{u.def+=8;}},3:{desc:'50% chance to negate a hit',apply:(u)=>{u.def+=8;}}},
-Trickster:{2:{desc:'50% chance to steal buffs after hit',apply:(u)=>{}},3:{desc:'Gravity effect on all hits',apply:(u)=>{}}},
-Oracle:  {2:{desc:'+4 to all stats',apply:(u)=>{u.atk+=4;u.def+=4;u.spd+=4;u.res+=4;u.mag+=4;}},3:{desc:'Units cannot be Panicked',apply:(u)=>{u.atk+=4;u.def+=4;u.spd+=4;u.res+=4;u.mag+=4;u._antiPanic=true;}}},
+Warden:  {2:{desc:'+6 DEF, fortify bonus ×2',apply:(u)=>{u.def+=6;}},3:{desc:'+6 DEF, allies in range get DEF+4',apply:(u)=>{u.def+=6;u._wardenAura=4;}}},
+Striker: {2:{desc:'+6 ATK when initiating',apply:(u)=>{u.atk+=6;}},3:{desc:'+6 ATK, always guaranteed follow-up',apply:(u)=>{u.atk+=6;u._guaranteedFollow=true;}}},
+Support: {2:{desc:'Assist range +1',apply:(u)=>{u._assistRange=(u._assistRange||1)+1;}},3:{desc:'Assist range +1, assists refresh unit',apply:(u)=>{u._assistRange=(u._assistRange||1)+1;u._assistRefresh=true;}}},
+Duelist: {2:{desc:'+5 SPD, +5 ATK when Solo',apply:(u)=>{u.spd+=5;u.atk+=5;}},3:{desc:'+5 SPD/ATK, double attacks deal +8',apply:(u)=>{u.spd+=5;u.atk+=5;u._doubleBonus=8;}}},
+Ravager: {2:{desc:'+10% crit rate',apply:(u)=>{u._bonusCrit=(u._bonusCrit||0)+0.1;}},3:{desc:'+10% crit, crits prevent overkill (1 HP min)',apply:(u)=>{u._bonusCrit=(u._bonusCrit||0)+0.1;u._critOverkill=true;}}},
+Sentinel:{2:{desc:'+8 DEF when defending',apply:(u)=>{u.def+=8;}},3:{desc:'+8 DEF, 50% chance to negate a hit',apply:(u)=>{u.def+=8;u._negateChance=0.5;}}},
+Trickster:{2:{desc:'50% chance to steal buffs after hit',apply:(u)=>{u._stealBuffs=0.5;}},3:{desc:'Steal buffs + gravity effect on all hits',apply:(u)=>{u._stealBuffs=0.5;u._gravityHit=true;}}},
+Oracle:  {2:{desc:'+4 to all stats',apply:(u)=>{u.atk+=4;u.def+=4;u.spd+=4;u.res+=4;u.mag+=4;}},3:{desc:'+4 all stats, units cannot be Panicked',apply:(u)=>{u.atk+=4;u.def+=4;u.spd+=4;u.res+=4;u.mag+=4;u._antiPanic=true;}}},
 };
 
 function assignFactionClass(u){
@@ -1647,6 +1647,10 @@ const syn=CLASS_SYNERGIES[u.unitClass];if(!syn)return;
 const n=cCount[u.unitClass];
 if(n>=3&&syn[3]&&syn[3].apply)syn[3].apply(u);
 else if(n>=2&&syn[2]&&syn[2].apply)syn[2].apply(u);
+});
+// Warden aura: apply DEF bonus to all allied units from wardens with _wardenAura
+units.forEach(w=>{
+if(w._wardenAura)units.forEach(u=>{if(u!==w)u.def+=w._wardenAura;});
 });
 }
 
@@ -1954,7 +1958,7 @@ const ASSIST_SKILLS=[
 // ═══ UNIT CREATION ══════════════════════════════════════════
 function rollGrade(guaranteeHigh=false){
 if(S.pullCount>=CFG.PITY){S.pullCount=0;return Math.random()<.15?'T0':Math.random()<.4?'S':'A';}
-if(guaranteeHigh){return Math.random()<.2?'T0':Math.random()<.5?'S':'A';} // 10-pull guarantee (no pity reset)
+if(guaranteeHigh){S.pullCount=0;return Math.random()<.2?'T0':Math.random()<.5?'S':'A';} // 10-pull guarantee resets pity
 const r=Math.random()*100;let acc=0;
 for(const g of GRADES){acc+=GRADE_WEIGHTS[g];if(r<acc)return g;}
 return'D';
@@ -2079,7 +2083,7 @@ c.width=window.innerWidth;c.height=window.innerHeight;
 const stars=Array.from({length:80},()=>({x:Math.random()*c.width,y:Math.random()*c.height,r:.3+Math.random()*1.5,s:.5+Math.random()*2,a:Math.random()}));
 function draw(){
 requestAnimationFrame(draw);
-if(document.hidden)return;
+if(document.hidden||!document.getElementById('home').classList.contains('active'))return;
 ctx.fillStyle='rgba(6,8,14,.15)';ctx.fillRect(0,0,c.width,c.height);
 stars.forEach(s=>{s.a+=s.s*.008;ctx.fillStyle=`rgba(200,210,240,${.1+Math.sin(s.a)*.35})`;ctx.beginPath();ctx.arc(s.x,s.y,s.r,0,Math.PI*2);ctx.fill();});
 }draw();
@@ -2092,7 +2096,7 @@ const c=document.getElementById('homeEmblem'),ctx=c.getContext('2d');
 let t=0;
 function draw(){
 requestAnimationFrame(draw);
-if(document.hidden)return;
+if(document.hidden||!document.getElementById('home').classList.contains('active'))return;
 ctx.clearRect(0,0,240,240);
 t+=.015;
 // Outer ring
@@ -2120,7 +2124,7 @@ const c=document.getElementById('orbCanvas'),ctx=c.getContext('2d');
 let t=0;
 function draw(){
 requestAnimationFrame(draw);
-if(document.hidden)return;
+if(document.hidden||!document.getElementById('home').classList.contains('active'))return;
 ctx.clearRect(0,0,200,200);t+=.02;
 const g=ctx.createRadialGradient(70,60,10,100,100,90);
 g.addColorStop(0,'#fff8e0');g.addColorStop(.3,'#ffd700');g.addColorStop(.7,'#8a6000');g.addColorStop(1,'#3a2500');
@@ -2861,7 +2865,7 @@ if(eCnt>2)B.eUnits.push(...createEnemyTeam(eCnt-2,eMult));
 }else{
 B.eUnits=createEnemyTeam(eCnt,eMult);
 }
-B.eUnits.forEach((u,i)=>{u.x=ms-1;u.y=Math.min(i,ms-1);});
+B.eUnits.forEach((u,i)=>{u.x=ms-1-Math.floor(i/ms);u.y=i%ms;});
 B.allUnits=[...B.pUnits,...B.eUnits];
 if(typeof initWallHp==='function')initWallHp();
 // Apply faction/class synergy bonuses to player units
@@ -3306,6 +3310,7 @@ return true;
 function doubles(atker,target){
 if(target&&target._itemAntiDouble)return false;
 if(atker&&atker._itemAlwaysDouble)return true;
+if(atker&&atker._guaranteedFollow)return true;
 const spdBonus=(atker._tempSpd||0);
 return(atker.spd+spdBonus)>=target.spd+5;
 }
@@ -3502,10 +3507,18 @@ target.passives?.forEach(p=>{
 if(p.effect.tag==='vantage'&&target.hp<target.maxHp*.75)vantage=true;
 });
 
-const executeHit=(a,d,spec)=>{
+const executeHit=(a,d,spec,isDoubleHit=false)=>{
 bumpAnim(a,d);
 fireProjectile(a,d);
+// Sentinel synergy: 50% chance to negate the hit entirely
+if(d._negateChance&&Math.random()<d._negateChance){
+floatTxt(d.x,d.y,'NEGATED!','#60a5fa');bLog(`${d.name} negated the hit!`,'spec');return{dmg:0,crit:false};
+}
 const result=calcDmg(a,d,spec);
+// Duelist synergy: double attacks deal bonus damage
+if(isDoubleHit&&a._doubleBonus)result.dmg+=a._doubleBonus;
+// Ravager synergy: crits prevent overkill (target kept at 1 HP)
+if(result.crit&&a._critOverkill&&d.hp>1)result.dmg=Math.min(result.dmg,d.hp-1);
 d.hp=Math.max(0,d.hp-result.dmg);
 // Miracle item: survive one lethal hit per combat
 if(d.hp<=0&&d._itemMiracle&&!d._miracleUsed){d.hp=1;d._miracleUsed=true;if(typeof floatTxt==='function')floatTxt(d.x,d.y,'MIRACLE!','#00e5ff');bLog(`${d.name} survived by a miracle!`,'spec');}
@@ -3523,8 +3536,14 @@ floatTxt(d.x,d.y,'-'+result.dmg,result.crit?'#ff2d55':'#ef4444',result.crit);
 if(a.weaponEffect==='killing_edge'&&a.specialCharges>0){a.specialCharges=Math.max(0,a.specialCharges-1);}
 // Gravity passive: target can't move next turn
 a.passives?.forEach(p=>{if(p.effect.tag==='gravity'&&evalCondition(p.condition,a,d))d.gravityApplied=true;});
+// Trickster synergy: gravity on all hits
+if(a._gravityHit)d.gravityApplied=true;
 // Panic passive: target's buffs become debuffs
-a.passives?.forEach(p=>{if(p.effect.tag==='panic'&&evalCondition(p.condition,a,d)){d._panicked=true;bLog(`${d.name} Panicked!`,'spec');}});
+a.passives?.forEach(p=>{if(p.effect.tag==='panic'&&evalCondition(p.condition,a,d)&&!d._antiPanic){d._panicked=true;bLog(`${d.name} Panicked!`,'spec');}});
+// Trickster synergy: steal buffs after hit
+if(a._stealBuffs&&Math.random()<a._stealBuffs){
+const stealable=['_tempSpd'];if(d._tempSpd>0){a._tempSpd=(a._tempSpd||0)+d._tempSpd;d._tempSpd=0;bLog(`${a.name} stole buffs from ${d.name}!`,'spec');}
+}
 
 // Lifesteal
 if(spec&&(a.special.effect==='lifesteal')){
@@ -3617,7 +3636,7 @@ let desperation=false;
 atker.passives?.forEach(p=>{if(p.effect.tag==='desperation'&&atker.hp<atker.maxHp*.75)desperation=true;});
 if(desperation){
 const despSpec=atker.special&&atker.specialCharges===0;
-executeHit(atker,target,despSpec);
+executeHit(atker,target,despSpec,true);
 if(despSpec)atker.specialCharges=atker.special.cd;
 else atker.specialCharges=Math.max(0,atker.specialCharges-1);
 bLog(`${atker.name} Desperation follow-up!`,'spec');
@@ -3651,7 +3670,7 @@ let desperation=false;
 atker.passives?.forEach(p=>{if(p.effect.tag==='desperation'&&atker.hp<atker.maxHp*.75)desperation=true;});
 if(!desperation){
 const dblSpec=atker.special&&atker.specialCharges===0&&!['heal_self','shield','aura_heal','extra_action'].includes(atker.special.effect);
-executeHit(atker,target,dblSpec);
+executeHit(atker,target,dblSpec,true);
 if(dblSpec)atker.specialCharges=atker.special.cd;
 }
 }
@@ -7718,7 +7737,8 @@ renderSettingsImages = function(body) {
 // ═══════════════════════════════════════════════════════════════
 class MaestroV2 {
   constructor() {
-    this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+    this.ctx = null;
+    this._audioReady = false;
     this.tempo = 90;
     this.isPlaying = false;
     // Richer chord progressions (i-VI-III-VII, i-iv-VII-III, etc.)
@@ -7727,6 +7747,12 @@ class MaestroV2 {
       [5, 1, 0, 4], [3, 5, 0, 7], [0, 5, 7, 3], [5, 4, 3, 0]
     ];
     this.scale = [45, 47, 48, 50, 52, 53, 55, 57, 59, 60, 62, 64, 65, 67, 69, 71, 72];
+  }
+
+  _ensureCtx() {
+    if(this._audioReady) return;
+    try { this.ctx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e) { return; }
+    this._audioReady = true;
     this.masterGain = this.ctx.createGain();
     this.masterGain.gain.value = 0.35;
 
@@ -7835,6 +7861,8 @@ class MaestroV2 {
 
   start() {
     if (this.isPlaying) return;
+    this._ensureCtx();
+    if(!this.ctx) return;
     try { this.ctx.resume(); } catch (e) { }
     this.isPlaying = true;
     this.nextNoteTime = this.ctx.currentTime + 0.1;
