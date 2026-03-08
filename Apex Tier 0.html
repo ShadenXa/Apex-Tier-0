@@ -2833,8 +2833,12 @@ B.hover={x:-1,y:-1};B.shaking=false;
 B.isCampaign=!!campaignData;B.campaignId=campaignData?.id||0;
 
 B.pUnits=pRoster.slice(0,CFG.TEAM_SIZE).map((u,i)=>{
-const bu=prepUnit(u,'player');bu.x=Math.floor(i/ms);bu.y=i%ms;return bu;
+const bu=prepUnit(u,'player');
+bu.x=Math.min(Math.floor(i/ms),ms-1);bu.y=i%ms;
+return bu;
 }).filter(u=>u.hp>0); // Bug #19: filter out zombie units (0 HP from Tempest carry-over)
+// Bug #33: resolve any stacking after initial placement
+{const occ=new Set();B.pUnits.forEach(u=>{const key=u.x+','+u.y;if(occ.has(key)){for(let x=0;x<ms;x++)for(let y=0;y<ms;y++){const k2=x+','+y;if(!occ.has(k2)&&B.grid[y]?.[x]?.passable!==0){u.x=x;u.y=y;occ.add(k2);x=ms;break;}}}else{occ.add(key);}});}
 const eCnt=campaignData?campaignData.enemyCount:Math.max(1,B.pUnits.length);
 const eMult=campaignData?campaignData.enemyMult:1.0;
 if(currentBattleConfig?.isBoss&&currentBattleConfig.ghb){
@@ -3812,7 +3816,7 @@ if(u.poisoned){u.hp=Math.max(0,u.hp-u.poisoned);floatTxt(u.x,u.y,'-'+u.poisoned,
 if(u.burned){u.hp=Math.max(0,u.hp-u.burned);floatTxt(u.x,u.y,'-'+u.burned,'#f97316');u.burned=0;}
 const t=B.grid[u.y]?.[u.x];
 if(t==='lava'){const ld=TERRAINS.lava.dmg;u.hp=Math.max(0,u.hp-ld);floatTxt(u.x,u.y,'-'+ld,'#f97316');bLog(`${u.name} lava -${ld}`,'dmg');}
-if(t==='fort'&&u.hp<u.maxHp){const h=Math.round(u.maxHp*TERRAINS.fort.healPct);u.hp=Math.min(u.maxHp,u.hp+h);floatTxt(u.x,u.y,'+'+h,'#22c55e');bLog(`${u.name} fort +${h}`,'sys');}
+if((t==='fort'||t==='castle')&&TERRAINS[t]?.healPct&&u.hp>0&&u.hp<u.maxHp){const h=Math.round(u.maxHp*TERRAINS[t].healPct);u.hp=Math.min(u.maxHp,u.hp+h);floatTxt(u.x,u.y,'+'+h,'#22c55e');bLog(`${u.name} ${t} +${h}`,'sys');}
 });
 if(checkBattleOver())return;
 // Bug #70: Unfreeze player units that were frozen — they skipped this turn
@@ -4039,7 +4043,7 @@ if(u.burned){u.hp=Math.max(0,u.hp-u.burned);floatTxt(u.x,u.y,'-'+u.burned,'#f973
 const t=B.grid[u.y]?.[u.x];
 if(t==='lava'){const d=TERRAINS.lava.dmg;u.hp=Math.max(0,u.hp-d);floatTxt(u.x,u.y,'-'+d,'#f97316');bLog(`${u.name} lava -${d}`,'dmg');}
 // Fort heal
-if(t==='fort'&&u.hp<u.maxHp){const h=Math.round(u.maxHp*TERRAINS.fort.healPct);u.hp=Math.min(u.maxHp,u.hp+h);floatTxt(u.x,u.y,'+'+h,'#22c55e');}
+if((t==='fort'||t==='castle')&&TERRAINS[t]?.healPct&&u.hp>0&&u.hp<u.maxHp){const h=Math.round(u.maxHp*TERRAINS[t].healPct);u.hp=Math.min(u.maxHp,u.hp+h);floatTxt(u.x,u.y,'+'+h,'#22c55e');}
 // Lightning Trap: 10 damage, consumes tile
 if(t==='lightning_trap'){u.hp=Math.max(1,u.hp-10);floatTxt(u.x,u.y,'-10','#fbbf24');bLog(`${u.name} triggered Lightning Trap!`,'dmg');B.grid[u.y][u.x]='plain';}
 // Gravity Trap: freeze unit, consumes tile
@@ -6440,7 +6444,8 @@ B.phase='player';B.mode='select';B.sel=null;B.highlights=[];
 B.dangerZone=false;B.dangerCells=[];B.hover={x:-1,y:-1};B.shaking=false;
 let pRoster=S.team.map(i=>S.roster[i]).filter(Boolean);
 if(!pRoster.length)pRoster=S.roster.slice(0,4);
-B.pUnits=pRoster.slice(0,CFG.TEAM_SIZE).map((u,i)=>{const bu=prepUnit(u,'player');bu.x=Math.floor(i/ms);bu.y=i%ms;return bu;});
+B.pUnits=pRoster.slice(0,CFG.TEAM_SIZE).map((u,i)=>{const bu=prepUnit(u,'player');bu.x=Math.min(Math.floor(i/ms),ms-1);bu.y=i%ms;return bu;});
+{const occ=new Set();B.pUnits.forEach(u=>{const key=u.x+','+u.y;if(occ.has(key)){for(let x=0;x<ms;x++)for(let y=0;y<ms;y++){const k2=x+','+y;if(!occ.has(k2)){u.x=x;u.y=y;occ.add(k2);x=ms;break;}}}else{occ.add(key);}});}
 B.eUnits=base.units.map((ud,i)=>{
 // Use stored spawn positions if present, otherwise default to right column
 const u={...ud,hp:ud.maxHp,x:ud.x??ms-1,y:ud.y??Math.min(i,ms-1),acted:false,moved:false,
@@ -8486,12 +8491,7 @@ updateHomeScreen = function () {
             const gained = existing.plus - before;
             if(gained > 0) {
                 const stats = ['maxHp','atk','def','mag','res','spd'];
-                stats.forEach(s => {
-                    const boost = Math.ceil(gained/stats.length);
-                    existing[s] += boost;
-                    const bsKey = s === 'maxHp' ? 'hp' : s;
-                    if(existing.baseStat) existing.baseStat[bsKey] += boost;
-                });
+                for(let g=0;g<gained;g++){const s=stats[~~(Math.random()*stats.length)];existing[s]=(existing[s]||0)+1;const bk=s==='maxHp'?'hp':s;if(existing.baseStat)existing.baseStat[bk]=(existing.baseStat[bk]||0)+1;}
             }
             return {dup:true, unit:existing, gained};
         }
@@ -10695,7 +10695,7 @@ updateHomeScreen = function () {
         const gained = u.plus - before;
         if(gained > 0) {
             const stats = ['maxHp','atk','def','mag','res','spd'];
-            stats.forEach(s => { const boost = Math.ceil(gained / stats.length); u[s] = (u[s]||0) + boost; if(u.baseStat) { const bk = s === 'maxHp' ? 'hp' : s; u.baseStat[bk] = (u.baseStat[bk]||0) + boost; } });
+            for(let g=0;g<gained;g++){const s=stats[~~(Math.random()*stats.length)];u[s]=(u[s]||0)+1;if(u.baseStat){const bk=s==='maxHp'?'hp':s;u.baseStat[bk]=(u.baseStat[bk]||0)+1;}}
         }
         save(true);
         updateTokenUI();
@@ -11454,7 +11454,7 @@ updateHomeScreen = function () {
                 const before = existing.plus || 0;
                 existing.plus = Math.min(CFG.MAX_PLUS || 10, (existing.plus || 0) + gain);
                 const gained = existing.plus - before;
-                if(gained > 0) { const stats = ['maxHp','atk','def','mag','res','spd']; stats.forEach(s => { const boost = Math.ceil(gained / stats.length); existing[s] = (existing[s]||0) + boost; const bk = s === 'maxHp' ? 'hp' : s; if(existing.baseStat) existing.baseStat[bk] = (existing.baseStat[bk]||0) + boost; }); }
+                if(gained > 0) { const stats = ['maxHp','atk','def','mag','res','spd']; for(let g=0;g<gained;g++){const s=stats[~~(Math.random()*stats.length)];existing[s]=(existing[s]||0)+1;const bk=s==='maxHp'?'hp':s;if(existing.baseStat)existing.baseStat[bk]=(existing.baseStat[bk]||0)+1;} }
                 if(!S.compendium.includes(existing.name)) S.compendium.push(existing.name);
                 addApexMeter(5); checkAchievements();
                 return {dup: true, unit: existing, gained};
@@ -11551,7 +11551,7 @@ updateHomeScreen = function () {
                 toast('Imported Unit: '+newU.name+'!','gold'); sfx('summon');
             } else if(pack.type==='APEX_BANNER') {
                 (pack.images||[]).forEach(img=>{if(!S.images.find(i=>i.src===img.src)) S.images.push({src:img.src,name:esc(img.name||''),isDefault:false});});
-                const nb=pack.banner; nb.id='banner_'+Date.now(); nb.createdAt=Date.now();
+                const nb=pack.banner; nb.id='banner_'+Date.now(); nb.id=nb.id.replace(/[^a-zA-Z0-9_]/g,''); nb.createdAt=Date.now();
                 nb.name=esc(nb.name||'Unnamed');
                 if(nb.heroNames)nb.heroNames=nb.heroNames.map(n=>esc(n));
                 if(!S.banners) S.banners=[];
