@@ -940,7 +940,6 @@ input[type=range]{accent-color:var(--t0);width:100px}
 <button class="btn2" style="flex:1" onclick="nav('modes')" data-tip="Training Tower, Arena, GHB, Tempest Trials, Hall of Forms, and more">MODES</button>
 </div>
 <button class="btn2" onclick="chooseDifficulty(()=>{currentBattleMode='ladder';currentBattleConfig=null;startBattle();})" data-tip="Quick battle to climb the ELO ladder and earn AP">LADDER BATTLE</button>
-<button class="btn2" style="border-color:#00e5ff;color:#00e5ff" onclick="nav('tavern')" data-tip="Tokens, achievements, trades, compendium, profile titles">APEX HQ</button>
 <button class="btn2" onclick="nav('settings')" data-tip="Upload images, configure battle options, manage banners and save data">SETTINGS</button>
 </div>
 <div style="font-family:var(--mono);font-size:.65rem;color:var(--text3);max-width:280px;line-height:1.7">Upload images to create Infinite Units. Climb the Elo ladder from Iron to Tier 0.</div>
@@ -1225,84 +1224,6 @@ input[type=range]{accent-color:var(--t0);width:100px}
 <button class="abtn" style="color:var(--text3)" onclick="endPlayerPhase()" data-tip="End your entire turn and start enemy phase">END</button>
 </div>
 </div>
-</div>
-</div>
-
-<!-- APEX HQ (Tokens & Social) -->
-<div class="screen" id="tavern">
-<div class="hdr"><div class="hdr-logo">APEX HQ</div>
-<div class="hdr-nav"><button class="nbtn" onclick="nav('home')">HOME</button></div></div>
-
-<!-- Tabs -->
-<div class="settings-tabs" id="hqTabs">
-<button class="stab active" onclick="setHQTab('glossary')">GLOSSARY</button>
-<button class="stab" onclick="setHQTab('achievements')">MEDALS</button>
-<button class="stab" onclick="setHQTab('multiplayer')">MULTI</button>
-<button class="stab" onclick="setHQTab('compendium')">COMPENDIUM</button>
-<button class="stab" onclick="setHQTab('profile')">PROFILE</button>
-</div>
-
-<div style="flex:1;overflow:hidden;display:flex;flex-direction:column;min-height:0" id="hqBody">
-
-<!-- TAB: GLOSSARY (content populated by patcher) -->
-<div class="hq-tab active" id="hqTab_glossary">
-<div class="hq-scroll" id="glossaryScroll"></div>
-</div>
-
-<!-- TAB: ACHIEVEMENTS -->
-<div class="hq-tab" id="hqTab_achievements">
-<div class="hq-scroll">
-<div class="settings-section">
-<h2 style="color:var(--t0)">ACHIEVEMENTS</h2>
-<div id="achieveList" style="display:flex;flex-direction:column;gap:6px"></div>
-</div>
-</div>
-</div>
-
-<!-- TAB: MULTIPLAYER -->
-<div class="hq-tab" id="hqTab_multiplayer">
-<div class="hq-scroll">
-<div class="settings-section">
-<h2 style="color:#7c4dff">ASYNC MULTIPLAYER CODES</h2>
-<p style="font-size:.7rem;color:var(--text2);margin-bottom:8px">Share units and banners with other players using Data Codes! No servers required.</p>
-<textarea id="importCodeBox" class="code-textarea" placeholder="Paste a Unit Code, Mercenary Code, or Community Banner Code here..."></textarea>
-<div style="display:flex;gap:8px">
-<button class="btn-t0" style="flex:1;background:linear-gradient(135deg,#7c4dff,#b000ff)" onclick="importDataCode()">IMPORT CODE</button>
-</div>
-<div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
-<div style="font-size:.7rem;color:var(--text2);margin-bottom:4px">Export a unit: Hero Detail &gt; Export Code</div>
-<div style="font-size:.7rem;color:var(--text2);margin-bottom:4px">Export a banner: Settings &gt; Banners &gt; Export</div>
-<div style="font-size:.7rem;color:var(--text2)">Export mercenary: Hero Detail &gt; Merc Code (1-battle temp unit)</div>
-</div>
-</div>
-</div>
-</div>
-
-<!-- TAB: COMPENDIUM -->
-<div class="hq-tab" id="hqTab_compendium">
-<div class="hq-scroll">
-<div class="settings-section">
-<h2 style="color:var(--gold)">HERO COMPENDIUM</h2>
-<div id="compStats" style="font-family:var(--display);font-size:.8rem;color:var(--text);margin-bottom:4px">Collected: 0 / 0</div>
-<p style="font-size:.65rem;color:var(--green);margin-bottom:8px">Every 5 unique images collected grants a permanent +1% to all stats account-wide!</p>
-<div style="font-size:.65rem;color:var(--gold);margin-bottom:8px">Current Bonus: <span id="compBonus">+0%</span></div>
-<div class="compendium-grid" id="compGrid"></div>
-</div>
-</div>
-</div>
-
-<!-- TAB: PROFILE -->
-<div class="hq-tab" id="hqTab_profile">
-<div class="hq-scroll">
-<div class="settings-section">
-<h2 style="color:var(--t0)">PROFILE TITLE</h2>
-<div style="font-family:var(--display);font-size:.9rem;color:var(--gold);margin-bottom:8px;letter-spacing:2px" id="currentTitle">Rookie</div>
-<p style="font-size:.65rem;color:var(--text2);margin-bottom:10px">Earn titles through achievements and gameplay. Mix and match!</p>
-<div id="titleGrid" style="display:grid;grid-template-columns:1fr 1fr;gap:6px"></div>
-</div>
-</div>
-</div>
-
 </div>
 </div>
 
@@ -12008,13 +11929,13 @@ TUTORIAL_STEPS[3].tip = 'The pity counter guarantees an A+ grade hero every 50 p
 TUTORIAL_STEPS[13].text = 'Use the banner carousel on the Summon screen to browse available banners.\n\n★ Standard Banner: Full pool, all heroes available\n★ Featured Banners: EXCLUSIVE pools of 10+ heroes with 2+ Tier 0 focus units at boosted rates\n\nCheck the rates displayed on each banner card!';
 TUTORIAL_STEPS[13].tip = 'Featured banner heroes are exclusive — you can ONLY pull heroes listed on that banner. Use Standard Banner for the full pool.';
 
-// Add a new tutorial step for the Glossary
+// Tutorial step: Game Currency (Glossary removed — APEX HQ screen removed)
 TUTORIAL_STEPS.splice(14, 0, {
-    title: 'Step 15 — Game Glossary',
-    text: 'Visit APEX HQ → GLOSSARY tab to find definitions for all game terms.\n\nKey currency:\n• Flux (FX) — Summoning currency\n• Prisms (PR) — Power-up shards\n• Zenith Marks (ZM) — Premium pity tokens\n\nAll renamed to be unique to Apex Tier 0!',
-    tip: 'The glossary is always available in APEX HQ for quick reference.',
-    screen: 'tavern', spotlight: '#hqTabs', pos: 'top',
-    action: () => { nav('tavern'); setTimeout(() => setHQTab('compendium'), 200); },
+    title: 'Step 15 — Game Currency',
+    text: 'Key currency in Apex Tier 0:\n\n• Flux (FX) — Summoning currency\n• Prisms (PR) — Power-up shards from dismissals\n• Zenith Marks (ZM) — Premium pity tokens for rerolls & duplicates',
+    tip: 'Dismiss unwanted units for resources! Higher grades give better rewards.',
+    screen: 'home', spotlight: null, pos: 'center',
+    action: () => { nav('home'); },
 });
 
 console.log('%c  ✓ Renamed terms + Glossary added', 'color:#22c55e');
@@ -15171,127 +15092,11 @@ console.log('%c [PATCHER] MaestroV4 music engine installed','color:#22c55e;font-
 
 
 <script>
-// ╔══════════════════════════════════════════════════════════════╗
-// ║  PATCHER: Apex HQ Tab Restructure                           ║
-// ║  - Glossary is the default tab (defined in HTML)             ║
-// ║  - Compendium has pagination                                 ║
-// ║  - All tabs get proper scrollbars                            ║
-// ╚══════════════════════════════════════════════════════════════╝
-(function(){
-'use strict';
-
-// ── 1. RENDER GLOSSARY CONTENT ──
-function renderGlossaryTabContent(){
-    var el=document.getElementById('glossaryScroll');
-    if(!el)return;
-    el.innerHTML='\
-    <div class="settings-section">\
-    <h2 style="color:var(--t0)">GAME GLOSSARY</h2>\
-    <p style="font-size:.6rem;color:var(--text2);margin-bottom:10px">All unique terms used in Apex Tier 0:</p>\
-    <div style="display:flex;flex-direction:column;gap:6px;font-size:.65rem">\
-        <div style="padding:6px 8px;background:var(--panel2);border-radius:6px;border-left:3px solid var(--gold)">\
-            <strong style="color:var(--gold)">Flux (FX)</strong> — <span style="color:var(--text2)">Primary currency. Earned from battles, quests, login. Spent to summon heroes.</span>\
-        </div>\
-        <div style="padding:6px 8px;background:var(--panel2);border-radius:6px;border-left:3px solid #7c4dff">\
-            <strong style="color:#7c4dff">Prisms (PR)</strong> — <span style="color:var(--text2)">Power-up shards from duplicate heroes past max merge.</span>\
-        </div>\
-        <div style="padding:6px 8px;background:var(--panel2);border-radius:6px;border-left:3px solid #ff6b35">\
-            <strong style="color:#ff6b35">Zenith Marks (ZM)</strong> — <span style="color:var(--text2)">Premium tokens from filling the Zenith Meter. Spend to guarantee a duplicate.</span>\
-        </div>\
-        <div style="padding:6px 8px;background:var(--panel2);border-radius:6px;border-left:3px solid var(--t0)">\
-            <strong style="color:var(--t0)">Tier 0 (T0)</strong> — <span style="color:var(--text2)">Highest hero grade. Rainbow border, best stats, cinematic summon.</span>\
-        </div>\
-        <div style="padding:6px 8px;background:var(--panel2);border-radius:6px;border-left:3px solid var(--green)">\
-            <strong style="color:var(--green)">Awakening</strong> — <span style="color:var(--text2)">Reset Lv.40 hero to Lv.1, gaining +3 to all base stats permanently.</span>\
-        </div>\
-        <div style="padding:6px 8px;background:var(--panel2);border-radius:6px;border-left:3px solid #ef4444">\
-            <strong style="color:#ef4444">Weapon Triangle</strong> — <span style="color:var(--text2)">Sword > Axe > Lance > Sword. Light > Dark > Anima > Light. +/-20% ATK.</span>\
-        </div>\
-        <div style="padding:6px 8px;background:var(--panel2);border-radius:6px;border-left:3px solid #3b82f6">\
-            <strong style="color:#3b82f6">Boon / Bane</strong> — <span style="color:var(--text2)">Each hero has a random +3 stat (Boon) and -3 stat (Bane) at summon.</span>\
-        </div>\
-        <div style="padding:6px 8px;background:var(--panel2);border-radius:6px;border-left:3px solid var(--text)">\
-            <strong style="color:var(--text)">SP (Skill Points)</strong> — <span style="color:var(--text2)">Earned from battles. Spent to learn new skills via Skill Inheritance.</span>\
-        </div>\
-        <div style="padding:6px 8px;background:var(--panel2);border-radius:6px;border-left:3px solid var(--text)">\
-            <strong style="color:var(--text)">ELO</strong> — <span style="color:var(--text2)">Battle rating. Higher = tougher opponents = better rewards.</span>\
-        </div>\
-        <div style="padding:6px 8px;background:var(--panel2);border-radius:6px;border-left:3px solid var(--text)">\
-            <strong style="color:var(--text)">Synergy</strong> — <span style="color:var(--text2)">Faction/Class bonuses when 2+ team units share the same type.</span>\
-        </div>\
-        <div style="padding:6px 8px;background:var(--panel2);border-radius:6px;border-left:3px solid var(--text)">\
-            <strong style="color:var(--text)">Merge (+)</strong> — <span style="color:var(--text2)">Pulling duplicates increases + level (max +10), boosting stats.</span>\
-        </div>\
-        <div style="padding:6px 8px;background:var(--panel2);border-radius:6px;border-left:3px solid var(--text)">\
-            <strong style="color:var(--text)">Danger Zone</strong> — <span style="color:var(--text2)">Toggle to preview all enemy attack ranges on the map.</span>\
-        </div>\
-        <div style="padding:6px 8px;background:var(--panel2);border-radius:6px;border-left:3px solid var(--text)">\
-            <strong style="color:var(--text)">Combat Forecast</strong> — <span style="color:var(--text2)">Shows predicted damage before committing to an attack.</span>\
-        </div>\
-        <div style="padding:6px 8px;background:var(--panel2);border-radius:6px;border-left:3px solid var(--text)">\
-            <strong style="color:var(--text)">Banner</strong> — <span style="color:var(--text2)">A curated summoning pool. Featured banners are exclusive.</span>\
-        </div>\
-        <div style="padding:6px 8px;background:var(--panel2);border-radius:6px;border-left:3px solid var(--text)">\
-            <strong style="color:var(--text)">Session Summon</strong> — <span style="color:var(--text2)">Reveals 5 colored orbs. Pick orbs individually to summon matching weapon heroes.</span>\
-        </div>\
-        <div style="padding:6px 8px;background:var(--panel2);border-radius:6px;border-left:3px solid var(--text)">\
-            <strong style="color:var(--text)">Prestige</strong> — <span style="color:var(--text2)">Awakening counter. Each prestige permanently buffs base stats.</span>\
-        </div>\
-        <div style="padding:6px 8px;background:var(--panel2);border-radius:6px;border-left:3px solid var(--text)">\
-            <strong style="color:var(--text)">Fusion Child</strong> — <span style="color:var(--text2)">A new unit born from two bonded Daycare units. Inherits all skills from both parents.</span>\
-        </div>\
-        <div style="padding:6px 8px;background:var(--panel2);border-radius:6px;border-left:3px solid var(--text)">\
-            <strong style="color:var(--text)">Class Change</strong> — <span style="color:var(--text2)">Reclass a hero to change their weapon and movement type for 100 Flux.</span>\
-        </div>\
-    </div>\
-    </div>';
-}
-
-// ── 2. OVERRIDE setHQTab ──
-var _origSetHQTab=window.setHQTab;
-window.setHQTab=function(tab){
-    // Hide all HQ tabs
-    document.querySelectorAll('.hq-tab').forEach(function(t){t.classList.remove('active');});
-
-    // Show the requested tab
-    var el=document.getElementById('hqTab_'+tab);
-    if(el){el.classList.add('active');el.style.display='flex';}
-
-    // Update tab buttons
-    var tabs=document.querySelectorAll('#hqTabs .stab');
-    var tabOrder=['glossary','achievements','multiplayer','compendium','profile'];
-    tabs.forEach(function(b,i){
-        b.classList.toggle('active',tabOrder[i]===tab);
-    });
-
-    // Render tab-specific content
-    if(tab==='glossary')renderGlossaryTabContent();
-    if(tab==='compendium'&&typeof renderCompendium==='function')renderCompendium();
-    if(tab==='achievements'&&typeof renderAchievements==='function')renderAchievements();
-    if(tab==='profile'&&typeof renderTitles==='function')renderTitles();
-};
-
-// ── 3. OVERRIDE refreshTavern ──
-var _origRefreshTavern=window.refreshTavern;
+// Apex HQ screen removed — keep glossary/renderGlossary as no-ops
+window.renderGlossary=function(){};
 window.refreshTavern=function(){
-    if(typeof renderAchievements==='function')renderAchievements();
     if(typeof checkAchievements==='function')checkAchievements();
-    renderGlossaryTabContent();
 };
-
-// ── 4. PREVENT renderGlossary from appending to compendium ──
-window.renderGlossary=function(){/* no-op: glossary is its own tab now */};
-
-// ── 5. OVERRIDE renameTermsInUI ──
-window.renameTermsInUI=function(){};
-
-// ── Initial setup if already on tavern screen ──
-if(document.getElementById('tavern')&&document.getElementById('tavern').classList.contains('active')){
-    renderGlossaryTabContent();
-}
-
-console.log('%c [PATCHER] HQ tabs restructured: Glossary + Compendium split','color:#22c55e;font-weight:bold');
-})();
 </script>
 
 
@@ -15497,6 +15302,316 @@ html,body{
     #home.active{padding-bottom:max(16px,env(safe-area-inset-bottom))!important;}
 }
 </style>
+
+<script>
+// ╔══════════════════════════════════════════════════════════════╗
+// ║  PATCH: Min-Maxer Economy Loop                               ║
+// ║  1. Meaningful dismissal rewards (Flux, Prisms, ZM)          ║
+// ║  2. Zenith Mark reroll system for Hero Detail                 ║
+// ╚══════════════════════════════════════════════════════════════╝
+(function(){
+'use strict';
+
+// ═══════════════════════════════════════════════════════════════
+//  REWARD CALCULATION
+// ═══════════════════════════════════════════════════════════════
+
+var DISMISS_REWARDS = {
+    D:  {flux:15, prisms:0,  meter:0,   marks:0},
+    C:  {flux:30, prisms:0,  meter:0,   marks:0},
+    B:  {flux:0,  prisms:2,  meter:0,   marks:0},
+    A:  {flux:0,  prisms:5,  meter:0,   marks:0},
+    S:  {flux:0,  prisms:10, meter:100, marks:0},
+    T0: {flux:0,  prisms:0,  meter:0,   marks:1},
+};
+
+function calcDismissReward(unit) {
+    var base = DISMISS_REWARDS[unit.grade] || DISMISS_REWARDS.D;
+    var flux   = base.flux;
+    var prisms = base.prisms;
+    var meter  = base.meter;
+    var marks  = base.marks;
+    // Merge refund: +3 Prisms per merge level
+    prisms += (unit.plus || 0) * 3;
+    // Prestige refund: +10 Prisms + 200 Zenith Meter per prestige
+    var pres = unit.prestige || 0;
+    prisms += pres * 10;
+    meter  += pres * 200;
+    return {flux:flux, prisms:prisms, meter:meter, marks:marks};
+}
+
+function calcBatchRewards(units) {
+    var r = {flux:0, prisms:0, meter:0, marks:0};
+    units.forEach(function(u) {
+        var ur = calcDismissReward(u);
+        r.flux   += ur.flux;
+        r.prisms += ur.prisms;
+        r.meter  += ur.meter;
+        r.marks  += ur.marks;
+    });
+    return r;
+}
+
+function formatRewards(r) {
+    var parts = [];
+    if(r.flux > 0)   parts.push(r.flux + ' Flux');
+    if(r.prisms > 0) parts.push(r.prisms + ' Prisms');
+    if(r.meter > 0)  parts.push(r.meter + ' Zenith Meter');
+    if(r.marks > 0)  parts.push(r.marks + ' Zenith Mark' + (r.marks > 1 ? 's' : ''));
+    return parts.length > 0 ? parts.join(', ') : 'nothing';
+}
+
+function grantRewards(r) {
+    if(r.flux > 0)   S.ap = (S.ap || 0) + r.flux;
+    if(r.prisms > 0) S.shards = (S.shards || 0) + r.prisms;
+    if(r.marks > 0)  S.apexTokens = (S.apexTokens || 0) + r.marks;
+    if(r.meter > 0) {
+        S.apexMeter = (S.apexMeter || 0) + r.meter;
+        var MAX = window.APEX_METER_MAX || 1000;
+        while(S.apexMeter >= MAX) {
+            S.apexMeter -= MAX;
+            S.apexTokens = (S.apexTokens || 0) + 1;
+            S._tokenEverEarned = true;
+            toast('ZENITH MARK EARNED! You now have ' + S.apexTokens + ' ZM', 'gold');
+            sfx('victory');
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  1A. PATCH: hdDismiss (individual dismiss from Hero Detail)
+// ═══════════════════════════════════════════════════════════════
+
+window.hdDismiss = function() {
+    var idx = currentHeroDetailIdx;
+    if(idx < 0) return;
+    var u = S.roster[idx];
+    if(!u) return;
+
+    var rewards = calcDismissReward(u);
+    var rewardStr = formatRewards(rewards);
+
+    if(!confirm('Dismiss ' + u.name + '?\n\nYou will receive: ' + rewardStr)) return;
+
+    // Grant rewards before deletion
+    grantRewards(rewards);
+
+    // ── Original cleanup logic (from hdDismiss at line 5062) ──
+    var dismissedId = u.id;
+    var ti = S.team.indexOf(idx);
+    if(ti >= 0) S.team.splice(ti, 1);
+    S.team = S.team.map(function(t){ return t > idx ? t - 1 : t; });
+    S.teamPresets = S.teamPresets.map(function(p) {
+        if(!p) return null;
+        return Object.assign({}, p, {team: p.team.filter(function(t){ return t !== idx; }).map(function(t){ return t > idx ? t - 1 : t; })});
+    });
+    if(S.daycareSlots) S.daycareSlots = S.daycareSlots.map(function(uid){ return uid === dismissedId ? null : uid; });
+    if(S.supportMap) {
+        Object.keys(S.supportMap).forEach(function(k) {
+            if(k.includes(String(dismissedId))) delete S.supportMap[k];
+        });
+    }
+    S.roster.splice(idx, 1);
+    currentHeroDetailIdx = -1;
+    save(true);
+    nav('barracks');
+    refreshBarracks();
+    toast('Dismissed! Received: ' + rewardStr, 'ok');
+};
+
+// ═══════════════════════════════════════════════════════════════
+//  1B. PATCH: toggleBatchMode (batch dismiss from Barracks)
+// ═══════════════════════════════════════════════════════════════
+
+window.toggleBatchMode = function() {
+    if(batchMode) {
+        if(batchSelected.size > 0) {
+            // Gather units before dismissal (sorted descending for safe splicing)
+            var sorted = Array.from(batchSelected).sort(function(a,b){ return b - a; });
+            var units = sorted.map(function(i){ return S.roster[i]; }).filter(Boolean);
+            var rewards = calcBatchRewards(units);
+            var rewardStr = formatRewards(rewards);
+
+            if(!confirm('Dismiss ' + sorted.length + ' unit(s)?\n\nYou will receive: ' + rewardStr)) {
+                return; // Stay in batch mode
+            }
+
+            // Grant rewards
+            grantRewards(rewards);
+
+            // Dismiss each unit (descending order prevents index shifting)
+            sorted.forEach(function(i) {
+                var u = S.roster[i];
+                var dismissedId = u ? u.id : null;
+
+                S.team = S.team.filter(function(t){ return t !== i; }).map(function(t){ return t > i ? t - 1 : t; });
+                S.teamPresets = S.teamPresets.map(function(p) {
+                    if(!p) return null;
+                    return Object.assign({}, p, {team: p.team.filter(function(t){ return t !== i; }).map(function(t){ return t > i ? t - 1 : t; })});
+                });
+
+                // Daycare & support cleanup (was missing in original batch dismiss)
+                if(dismissedId !== null) {
+                    if(S.daycareSlots) S.daycareSlots = S.daycareSlots.map(function(uid){ return uid === dismissedId ? null : uid; });
+                    if(S.supportMap) {
+                        Object.keys(S.supportMap).forEach(function(k) {
+                            if(k.includes(String(dismissedId))) delete S.supportMap[k];
+                        });
+                    }
+                }
+
+                S.roster.splice(i, 1);
+            });
+
+            toast('Dismissed ' + sorted.length + ' unit(s)! Received: ' + rewardStr, 'ok');
+            save(true);
+        }
+        batchMode = false;
+        batchSelected.clear();
+        var bBtn = document.getElementById('batchBtn');
+        if(bBtn) {
+            bBtn.textContent = 'Batch';
+            bBtn.classList.remove('active');
+        }
+    } else {
+        batchMode = true;
+        var bBtn2 = document.getElementById('batchBtn');
+        if(bBtn2) {
+            bBtn2.textContent = 'Dismiss (0)';
+            bBtn2.classList.add('active');
+        }
+    }
+    refreshBarracks();
+};
+
+// ═══════════════════════════════════════════════════════════════
+//  2. ZENITH MARK REROLL SYSTEM
+// ═══════════════════════════════════════════════════════════════
+
+// Inject reroll button into Hero Detail header on each open
+var _origOHD_econ = window.openHeroDetail;
+window.openHeroDetail = function(idx) {
+    _origOHD_econ.apply(this, arguments);
+
+    var hdrNav = document.querySelector('#heroDetail .hdr-nav');
+    if(!hdrNav) return;
+
+    // Remove old reroll button if present
+    var existing = document.getElementById('hdRerollBtn');
+    if(existing) existing.remove();
+
+    var btn = document.createElement('button');
+    btn.id = 'hdRerollBtn';
+    btn.className = 'btn2 btn-sm';
+    btn.style.cssText = 'color:#7c4dff;border-color:#7c4dff;';
+    btn.textContent = '\u27F3 Reroll (1 ZM)';
+    btn.onclick = function() { rerollUnit(currentHeroDetailIdx); };
+
+    // Insert before the dismiss button
+    var dismissBtn = hdrNav.querySelector('.btn-danger');
+    if(dismissBtn) {
+        hdrNav.insertBefore(btn, dismissBtn);
+    } else {
+        hdrNav.appendChild(btn);
+    }
+};
+
+function rerollUnit(idx) {
+    var u = S.roster[idx];
+    if(!u) return;
+
+    if((S.apexTokens || 0) < 1) {
+        toast('Not enough Zenith Marks! You need 1 ZM to reroll.', 'err');
+        return;
+    }
+
+    if(!confirm('Spend 1 Zenith Mark to REROLL ' + u.name + '?\n\nThis will randomize their IVs and base skills, but keep their Level, Merges, Prestige, and Equipment.')) return;
+
+    // Deduct Zenith Mark
+    S.apexTokens = (S.apexTokens || 0) - 1;
+
+    // Generate fresh unit with same image src and grade
+    var fresh = createUnit(u.src, u.name, u.grade);
+
+    // ── Copy fresh RNG to original unit ──
+    // New base stats (includes IVs from applyIVs called inside createUnit)
+    u.baseStat = {
+        hp:  fresh.baseStat.hp,
+        atk: fresh.baseStat.atk,
+        def: fresh.baseStat.def,
+        mag: fresh.baseStat.mag,
+        res: fresh.baseStat.res,
+        spd: fresh.baseStat.spd
+    };
+
+    // New growth rates
+    u.growthRates = {
+        hp:  fresh.growthRates.hp,
+        atk: fresh.growthRates.atk,
+        def: fresh.growthRates.def,
+        mag: fresh.growthRates.mag,
+        res: fresh.growthRates.res,
+        spd: fresh.growthRates.spd
+    };
+
+    // New IVs
+    u.boon = fresh.boon;
+    u.bane = fresh.bane;
+
+    // New special
+    u.special = fresh.special ? Object.assign({}, fresh.special) : null;
+
+    // New passives/skills
+    u.skillA = fresh.skillA ? Object.assign({}, fresh.skillA, {effect: Object.assign({}, (fresh.skillA.effect || {}))}) : null;
+    u.skillB = fresh.skillB ? Object.assign({}, fresh.skillB, {effect: Object.assign({}, (fresh.skillB.effect || {}))}) : null;
+    u.skillC = fresh.skillC ? Object.assign({}, fresh.skillC) : null;
+    u.passives = [u.skillA, u.skillB, u.skillC].filter(Boolean);
+
+    // New assist
+    u.assist = fresh.assist ? Object.assign({}, fresh.assist) : null;
+
+    // New weapon effect (keep weapon type, reroll effect)
+    u.weaponEffect = fresh.weaponEffect || null;
+    u.weaponEffectName = fresh.weaponEffectName || null;
+
+    // ── Re-apply permanent bonuses to new baseStat ──
+
+    // Prestige bonuses
+    var prestige = u.prestige || 0;
+    if(prestige > 0) {
+        var boostMap = {D:6, C:5, B:4, A:3, S:2, T0:1};
+        var boostPerPrestige = boostMap[u.grade] || 3;
+        var totalBoost = boostPerPrestige * prestige;
+        ['hp','atk','def','mag','res','spd'].forEach(function(s) {
+            u.baseStat[s] = (u.baseStat[s] || 0) + totalBoost;
+        });
+    }
+
+    // Merge bonuses (+1 random stat per merge level)
+    var merges = u.plus || 0;
+    if(merges > 0) {
+        var mstats = ['hp','atk','def','mag','res','spd'];
+        for(var m = 0; m < merges; m++) {
+            var rs = mstats[~~(Math.random() * mstats.length)];
+            u.baseStat[rs] = (u.baseStat[rs] || 0) + 1;
+        }
+    }
+
+    // Recalculate active stats from baseStat + level + growths
+    applyLevel(u);
+    u.hp = u.maxHp;
+
+    // Save and refresh
+    if(typeof updateTokenUI === 'function') updateTokenUI();
+    save(true);
+    sfx('summon');
+    toast('\u27F3 ' + u.name + ' has been rerolled! New IVs and skills.', 'gold');
+    openHeroDetail(idx);
+}
+
+console.log('%c [PATCH] Min-Maxer Economy Loop installed', 'color:#7c4dff;font-weight:bold');
+})();
+</script>
 
 </body>
 </html>
