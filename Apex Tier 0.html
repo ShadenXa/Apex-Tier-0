@@ -2307,115 +2307,11 @@ el.textContent=`ELO: ${S.elo} | ${r.name}`;el.style.color=r.color;el.style.borde
 // ═══ GACHA SYSTEM ═══════════════════════════════════════════
 function getPool(){const u=S.images.filter(i=>!i.isDefault);return u.length?u:S.images;}
 
-function refreshGacha(){
-document.getElementById('orbCount').textContent=S.ap;
-const _shEl=document.getElementById('gachaShardsCount');if(_shEl)_shEl.textContent=S.shards||0;
-const _atEl=document.getElementById('gachaTokenCount');if(_atEl)_atEl.textContent=S.apexTokens||0;
-const _mfEl=document.getElementById('gachaMeterFill');if(_mfEl)_mfEl.style.width=Math.min(100,((S.apexMeter||0)/1000)*100)+'%';
-const _mtEl=document.getElementById('gachaMeterText');if(_mtEl)_mtEl.textContent=(S.apexMeter||0)+'/1000';
-const pct=Math.min(100,(S.pullCount/CFG.PITY)*100);
-document.getElementById('pityFill').style.width=pct+'%';
-document.getElementById('pityText').textContent=`${S.pullCount}/${CFG.PITY}`;
-const pool=getPool();
-const pi=document.getElementById('poolInfo');if(pi)pi.textContent=`Pool: ${pool.length} image${pool.length!==1?'s':''}`;
-const listEl=document.getElementById('fehBannerList');
-if(!listEl){return;}
-listEl.innerHTML='';
-const banners=typeof getAvailableBanners==='function'?getAvailableBanners():[];
-if(!banners.length){
-listEl.innerHTML='<div style="text-align:center;color:var(--text2);padding:40px;">No banners available. Upload images in Settings!</div>';
-return;
-}
-banners.forEach((banner,idx)=>{
-// Calculate dynamic rates based on pity
-let t0Rate=2.0,sRate=7.0,aRate=14.0;
-if(S.pullCount>30){sRate+=(S.pullCount-30)*0.5;t0Rate+=(S.pullCount-30)*0.1;}
-// Get hero images for this banner
-let focusImages=[];
-if(banner.isStandard){
-focusImages=S.images.filter(i=>!i.isDefault).slice(0,4);
-}else{
-focusImages=(banner.heroNames||[]).map(name=>S.images.find(i=>i.name===name)).filter(Boolean).slice(0,5);
-}
-const thumbsHTML=focusImages.map(img=>`<img src="${img.src}" draggable="false" style="width:44px;height:44px;border-radius:50%;object-fit:cover;border:2px solid var(--gold);pointer-events:none;" title="${esc(img.name)}">`).join('');
-const isActive=banner.id===S.activeBannerId||(banner.isStandard&&!S.activeBannerId);
-const label=banner.isStandard?'STANDARD POOL':banner.isAuto?banner.name:banner.name;
-const card=document.createElement('div');
-card.style.cssText=`background:var(--panel);border:${isActive?'2px solid var(--gold)':'1px solid var(--border)'};border-radius:12px;padding:16px;position:relative;overflow:hidden;${isActive?'box-shadow:0 0 20px rgba(251,191,36,.15);':''}`;
-card.innerHTML=`
-<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;">
-<div>
-<div style="font-family:var(--display);font-size:.8rem;color:${isActive?'var(--gold)':'var(--text)'};letter-spacing:1px;font-weight:700">${isActive?'★ ':''}${esc(label)}</div>
-<div style="font-size:.6rem;color:var(--text2);font-family:var(--mono);margin-top:2px">${banner.isStandard?'All images equally weighted':focusImages.length+' focus heroes (4× rate)'}</div>
-</div>
-<div style="text-align:right;font-family:var(--mono);font-size:.55rem;line-height:1.6;">
-<div style="color:var(--t0)">T0: ${t0Rate.toFixed(1)}%</div>
-<div style="color:var(--s)">S: ${sRate.toFixed(1)}%</div>
-<div style="color:var(--a)">A: ${aRate.toFixed(1)}%</div>
-</div>
-</div>
-<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;">${thumbsHTML||'<span style="font-size:.6rem;color:var(--text3)">Upload images to populate</span>'}</div>
-<div style="display:flex;gap:8px;flex-wrap:wrap;">
-${!banner.isStandard&&!banner.isAuto?`<button class="btn-t0" style="font-size:.68rem;padding:6px 14px" onclick="setActiveBanner('${banner.id}');refreshGacha()">SET ACTIVE</button>`:''}
-<button class="btn2 btn-sm" onclick="setActiveBanner('${banner.id}');startSession()">SESSION (5 AP)</button>
-<button class="btn2 btn-sm" onclick="setActiveBanner('${banner.id}');pull1()">1 PULL (5 AP)</button>
-<button class="btn2 btn-sm" onclick="setActiveBanner('${banner.id}');pull10()">10 PULL (40 AP)</button>
-</div>
-${isActive?'<div style="position:absolute;top:0;left:0;right:0;height:2px;background:var(--t0g);background-size:200% 200%;animation:t0shift 3s ease infinite"></div>':''}`;
-listEl.appendChild(card);
-});
-// Add pool info at bottom
-const poolNote=document.createElement('div');
-poolNote.style.cssText='font-size:.6rem;color:var(--text3);text-align:center;padding:8px;font-family:var(--mono);line-height:1.6';
-poolNote.textContent=`Pool: ${pool.length} images | Grades: D < C < B < A < S < TIER 0 | Guaranteed A+ every ${CFG.PITY} pulls | Duplicates grant +5 stats`;
-listEl.appendChild(poolNote);
-}
+// [CONSOLIDATED] refreshGacha — original removed, final version defined in MEGA PATCH section
+function refreshGacha(){}
 
-function rollUnit(guaranteeHigh=false){
-const pool=getPool();
-if(!pool.length){toast('Add images first!','err');return null;}
-S.pullCount++;
-// Weighted pool for active banner
-let img;
-if(S.activeBannerId){
-const banner=S.banners.find(b=>b.id===S.activeBannerId);
-if(banner&&(banner.heroIds?.length||banner.heroNames?.length)){
-const weighted=[];
-const focusNames=banner.heroIds?banner.heroIds.map(id=>{const u=S.roster.find(r=>r.id===id);if(!u)return null;const img=S.images.find(im=>im.src===u.src);return img?img.name:u.name;}).filter(Boolean):banner.heroNames;
-pool.forEach(p=>{
-const times=focusNames.includes(p.name)?4:1;
-for(let i=0;i<times;i++)weighted.push(p);
-});
-img=weighted[~~(Math.random()*weighted.length)];
-}else img=pool[~~(Math.random()*pool.length)];
-}else img=pool[~~(Math.random()*pool.length)];
-const grade=rollGrade(guaranteeHigh||S.pullCount>=CFG.PITY);
-trackQuest('summons');
-if(['A','S','T0'].includes(grade))trackQuest('highPull');
-// Check duplicate
-const existing=S.roster.find(u=>u.name===img.name);
-if(existing){
-existing.totalPulls=(existing.totalPulls||1)+1;
-if(existing.plus>=CFG.MAX_PLUS){
-// Past max merge: convert dupes to shards + SP
-existing.shards=(existing.shards||0)+3;
-existing.sp=(existing.sp||0)+100;
-return{dup:true,unit:existing,gained:0,overMax:true};
-}
-const gain=CFG.PLUS_PER_DUP;
-const before=existing.plus;
-existing.plus=Math.min(CFG.MAX_PLUS,existing.plus+gain);
-const gained=existing.plus-before;
-if(gained>0){const stats=['maxHp','atk','def','mag','res','spd'];for(let g=0;g<gained;g++){const s=stats[~~(Math.random()*stats.length)];existing[s]=(existing[s]||0)+1;const bsKey=s==='maxHp'?'hp':s;if(existing.baseStat)existing.baseStat[bsKey]=(existing.baseStat[bsKey]||0)+1;}}
-return{dup:true,unit:existing,gained};
-}
-const unit=createUnit(img.src,img.name,grade);
-unit.hue=img.hue||0;
-unit.isAnimated=img.isAnimated||false;
-unit.format=img.format||'jpeg';
-S.roster.push(unit);
-return{dup:false,unit};
-}
+// [CONSOLIDATED] rollUnit — original removed, final version defined in MEGA PATCH section
+function rollUnit(guaranteeHigh=false){ return null; }
 
 let _pullLock=false;
 function pull1(){
@@ -2749,27 +2645,21 @@ toast(`+${u.plus}!`,'gold');save(true);openModal(idx);
 }
 
 // ═══ CAMPAIGN ═══════════════════════════════════════════════
-function refreshCampaign(){
-const list=document.getElementById('campList');list.innerHTML='';
-CAMPAIGN.forEach(c=>{
-const done=S.campaignDone.includes(c.id);
-const card=document.createElement('div');card.className='camp-card';
-card.innerHTML=`<div class="camp-num">${c.id}</div><div class="camp-info"><h3>${c.name}</h3><p>${c.desc}</p>${done?'<div class="camp-done">COMPLETED</div>':''}</div>`;
-card.onclick=()=>startCampaign(c.id);
-list.appendChild(card);
-});
-}
+// [CONSOLIDATED] refreshCampaign — original removed, final version in difficulty-stars section
+function refreshCampaign(){}
 
 let currentCampaign=null;
 let dialogQueue=[];
 let isDialogAnimating=false; // Bug #28
 
 function startCampaign(id){
+chooseDifficulty(()=>{
 const c=CAMPAIGN.find(x=>x.id===id);if(!c)return;
 currentCampaign=c;
 dialogQueue=[...c.dialog]; // Bug #64: fresh copy each time
 isDialogAnimating=false;
 showDialog();
+});
 }
 
 function showDialog(){
@@ -2913,16 +2803,35 @@ function generateMap(w, h, theme) {
 }
 
 function prepUnit(unit,side){
+    // [CONSOLIDATED] Original + stat caps + special null guard + compendium bonus
+    const hadTempestHp = unit.tempestHp !== undefined;
     const u={...unit};
-    // FIX #3A: Deep clone passives to prevent permanent mutation
     u.passives=[...(unit.passives||[])].map(p=>p?{...p,effect:{...(p.effect||{})}}:p);
-    // Use saved tempest HP if available (HP carry-over), otherwise start at max
     u.hp=(u.tempestHp!==undefined)?u.tempestHp:u.maxHp;
     if(u.tempestHp!==undefined)delete u.tempestHp;
     u.acted=u.moved=false;
+    if(!u.special) u.special = {name:'None',desc:'No special skill',effect:'none',val:0,cd:99};
     u.specialCharges=u.special?u.special.cd:0;
     u.shielded=false;u.frozen=false;u.extraAction=false;u.poisoned=0;u.burned=0;
     u.side=side;u.img=null;
+    // Compendium bonus (player units only)
+    if(side === 'player' && typeof getCompendiumBonus === 'function') {
+        const bonusMult = 1 + getCompendiumBonus();
+        if(bonusMult > 1) {
+            ['atk','def','mag','res','spd'].forEach(s => { u[s] = Math.floor(u[s] * bonusMult); });
+            u.maxHp = Math.floor(u.maxHp * bonusMult);
+            if(!hadTempestHp) u.hp = u.maxHp;
+            u.hp = Math.min(u.hp, u.maxHp);
+        }
+    }
+    // Stat caps
+    ['atk','def','mag','res','spd'].forEach(s => { u[s] = Math.min(99, u[s]); });
+    u.maxHp = Math.min(250, u.maxHp);
+    u.hp = Math.min(u.maxHp, u.hp);
+    // Item effects
+    if(typeof applyItemEffects === 'function') applyItemEffects(u);
+    if(u._itemRegen > 15) u._itemRegen = 15;
+    if(u._shieldPct > 0.6) u._shieldPct = 0.6;
     return u;
 }
 
@@ -3955,10 +3864,20 @@ if(B.pUnits.filter(u=>u.hp>0).every(u=>u.acted))endPlayerPhase();
 }
 
 function endPlayerPhase(){
+// [CONSOLIDATED] Original + enemy item regen + music intensity + turn counter
 if(B.phase!=='player')return;
-// Defer if a move animation is still in progress
 if(B.animating){B._pendingEnemyPhase=true;return;}
-// Apply terrain/status damage symmetrically for player units at phase end
+// Turn counter (from battle log patch)
+B.turnCount = (B.turnCount || 0) + 1;
+// Music intensity (from Maestro patch)
+if(bgm && bgm.setIntensity) bgm.setIntensity('enemy');
+// Enemy item regen at start of enemy phase
+B.allUnits.filter(u=>u.hp>0&&u.side==='enemy').forEach(u=>{
+    if(u._itemRegen&&u._itemRegen>0&&u.hp<u.maxHp){
+        const h=Math.min(u._itemRegen,u.maxHp-u.hp); u.hp+=h; floatTxt(u.x,u.y,'+'+h,'#22c55e');
+    }
+});
+// Terrain/status damage for player units
 B.pUnits.filter(u=>u.hp>0).forEach(u=>{
 if(u.poisoned){u.hp=Math.max(0,u.hp-u.poisoned);floatTxt(u.x,u.y,'-'+u.poisoned,'#a855f7');u.poisoned=0;}
 if(u.burned){u.hp=Math.max(0,u.hp-u.burned);floatTxt(u.x,u.y,'-'+u.burned,'#f97316');u.burned=0;}
@@ -3967,7 +3886,6 @@ if(t==='lava'){const ld=TERRAINS.lava.dmg;u.hp=Math.max(0,u.hp-ld);floatTxt(u.x,
 if((t==='fort'||t==='castle')&&TERRAINS[t]?.healPct&&u.hp>0&&u.hp<u.maxHp){const h=Math.round(u.maxHp*TERRAINS[t].healPct);u.hp=Math.min(u.maxHp,u.hp+h);floatTxt(u.x,u.y,'+'+h,'#22c55e');bLog(`${u.name} ${t} +${h}`,'sys');}
 });
 if(checkBattleOver())return;
-// Bug #70: Unfreeze player units that were frozen — they skipped this turn
 B.pUnits.filter(u=>u.hp>0&&u.frozen).forEach(u=>{u.frozen=false;});
 B.phase='enemy';B.sel=null;B.highlights=[];B.mode='select';hideFC();
 document.getElementById('turnInd').textContent='ENEMY PHASE';
@@ -4182,6 +4100,19 @@ setTimeout(done,spd(CFG.AI_DELAY*.3));
 }
 
 function endEnemyPhase(){
+// [CONSOLIDATED] Original + stack_spd/item regen + music intensity
+// stack_spd (Haste) + player item regen at start of player phase
+B.allUnits.filter(u=>u.hp>0).forEach(u=>{
+    u.passives?.forEach(p=>{
+        if(p.trigger==='TurnStart'&&p.effect?.tag==='stack_spd'&&evalCondition(p.condition,u,null)){
+            u._stackedSpd=u._stackedSpd||0;
+            if(u._stackedSpd<12){ const add=Math.min(p.effect.val,12-u._stackedSpd); u.spd+=add; u._stackedSpd+=add; }
+        }
+    });
+    if(u.side==='player'&&u._itemRegen&&u._itemRegen>0&&u.hp<u.maxHp){
+        const h=Math.min(u._itemRegen,u.maxHp-u.hp); u.hp+=h; floatTxt(u.x,u.y,'+'+h,'#22c55e');
+    }
+});
 if(checkBattleOver())return;
 // Status damage
 B.allUnits.filter(u=>u.hp>0).forEach(u=>{
@@ -4248,6 +4179,8 @@ document.getElementById('turnInd').className='turn-ind turn-p';
 bLog('-- YOUR PHASE --','sys');if(bgm&&bgm.isPlaying)bgm.tempo=90;
 if(B.dangerZone)calcDangerZone();
 drawMap();updateBUI();updateEList();
+// Music intensity (from Maestro patch)
+if(bgm && bgm.setIntensity && B.phase === 'player') bgm.setIntensity('player');
 }
 
 // Helper: clean up mercenary units after battle
@@ -4513,11 +4446,95 @@ document.body.appendChild(p);setTimeout(()=>{p.remove();},1100);
 }
 
 function showWin(ap,elo){
+// [CONSOLIDATED] Original + item rewards + XP breakdown + difficulty badge + campaign continue
 const r=getEloRank(S.elo);
+
+// Item/ability rewards (from item rewards patch)
+if(Math.random() < 0.4) {
+    const rarities = ['C','C','C','B','B','A','S'];
+    const rarity = rarities[~~(Math.random()*rarities.length)];
+    const item = typeof grantRandomItem==='function' ? grantRandomItem(rarity) : null;
+    if(item) toast('Found item: ' + item.name + '!', 'gold');
+}
+if(Math.random() < 0.2) {
+    const ab = typeof ABILITY_DB!=='undefined' ? ABILITY_DB[~~(Math.random()*ABILITY_DB.length)] : null;
+    if(ab && !S.unlockedAbilities.includes(ab.id)) {
+        S.unlockedAbilities.push(ab.id);
+        toast('Unlocked ability: ' + ab.name + '!', 'gold');
+    }
+}
+
+// XP data capture (from XP breakdown patch)
+const xpData = [];
+const expMult = (typeof currentBattleConfig !== 'undefined' && currentBattleConfig?.expMult) ?? 1;
+if (typeof B !== 'undefined' && B.pUnits) {
+    B.pUnits.filter(u => u.hp > 0).forEach(bu => {
+        const ru = S.roster.find(r => r.id === bu.id);
+        if (ru) {
+            const xpGain = Math.round(20 * expMult);
+            const newExpReq = Math.floor(100 * Math.pow(ru.level || 1, 1.5));
+            const newPct = ru.level >= 40 ? 100 : Math.min(100, Math.round(((ru.exp || 0) / newExpReq) * 100));
+            xpData.push({ name: ru.name, level: ru.level || 1, xpGain, pct: newPct, leveledUp: ru.level > (bu.level || ru.level) });
+        }
+    });
+}
+
+// Original showWin display
 document.getElementById('resultTitle').textContent='VICTORY';document.getElementById('resultTitle').className='win';
 document.getElementById('resultSub').textContent=`${r.name} | ELO: ${S.elo} (+${elo})`;
-document.getElementById('resultReward').textContent=`+${ap} AP | +${elo} ELO`;
+document.getElementById('resultReward').textContent=`+${ap} Flux | +${elo} ELO`;
 document.getElementById('resultBg').classList.add('show');
+
+// Difficulty badge (from difficulty-stars patch)
+const resultSub = document.getElementById('resultSub');
+if(resultSub && typeof DIFF_LABELS !== 'undefined') {
+    const diff = typeof currentDifficulty !== 'undefined' ? currentDifficulty : 'normal';
+    const info = DIFF_LABELS[diff];
+    if(info) resultSub.innerHTML += `<div style="margin-top:6px;font-family:var(--display);font-size:.7rem;color:${info.color};letter-spacing:2px">${info.icon} CLEARED ON ${info.name.toUpperCase()}</div>`;
+}
+
+// XP breakdown display
+if (xpData.length > 0) {
+    const rewardEl = document.getElementById('resultReward');
+    if (rewardEl) {
+        let xpHTML = rewardEl.innerHTML;
+        xpHTML += '<div class="result-xp-list">';
+        xpData.forEach((d, i) => {
+            xpHTML += `<div class="result-xp-unit" style="animation-delay:${i * 0.1 + 0.3}s">
+                <span class="result-xp-name">${d.name}</span>
+                <div class="result-xp-bar"><div class="result-xp-fill" style="width:0%"></div></div>
+                <span class="result-xp-text">+${d.xpGain} XP</span>
+                ${d.leveledUp ? '<span class="result-lvlup">LV UP!</span>' : ''}
+            </div>`;
+        });
+        xpHTML += '</div>';
+        rewardEl.innerHTML = xpHTML;
+        requestAnimationFrame(() => {
+            setTimeout(() => {
+                rewardEl.querySelectorAll('.result-xp-fill').forEach((bar, i) => {
+                    bar.style.width = xpData[i].pct + '%';
+                });
+            }, 400);
+        });
+    }
+}
+
+// Campaign continue button (from campaign_v2 patch)
+if(typeof currentBattleMode !== 'undefined' && currentBattleMode === 'campaign_v2') {
+    const battleNum = typeof B !== 'undefined' ? B._currentCampaignBattle || currentBattleConfig?.battleNum : null;
+    if(battleNum && typeof TOTAL_BATTLES !== 'undefined' && battleNum < TOTAL_BATTLES) {
+        const resultBtns = document.querySelector('.result-btns');
+        if(resultBtns && !resultBtns.querySelector('#campNextBattleBtn')) {
+            const contBtn = document.createElement('button');
+            contBtn.id = 'campNextBattleBtn';
+            contBtn.className = 'btn-t0';
+            contBtn.style.cssText = 'font-size:.75rem;padding:8px 14px';
+            contBtn.textContent = 'BACK TO CAMPAIGN \u25B8';
+            contBtn.onclick = function() { closeResult(); setTimeout(function() { goToCampaign(); }, 120); };
+            resultBtns.appendChild(contBtn);
+        }
+    }
+}
 }
 
 function showLose(elo){
@@ -5481,55 +5498,20 @@ sfx('victory');save(true);openHeroDetail(idx);
 }
 
 // ═══ BATTLE MODES ═══════════════════════════════════════════
-function refreshModes(){
-const el=document.getElementById('modesContent');if(!el)return;
-el.innerHTML='';
-const _ghbDay=new Date().getDay();
-const modes=[
-{icon:'🗼',name:'Training Tower',desc:'Progressive floors of increasing difficulty. Earn EXP and AP rewards.',info:`Floor ${S.trainingFloor||1}/10`,_fn:()=>startTrainingMode()},
-{icon:'⚔',name:'Arena',desc:'Battle against AI opponents for Arena Score and ELO bonuses.',info:`Score: ${S.arenaScore||0}`,_fn:()=>startArenaMode()},
-{icon:'★',name:'Grand Hero Battle',desc:'Face legendary bosses. Each day a new boss appears. Beat them to add them to your barracks!',info:'7 unique bosses',_fn:()=>startGHB(_ghbDay)},
-{icon:'⚡',name:'Tempest Trials',desc:'7-battle gauntlet: same team, HP carries over. Earn massive AP rewards.',info:'5 attempts/day',_fn:()=>startTempest(1)},
-{icon:'🏛',name:'Hall of Forms',desc:'Roguelike 13-floor draft. Start with skillless units, pick a skill each floor.',info:'Random team',_fn:()=>startHallOfForms()},
-{icon:'🏰',name:'Aether Raids',desc:'Import a friend\'s defense base code and attack it! Export your own base for others.',info:'Async PvP',_fn:()=>importAetherBase()},
-{icon:'🎯',name:'Heroic Ordeal',desc:'Pick a hero and defeat a challenge with only them and one ally. Earn extra SP.',info:'Per-unit challenge',_fn:()=>startHeroicOrdeal(0)},
-{icon:'👥',name:'Bound Hero Battle',desc:'Face two synergized bosses with extreme stats. Beat them to earn bonus AP.',info:'Boss duo',_fn:()=>startBHB()},
-{icon:'💕',name:'Unit Daycare',desc:'Bond two units together. Pet them, raise their support, and welcome fusion children with inherited skills and stats!',info:S.daycareSlots?`${S.daycareSlots.filter(Boolean).length}/2 units`:'Empty',_fn:()=>nav('daycare')},
-];
-modes.forEach(m=>{
-const card=document.createElement('div');
-card.className='mode-card';
-card.innerHTML=`<div class="mode-card-icon">${m.icon}</div>
-<div class="mode-card-name">${m.name}</div>
-<div class="mode-card-desc">${m.desc}</div>
-<div class="mode-card-info">${m.info}</div>`;
-card.onclick=()=>{if(typeof m._fn==='function')m._fn();};
-el.appendChild(card);
-});
-}
+// [CONSOLIDATED] refreshModes — original removed, final version in difficulty-stars section
+function refreshModes(){}
 
-function startTrainingMode(){
-if(!S.trainingFloor)S.trainingFloor=1;
-// Show floor picker
-const floors=document.getElementById('modesContent');
-floors.innerHTML=`<div style="font-family:var(--display);font-size:.7rem;color:var(--t0);letter-spacing:1px;margin-bottom:10px">TRAINING TOWER — Select Floor</div>
-<div class="tower-floors">${Array.from({length:10},(_,i)=>{
-const fl=i+1;
-const cleared=fl<(S.trainingFloor||1);
-return`<button class="tower-floor-btn${cleared?' ':''}" onclick="launchTrainingFloor(${fl})">
-<div>Floor</div><div style="font-size:1rem;font-weight:700">${fl}</div>
-${cleared?'<div style="font-size:.5rem;color:var(--green)">Done</div>':''}
-</button>`;
-}).join('')}</div>
-<button class="btn2 btn-sm" style="margin-top:10px" onclick="refreshModes()">Back</button>`;
-}
+// [CONSOLIDATED] startTrainingMode — original removed, final version in difficulty-stars section
+function startTrainingMode(){}
 
 function launchTrainingFloor(floor){
+chooseDifficulty(()=>{
 currentBattleMode='training';
 const levelMultiplier=Math.max(0.5,floor*0.2);
 const enemyCount=Math.min(3+Math.floor(floor/3),5);
 currentBattleConfig={floor,enemyCount,expMult:levelMultiplier*0.5,apReward:floor*5};
 startBattle();
+});
 }
 
 // Arena bonus unit: determined by ISO week number for weekly rotation
@@ -6644,19 +6626,8 @@ return{id:'auto_thematic',name:theme.name+' Focus',heroNames:matches.slice(0,4).
 
 let activeBannerIndex=0;
 
-function getAvailableBanners(){
-const banners=[];
-// Standard pool (always active)
-banners.push({id:'standard',name:'Standard Pool',heroNames:[],isAuto:true,isStandard:true});
-// User-created banners
-S.banners.forEach(b=>banners.push(b));
-// Auto-generated
-const weekly=generateAutoFocusBanner();
-if(weekly)banners.push(weekly);
-const thematic=generateThematicBanner();
-if(thematic)banners.push(thematic);
-return banners;
-}
+// [CONSOLIDATED] getAvailableBanners — original removed, final version defined in MEGA PATCH section
+function getAvailableBanners(){ return []; }
 
 function cycleBanner(dir){
 const banners=getAvailableBanners();
@@ -6676,6 +6647,9 @@ let hofState=null;
 
 function startHallOfForms(){
 if(!S.images.length||S.images.length<4){toast('Need at least 4 images!','err');return;}
+chooseDifficulty(()=>{_startHallOfFormsInner();});
+}
+function _startHallOfFormsInner(){
 const pool=S.images.slice();
 const team=[];
 for(let i=0;i<4&&pool.length;i++){
@@ -6844,23 +6818,24 @@ toast('Aether Raid: Defeat the base!','gold');
 // Heroic Ordeals — unit-specific challenge
 function startHeroicOrdeal(unitIdx){
 const u=S.roster[unitIdx];if(!u)return;
+chooseDifficulty(()=>{
 S._savedOrdealTeamIds=S.team.map(i=>S.roster[i]?.id).filter(Boolean);
 currentBattleMode='ordeal';
 currentBattleConfig={expMult:1,apReward:5,ordealUnit:unitIdx};
-// Force team to be this unit + 1 random ally
 const ally=S.roster.find((r,i)=>i!==unitIdx&&r.hp>0);
 const tempTeam=[unitIdx];
 if(ally)tempTeam.push(S.roster.indexOf(ally));
 S.team=tempTeam;
 toast(`Heroic Ordeal: ${u.name}`,'gold');
 startBattle();
+});
 }
 
 // Bound Hero Battle — 2 synergized bosses
 function startBHB(){
+chooseDifficulty(()=>{
 currentBattleMode='bhb';
 const pool=S.images.length?S.images:PLACEHOLDERS.map(p=>({src:makePlaceholderSrc(p.hue),name:p.name,hue:p.hue}));
-// Create two boss enemies with extreme synergy
 const img1=pool[~~(Math.random()*pool.length)];
 const img2=pool[~~(Math.random()*pool.length)];
 const boss1=createUnit(img1.src,img1.name);
@@ -6876,6 +6851,7 @@ const eMult=1+S.elo/2000;
 currentBattleConfig={expMult:1,apReward:10,isBoss:true,bhbBosses:[prepUnit(boss1,'enemy'),prepUnit(boss2,'enemy')]};
 toast('Bound Hero Battle!','gold');
 startBattle();
+});
 }
 
 // ═══ EXPANDED LEARNABLE SKILLS ═══════════════════════════════
@@ -7019,7 +6995,13 @@ if(_ttEl)_ttEl.style.opacity='0';
 // ═══ TOAST ══════════════════════════════════════════════════
 let toastTimer;
 function toast(msg,type=''){
-const t=document.getElementById('toast');t.textContent=msg;t.className='toast show '+(type||'');
+// [CONSOLIDATED] Original + icons + term renaming
+const icons = { ok: '\u2713 ', err: '\u2715 ', gold: '\u2605 ' };
+const prefix = icons[type] || '';
+if(typeof msg === 'string') {
+    msg = msg.replace(/\bAP\b/g, 'Flux').replace(/\bApex Token\b/g, 'Zenith Mark').replace(/\bAPEX TOKEN\b/g, 'ZENITH MARK').replace(/\bshards\b/g, 'Prisms').replace(/\bSH\b(?=[^a-zA-Z]|$)/g, 'PR');
+}
+const t=document.getElementById('toast');t.textContent=prefix+msg;t.className='toast show '+(type||'');
 clearTimeout(toastTimer);toastTimer=setTimeout(()=>t.classList.remove('show'),2400);
 }
 
@@ -7549,38 +7531,12 @@ window.claimMaxReward = function(idx) {
     refreshBarracks();
 };
 
-// ═══ EXPANDED CAMPAIGN SYSTEM ════════════════════════════════
-// Replace the old 5-chapter campaign with the 50-chapter epic
-
-const _origRefreshCampaign = refreshCampaign;
-refreshCampaign = function() {
-    const list = document.getElementById('campList');
-    if(!list) return;
-    list.innerHTML = '';
-    
-    // Group by arc
-    let currentArc = '';
-    CAMPAIGN_EXPANDED.forEach(c => {
-        if(c.arc !== currentArc) {
-            currentArc = c.arc;
-            const arcHeader = document.createElement('div');
-            arcHeader.style.cssText = 'font-family:var(--display);color:var(--t0);font-size:.8rem;letter-spacing:2px;padding:12px 0 6px;border-bottom:1px solid var(--border);margin-bottom:8px';
-            arcHeader.textContent = '═══ ' + currentArc.toUpperCase() + ' ═══';
-            list.appendChild(arcHeader);
-        }
-        const done = S.campaignDone.includes(c.id);
-        const card = document.createElement('div');
-        card.className = 'camp-card';
-        card.innerHTML = `<div class="camp-num">${c.id%100}</div><div class="camp-info"><h3>${c.name}</h3><p>${c.desc}</p>${done?'<div class="camp-done">COMPLETED</div>':''}${c.boss?'<div style="color:var(--gold);font-family:var(--display);font-size:.55rem">★ BOSS BATTLE</div>':''}</div>`;
-        card.onclick = () => startExpandedCampaign(c.id);
-        list.appendChild(card);
-    });
-};
+// [CONSOLIDATED] Expanded campaign refreshCampaign removed — superseded by difficulty-stars version
 
 function startExpandedCampaign(id) {
     const c = CAMPAIGN_EXPANDED.find(x => x.id === id);
     if(!c) return;
-    
+    chooseDifficulty(()=>{
     // Replace [RANDOM_UNIT_X] placeholders with actual unit names
     const dialog = (c.dialog||[]).map(d => {
         let text = d.text;
@@ -7604,52 +7560,14 @@ function startExpandedCampaign(id) {
     isDialogAnimating = false;
     if(dialog.length) showDialog();
     else launchCampaignBattle();
+    });
 }
 
-// ═══ ITEM REWARDS FROM BATTLES ═══════════════════════════════
-// Patch victory to grant items
-const _origShowWin = showWin;
-showWin = function(ap, elo) {
-    // 40% chance to find an item on victory
-    if(Math.random() < 0.4) {
-        const rarities = ['C','C','C','B','B','A','S'];
-        const rarity = rarities[~~(Math.random()*rarities.length)];
-        const item = grantRandomItem(rarity);
-        if(item) {
-            toast('Found item: ' + item.name + '!', 'gold');
-        }
-    }
-    // 20% chance to unlock an ability
-    if(Math.random() < 0.2) {
-        const ab = ABILITY_DB[~~(Math.random()*ABILITY_DB.length)];
-        if(ab && !S.unlockedAbilities.includes(ab.id)) {
-            S.unlockedAbilities.push(ab.id);
-            toast('Unlocked ability: ' + ab.name + '!', 'gold');
-        }
-    }
-    _origShowWin(ap, elo);
-};
+// [CONSOLIDATED] Item/ability rewards merged into showWin
 
 // ═══ BALANCE SAFEGUARDS ══════════════════════════════════════
-// Cap maximum stats to prevent invincible combos
+// [CONSOLIDATED] Stat caps + item effects merged into prepUnit
 const MAX_STAT_CAP = 99;
-const _origPrepUnit = prepUnit;
-prepUnit = function(unit, side) {
-    const u = _origPrepUnit(unit, side);
-    // Cap stats
-    ['atk','def','mag','res','spd'].forEach(s => {
-        u[s] = Math.min(MAX_STAT_CAP, u[s]);
-    });
-    u.maxHp = Math.min(250, u.maxHp);
-    u.hp = Math.min(u.maxHp, u.hp);
-    // Apply item effects for battle
-    if(typeof applyItemEffects === 'function') applyItemEffects(u);
-    // Limit healing to prevent infinite loops: max 15 HP regen per turn
-    if(u._itemRegen > 15) u._itemRegen = 15;
-    // Cap damage reduction at 60%
-    if(u._shieldPct > 0.6) u._shieldPct = 0.6;
-    return u;
-};
 
 // ═══ HERO DETAIL ITEM/ABILITY MANAGEMENT ═════════════════════
 // Patch hero detail to show item and ability equip options
@@ -7885,33 +7803,7 @@ toast('Content Expansion loaded!', 'gold');
         return r;
     };
 
-    // stack_spd (Haste) + item regen at turn boundary
-    // Player units regen at start of player phase (end of enemy phase)
-    const _origEEP = endEnemyPhase;
-    endEnemyPhase = function(){
-        B.allUnits.filter(u=>u.hp>0).forEach(u=>{
-            u.passives?.forEach(p=>{
-                if(p.trigger==='TurnStart'&&p.effect?.tag==='stack_spd'&&evalCondition(p.condition,u,null)){
-                    u._stackedSpd=u._stackedSpd||0;
-                    if(u._stackedSpd<12){ const add=Math.min(p.effect.val,12-u._stackedSpd); u.spd+=add; u._stackedSpd+=add; }
-                }
-            });
-            if(u.side==='player'&&u._itemRegen&&u._itemRegen>0&&u.hp<u.maxHp){
-                const h=Math.min(u._itemRegen,u.maxHp-u.hp); u.hp+=h; floatTxt(u.x,u.y,'+'+h,'#22c55e');
-            }
-        });
-        _origEEP();
-    };
-    // Enemy units regen at start of enemy phase (end of player phase)
-    const _origEPPRegen = endPlayerPhase;
-    endPlayerPhase = function(){
-        B.allUnits.filter(u=>u.hp>0&&u.side==='enemy').forEach(u=>{
-            if(u._itemRegen&&u._itemRegen>0&&u.hp<u.maxHp){
-                const h=Math.min(u._itemRegen,u.maxHp-u.hp); u.hp+=h; floatTxt(u.x,u.y,'+'+h,'#22c55e');
-            }
-        });
-        _origEPPRegen.apply(this,arguments);
-    };
+    // [CONSOLIDATED] stack_spd/regen merged into endEnemyPhase, enemy regen merged into endPlayerPhase
 
     // post_combat_debuff_atk + on-hit item effects + lifesteal + reflect
     const _origPC = performCombat;
@@ -8439,113 +8331,7 @@ refreshPresets = function () {
 };
 
 
-// ═══════════════════════════════════════════════════════════════
-// FIX #4: 10 ROTATING BANNERS WITH MANDATORY T0 FOCUS
-// ═══════════════════════════════════════════════════════════════
-getAvailableBanners = function () {
-  const banners = [];
-  const pool = S.images.filter(i => !i.isDefault);
-  const roster = S.roster;
-
-  // 1. Standard pool (always first)
-  banners.push({
-    id: 'standard', name: 'Standard Pool', heroNames: [],
-    isAuto: true, isStandard: true,
-    t0Rate: 2, sRate: 7, aRate: 14
-  });
-
-  // 2. User-created custom banners
-  S.banners.forEach(b => banners.push(b));
-
-  // 3. Generate exactly 10 procedural weekly banners
-  if (roster.length >= 2 && pool.length >= 2) {
-    const seed = getWeekSeed();
-    const rng = (i) => {
-      let s = (seed * 2654435761 + i * 40503) & 0x7fffffff;
-      s = ((s >> 16) ^ s) * 45679;
-      return Math.abs(s % 10000) / 10000;
-    };
-
-    // Find all T0 units in roster
-    const t0Units = roster.filter(u => u.grade === 'T0');
-    // If no T0 units, use S-grade as fallback
-    const eliteUnits = t0Units.length > 0 ? t0Units : roster.filter(u => u.grade === 'S');
-    // If still none, use A-grade
-    const fallbackElites = eliteUnits.length > 0 ? eliteUnits : roster.filter(u => ['A', 'B'].includes(u.grade));
-
-    const BANNER_THEMES = [
-      { name: 'Crimson Blades', filter: u => u.weapon === 'Sword' || u.weapon === 'Axe', icon: '⚔' },
-      { name: 'Sky Knights', filter: u => u.moveType === 'Flying', icon: '🦅' },
-      { name: 'Iron Fortress', filter: u => u.moveType === 'Armored' || u.def >= 25, icon: '🛡' },
-      { name: 'Arcane Storm', filter: u => ['LightMag', 'DarkMag', 'AnimaMag'].includes(u.weapon), icon: '✨' },
-      { name: 'Swift Strike', filter: u => u.spd >= 28, icon: '⚡' },
-      { name: 'Cavalry Charge', filter: u => u.moveType === 'Cavalry', icon: '🐎' },
-      { name: 'Shadow Ops', filter: u => u.weapon === 'Dagger' || u.weapon === 'Bow', icon: '🎯' },
-      { name: 'Holy Light', filter: u => u.weapon === 'LightMag' || u.faction === 'Celestial', icon: '☀' },
-      { name: 'Abyssal Dark', filter: u => u.weapon === 'DarkMag' || u.faction === 'Abyssal', icon: '🌑' },
-      { name: 'Power Surge', filter: u => u.atk >= 30 || u.mag >= 30, icon: '💥' },
-      { name: 'Verdant Guard', filter: u => u.faction === 'Verdant' || u.weapon === 'Axe', icon: '🌿' },
-      { name: 'Infernal Blaze', filter: u => u.faction === 'Infernal' || u.weapon === 'Sword', icon: '🔥' },
-      { name: 'Cyber Elite', filter: u => u.faction === 'Cyber' || u.spd >= 26, icon: '🤖' },
-      { name: 'Mystic Oracle', filter: u => u.faction === 'Mystic' || u.unitClass === 'Oracle', icon: '🔮' },
-      { name: 'Lance Masters', filter: u => u.weapon === 'Lance', icon: '🔱' },
-    ];
-
-    for (let b = 0; b < 10; b++) {
-      const themeIdx = Math.floor(rng(b * 7) * BANNER_THEMES.length);
-      const theme = BANNER_THEMES[(themeIdx + b) % BANNER_THEMES.length];
-
-      // Pick a T0 focus unit (mandatory)
-      const elitePool = fallbackElites.length > 0 ? fallbackElites : roster;
-      const t0Focus = elitePool[Math.floor(rng(b * 13 + 1) * elitePool.length)];
-
-      // Pick 3-4 normal focus units matching the theme
-      let themeMatches = roster.filter(u => theme.filter(u) && u.id !== t0Focus.id);
-      if (themeMatches.length < 3) {
-        // Pad with random roster units
-        const others = roster.filter(u => u.id !== t0Focus.id && !themeMatches.find(m => m.id === u.id));
-        while (themeMatches.length < 3 && others.length) {
-          const idx = Math.floor(rng(b * 31 + themeMatches.length) * others.length);
-          themeMatches.push(others.splice(idx, 1)[0]);
-        }
-      }
-      // Shuffle and take 3-4
-      themeMatches.sort((a, c) => rng(a.id + b) - rng(c.id + b));
-      const focusCount = 3 + (rng(b * 41) > 0.5 ? 1 : 0);
-      const normalFocus = themeMatches.slice(0, focusCount);
-
-      // Get image names for all focus units
-      const allFocusNames = [t0Focus, ...normalFocus].map(u => {
-        const img = S.images.find(im => im.src === u.src);
-        return img ? img.name : u.name;
-      }).filter(Boolean);
-
-      // Calculate rates
-      const baseT0 = 2.0 + (S.pullCount > 30 ? (S.pullCount - 30) * 0.1 : 0);
-      const baseSRate = 7.0 + (S.pullCount > 30 ? (S.pullCount - 30) * 0.5 : 0);
-
-      banners.push({
-        id: `auto_weekly_${b}_${seed}`,
-        name: `${theme.icon} ${theme.name}`,
-        heroNames: allFocusNames,
-        t0FocusName: t0Focus.name,
-        t0FocusGrade: t0Focus.grade,
-        isAuto: true,
-        t0Rate: Math.round(baseT0 * 10) / 10,
-        sRate: Math.round(baseSRate * 10) / 10,
-        aRate: 14,
-        bRate: 22,
-        cRate: 30,
-        dRate: 25 - Math.max(0, baseT0 - 2 + baseSRate - 7),
-        focusBoost: '4×',
-      });
-    }
-  }
-
-  return banners;
-};
-
-// [CONSOLIDATED] refreshGacha Layer 1 removed — superseded by HOTFIX v2.1 (direct override, no chain)
+// [CONSOLIDATED] MEGA PATCH FIX #4 getAvailableBanners removed — superseded by MEGA PATCH v3 (banner revamp)
 
 
 // ═══════════════════════════════════════════════════════════════
@@ -8695,235 +8481,9 @@ updateHomeScreen = function () {
   console.log('%c  ✓ Credit: Game made by Sincere Smith, ShadenXa', 'color:#22c55e');
 })();
 
-// ═══════════════════════════════════════════════════════════════
-// HOTFIX v2.1 — Merged inline
-// ═══════════════════════════════════════════════════════════════
+// [CONSOLIDATED] HOTFIX v2.1 removed — refreshGacha superseded by MEGA PATCH v3 (banner revamp)
 
-(function() {
-    console.log('%c APEX TIER 0 HOTFIX v2.1 LOADING...', 'color:#00e5ff;font-weight:bold;font-size:14px');
-
-    // [CONSOLIDATED] rollUnit Layer 1 removed — superseded by MEGA PATCH banner-exclusive rollUnit
-
-    // 2. OVERRIDE refreshGacha TO FIX BUTTONS & ICONS
-    window.refreshGacha = function() {
-        document.getElementById('orbCount').textContent = S.ap;
-        const pct = Math.min(100, (S.pullCount / CFG.PITY) * 100);
-        document.getElementById('pityFill').style.width = pct + '%';
-        document.getElementById('pityText').textContent = `${S.pullCount}/${CFG.PITY}`;
-
-        const listEl = document.getElementById('fehBannerList');
-        if (!listEl) return;
-        listEl.innerHTML = '';
-
-        const banners = getAvailableBanners();
-        if (!banners.length) {
-            listEl.innerHTML = '<div style="text-align:center;color:var(--text2);padding:40px;">No banners available. Upload images in Settings!</div>';
-            return;
-        }
-
-        banners.forEach((banner, idx) => {
-            // Rates
-            let t0Rate = banner.t0Rate || (2.0 + (S.pullCount > 30 ? (S.pullCount - 30) * 0.1 : 0));
-            let sRate = banner.sRate || (7.0 + (S.pullCount > 30 ? (S.pullCount - 30) * 0.5 : 0));
-            let aRate = banner.aRate || 14;
-            
-            // Fix Icon Lookup: Try exact image match -> Try Unit Name match -> Placeholder
-            let focusImages = [];
-            const namesToFind = (banner.heroNames || []).slice(0, 5);
-            
-            if (banner.isStandard) {
-                 focusImages = S.images.filter(i => !i.isDefault).slice(0, 4);
-            } else {
-                 focusImages = namesToFind.map(name => {
-                    // Try finding image directly
-                    let img = S.images.find(i => i.name === name);
-                    // Fallback: Find unit in roster and get its src
-                    if (!img) {
-                        const unit = S.roster.find(u => u.name === name);
-                        if (unit && unit.src) img = {src: unit.src, name: unit.name};
-                    }
-                    return img;
-                 }).filter(Boolean);
-            }
-
-            const thumbsHTML = focusImages.map(img =>
-                `<img src="${img.src}" draggable="false" style="width:44px;height:44px;border-radius:50%;object-fit:cover;border:2px solid var(--gold);pointer-events:none;background:#000;" title="${esc(img.name)}">`
-            ).join('');
-
-            const isActive = banner.id === S.activeBannerId;
-            const label = banner.isStandard ? 'STANDARD POOL' : esc(banner.name);
-
-            const card = document.createElement('div');
-            card.style.cssText = `background:var(--panel);border:${isActive ? '2px solid var(--gold)' : '1px solid var(--border)'};border-radius:12px;padding:16px;position:relative;overflow:hidden;flex-shrink:0;${isActive ? 'box-shadow:0 0 20px rgba(251,191,36,.15);' : ''}`;
-
-            // We explicitly set S.activeBannerId in the onclicks to ensure the engine pulls from THIS banner
-            card.innerHTML = `
-            <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;">
-              <div>
-                <div style="font-family:var(--display);font-size:.8rem;color:${isActive ? 'var(--gold)' : 'var(--text)'};letter-spacing:1px;font-weight:700">${isActive ? '★ ' : ''}${label}</div>
-                <div style="font-size:.6rem;color:var(--text2);font-family:var(--mono);margin-top:2px">
-                  ${banner.isStandard ? 'All images included' : `${focusImages.length} focus heroes`}
-                </div>
-                ${banner.t0FocusName ? `<div style="font-size:.58rem;color:var(--t0);font-family:var(--display);margin-top:4px;background:rgba(255,45,85,.1);padding:2px 4px;border-radius:4px;display:inline-block">★ T0: ${esc(banner.t0FocusName)}</div>` : ''}
-              </div>
-              <div style="text-align:right;">
-                <div class="banner-rates">
-                  <span class="banner-rate-chip" style="color:var(--t0);border-color:rgba(255,45,85,.3)">T0: ${t0Rate.toFixed(1)}%</span>
-                  <span class="banner-rate-chip" style="color:var(--s);border-color:rgba(255,215,0,.3)">S: ${sRate.toFixed(1)}%</span>
-                </div>
-              </div>
-            </div>
-            <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;min-height:44px">${thumbsHTML || '<span style="font-size:.6rem;color:var(--text3);align-self:center">No images found</span>'}</div>
-            <div style="display:flex;gap:8px;flex-wrap:wrap;">
-              <button class="btn2 btn-sm" onclick="S.activeBannerId='${banner.id}';startSession()">SESSION (5 AP)</button>
-              <button class="btn2 btn-sm" onclick="S.activeBannerId='${banner.id}';pull1()">1 PULL (5 AP)</button>
-              <button class="btn2 btn-sm" onclick="S.activeBannerId='${banner.id}';pull10()">10 PULL (40 AP)</button>
-              ${!isActive ? `<button class="fbtn" onclick="setActiveBanner('${banner.id}');refreshGacha()">Set Default</button>` : ''}
-            </div>
-            ${isActive ? '<div style="position:absolute;top:0;left:0;right:0;height:2px;background:var(--t0g);background-size:200% 200%;animation:t0shift 3s ease infinite"></div>' : ''}`;
-
-            listEl.appendChild(card);
-        });
-        
-        // Add footer padding
-        const pad = document.createElement('div');
-        pad.style.height = "40px";
-        listEl.appendChild(pad);
-    };
-
-    console.log('%c APEX TIER 0 HOTFIX v2.1 APPLIED', 'color:#00e5ff;font-weight:bold;font-size:14px');
-    
-    // Re-render if currently on Gacha screen
-    if(document.getElementById('gacha').classList.contains('active')) {
-        refreshGacha();
-    }
-})();
-
-// ═══════════════════════════════════════════════════════════════
-// HOTFIX v2.2 — Merged inline
-// ═══════════════════════════════════════════════════════════════
-
-(function() {
-    console.log('%c APEX TIER 0 HOTFIX v2.2 (Gacha Roster Fix) LOADING...', 'color:#00e5ff;font-weight:bold;font-size:14px');
-
-    window.getAvailableBanners = function () {
-      const banners =[];
-      const pool = S.images.filter(i => !i.isDefault);
-      const roster = S.roster;
-
-      // 1. Standard pool (always first)
-      banners.push({
-        id: 'standard', name: 'Standard Pool', heroNames:[],
-        isAuto: true, isStandard: true,
-        t0Rate: 2, sRate: 7, aRate: 14
-      });
-
-      // 2. User-created custom banners
-      S.banners.forEach(b => banners.push(b));
-
-      // 3. Generate exactly 10 procedural weekly banners focusing on UNOWNED + LV 40 units
-      if (pool.length >= 4) {
-        const seed = Math.floor(Date.now() / 604800000); // Weekly rotating seed
-        const rng = (i) => {
-          let s = (seed * 2654435761 + i * 40503) & 0x7fffffff;
-          s = ((s >> 16) ^ s) * 45679;
-          return Math.abs(s % 10000) / 10000;
-        };
-
-        // Categorize the pool
-        const ownedNames = new Set(roster.map(u => u.name));
-        const unownedImages = pool.filter(img => !ownedNames.has(img.name));
-        const lv40Units = roster.filter(u => (u.level || 1) >= 40);
-
-        // Dynamic dupe chance: Base 5%, +2% per lv40 unit, max 35%
-        const dupeChance = Math.min(0.35, 0.05 + (lv40Units.length * 0.02));
-
-        // Generic thematic names to avoid weapon/role mismatch for unsummoned units
-        const BANNER_THEMES =[
-          { name: 'Echoes of the Past', icon: '🌌' },
-          { name: 'New Horizons', icon: '🌅' },
-          { name: 'Apex Vanguard', icon: '⚔' },
-          { name: 'Celestial Summons', icon: '✨' },
-          { name: 'Phantom Shadows', icon: '🌑' },
-          { name: 'Roar of the Wild', icon: '🦁' },
-          { name: 'Storm Walkers', icon: '⚡' },
-          { name: 'Iron Will', icon: '🛡' },
-          { name: 'Crimson Fate', icon: '🩸' },
-          { name: 'Azure Dreams', icon: '🌊' },
-        ];
-
-        for (let b = 0; b < 10; b++) {
-          const themeIdx = Math.floor(rng(b * 7) * BANNER_THEMES.length);
-          const theme = BANNER_THEMES[(themeIdx + b) % BANNER_THEMES.length];
-
-          const focusNames = new Set();
-          let t0FocusName = null;
-
-          // Pick 4 unique focus units for the banner
-          for (let i = 0; i < 4; i++) {
-            let selectedImg = null;
-
-            // 1. Roll for Lv 40 Dupe (if player has maxed units)
-            if (lv40Units.length > 0 && rng(b * 13 + i) < dupeChance) {
-               const cand = lv40Units[Math.floor(rng(b * 17 + i) * lv40Units.length)];
-               selectedImg = pool.find(img => cand.name === img.name) || cand;
-            }
-
-            // 2. Fallback to Unowned units
-            if (!selectedImg && unownedImages.length > 0) {
-               const availableUnowned = unownedImages.filter(img => !focusNames.has(img.name));
-               if(availableUnowned.length > 0) {
-                   selectedImg = availableUnowned[Math.floor(rng(b * 19 + i) * availableUnowned.length)];
-               }
-            }
-
-            // 3. Ultimate fallback to entire pool (if no unowned left)
-            if (!selectedImg) {
-               const availablePool = pool.filter(img => !focusNames.has(img.name));
-               if(availablePool.length > 0) {
-                   selectedImg = availablePool[Math.floor(rng(b * 23 + i) * availablePool.length)];
-               }
-            }
-
-            if (selectedImg) {
-               focusNames.add(selectedImg.name);
-               if (i === 0) t0FocusName = selectedImg.name; // First picked is T0 focus
-            }
-          }
-
-          // Calculate rates
-          const baseT0 = 2.0 + (S.pullCount > 30 ? (S.pullCount - 30) * 0.1 : 0);
-          const baseSRate = 7.0 + (S.pullCount > 30 ? (S.pullCount - 30) * 0.5 : 0);
-
-          banners.push({
-            id: `auto_weekly_${b}_${seed}`,
-            name: `${theme.icon} ${theme.name}`,
-            heroNames: Array.from(focusNames),
-            t0FocusName: t0FocusName,
-            t0FocusGrade: 'T0',
-            isAuto: true,
-            t0Rate: Math.round(baseT0 * 10) / 10,
-            sRate: Math.round(baseSRate * 10) / 10,
-            aRate: 14,
-            bRate: 22,
-            cRate: 30,
-            dRate: 25 - Math.max(0, baseT0 - 2 + baseSRate - 7),
-            focusBoost: '4×',
-          });
-        }
-      }
-
-      return banners;
-    };
-
-    // Auto-refresh the Gacha screen if the user is currently looking at it
-    const gachaEl = document.getElementById('gacha');
-    if(gachaEl && gachaEl.classList.contains('active')) {
-        if(typeof refreshGacha === 'function') refreshGacha();
-    }
-    
-    console.log('%c APEX TIER 0 HOTFIX v2.2 APPLIED', 'color:#00e5ff;font-weight:bold;font-size:14px');
-})();
+// [CONSOLIDATED] HOTFIX v2.2 removed — getAvailableBanners superseded by MEGA PATCH v3 (banner revamp)
 
 // ═══════════════════════════════════════════════════════════════
 // AUTO-BATTLE SYSTEM — "Grind Fix"
@@ -10082,18 +9642,7 @@ updateHomeScreen = function () {
     }, {passive: false});
 
     // ─── 3. NULL GUARD WRAPPERS ──────────────────────────────
-    // Guard all special accesses in battle preparation
-    if(typeof prepUnit === 'function') {
-        const _origPrepUnit = prepUnit;
-        window.prepUnit = function(unit, side) {
-            const u = _origPrepUnit(unit, side);
-            if(u && !u.special) {
-                u.special = {name:'None',desc:'No special skill',effect:'none',val:0,cd:99};
-            }
-            if(u) u.specialCharges = u.special ? u.special.cd : 0;
-            return u;
-        };
-    }
+    // [CONSOLIDATED] Special null guard merged into prepUnit
 
     // ─── 4. MAESTRO V3: ADAPTIVE DYNAMIC MUSIC ──────────────
     class MaestroV3 {
@@ -10394,17 +9943,7 @@ updateHomeScreen = function () {
 
     // [CONSOLIDATED] Cinematic transitions — merged into main nav()
 
-    // Hook into battle phase changes for music intensity
-    const _origEndPlayerPhase = endPlayerPhase;
-    window.endPlayerPhase = function() {
-        if(bgm && bgm.setIntensity) bgm.setIntensity('enemy');
-        _origEndPlayerPhase.apply(this, arguments);
-    };
-    const _origEndEnemyPhase2 = endEnemyPhase;
-    window.endEnemyPhase = function() {
-        _origEndEnemyPhase2.apply(this, arguments);
-        if(bgm && bgm.setIntensity && B.phase === 'player') bgm.setIntensity('player');
-    };
+    // [CONSOLIDATED] Music intensity merged into endPlayerPhase/endEnemyPhase
 
     // [CONSOLIDATED] Weapon viewer — merged into main openHeroDetail
 
@@ -10441,13 +9980,8 @@ updateHomeScreen = function () {
         };
     }
 
-    // Track turn count
+    // [CONSOLIDATED] Turn counter merged into endPlayerPhase
     if(typeof B !== 'undefined') B.turnCount = 0;
-    const _origEPP = window.endPlayerPhase;
-    window.endPlayerPhase = function() {
-        B.turnCount = (B.turnCount || 0) + 1;
-        _origEPP.apply(this, arguments);
-    };
 
     console.log('%c GRAND STABILITY & POLISH PATCH APPLIED', 'color:#22c55e;font-weight:bold;font-size:14px');
     console.log('%c  ✓ Canvas drawImage crash safety', 'color:#22c55e');
@@ -10771,25 +10305,7 @@ updateHomeScreen = function () {
         return Math.floor((S.compendium.length || 0) / 5) * 0.01;
     };
 
-    const _origPrepUnit_v35 = window.prepUnit;
-    window.prepUnit = function(unit, side) {
-        const hadTempestHp = unit.tempestHp !== undefined;
-        const u = _origPrepUnit_v35.apply(this, arguments);
-        if(u && side === 'player') {
-            const bonusMult = 1 + getCompendiumBonus();
-            if(bonusMult > 1) {
-                ['atk','def','mag','res','spd'].forEach(s => { u[s] = Math.floor(u[s] * bonusMult); });
-                u.maxHp = Math.floor(u.maxHp * bonusMult);
-                // Only scale current HP if NOT carrying over from Tempest (already multiplied)
-                if(!hadTempestHp) {
-                    u.hp = u.maxHp;
-                }
-                // Clamp carryover HP to new maxHp
-                u.hp = Math.min(u.hp, u.maxHp);
-            }
-        }
-        return u;
-    };
+    // [CONSOLIDATED] Compendium bonus merged into prepUnit
 
     window._compPage = 0;
     window.renderCompendium = function(page) {
@@ -11048,73 +10564,11 @@ updateHomeScreen = function () {
         setTimeout(() => ripple.remove(), 500);
     });
 
-    // ─── 2. ENHANCED VICTORY SCREEN WITH XP BREAKDOWN ────────
-    const _origShowWin = showWin;
-    window.showWin = function(ap, elo) {
-        // Capture XP state before awarding
-        const xpData = [];
-        const expMult = (typeof currentBattleConfig !== 'undefined' && currentBattleConfig?.expMult) ?? 1;
-        if (typeof B !== 'undefined' && B.pUnits) {
-            B.pUnits.filter(u => u.hp > 0).forEach(bu => {
-                const ru = S.roster.find(r => r.id === bu.id);
-                if (ru) {
-                    const xpGain = Math.round(20 * expMult);
-                    const expReq = Math.floor(100 * Math.pow(ru.level || 1, 1.5));
-                    const prevPct = ru.level >= 40 ? 100 : Math.min(100, Math.round(((ru.exp || 0) / expReq) * 100));
-                    // Check if unit will level up (exp was already awarded by checkBattleOver)
-                    const newExpReq = Math.floor(100 * Math.pow(ru.level || 1, 1.5));
-                    const newPct = ru.level >= 40 ? 100 : Math.min(100, Math.round(((ru.exp || 0) / newExpReq) * 100));
-                    xpData.push({
-                        name: ru.name,
-                        level: ru.level || 1,
-                        xpGain: xpGain,
-                        pct: newPct,
-                        leveledUp: ru.level > (bu.level || ru.level)
-                    });
-                }
-            });
-        }
-
-        _origShowWin(ap, elo);
-
-        // Add XP breakdown to result card
-        if (xpData.length > 0) {
-            const rewardEl = document.getElementById('resultReward');
-            if (rewardEl) {
-                let xpHTML = rewardEl.innerHTML;
-                xpHTML += '<div class="result-xp-list">';
-                xpData.forEach((d, i) => {
-                    xpHTML += `<div class="result-xp-unit" style="animation-delay:${i * 0.1 + 0.3}s">
-                        <span class="result-xp-name">${d.name}</span>
-                        <div class="result-xp-bar"><div class="result-xp-fill" style="width:0%"></div></div>
-                        <span class="result-xp-text">+${d.xpGain} XP</span>
-                        ${d.leveledUp ? '<span class="result-lvlup">LV UP!</span>' : ''}
-                    </div>`;
-                });
-                xpHTML += '</div>';
-                rewardEl.innerHTML = xpHTML;
-
-                // Animate XP bars after a short delay
-                requestAnimationFrame(() => {
-                    setTimeout(() => {
-                        rewardEl.querySelectorAll('.result-xp-fill').forEach((bar, i) => {
-                            bar.style.width = xpData[i].pct + '%';
-                        });
-                    }, 400);
-                });
-            }
-        }
-    };
+    // [CONSOLIDATED] XP breakdown merged into showWin
 
     // [CONSOLIDATED] Transition timing — transitions built into main nav()
 
-    // ─── 4. ENHANCED TOAST WITH ICONS ─────────────────────────
-    const _origToast = toast;
-    window.toast = function(msg, type) {
-        const icons = { ok: '✓ ', err: '✕ ', gold: '★ ' };
-        const prefix = icons[type] || '';
-        _origToast(prefix + msg, type);
-    };
+    // [CONSOLIDATED] Toast icons merged into toast()
 
     console.log('%c  ✓ Extreme Polish Pack loaded', 'color:#22c55e');
 })();
@@ -11336,8 +10790,8 @@ mpOverlay.addEventListener('click', (e) => {
 });
 
 // Patch pull10 to use sequential animation
-const _origPull10 = pull10;
-window.pull10 = pull10 = function() {
+// [CONSOLIDATED] pull10 — final version (replaces original)
+pull10 = function() {
     if(_pullLock) return;
     if(!getPool().length) { toast('Add images first!','err'); return; }
     if(S.ap < CFG.PULL10) { toast('Not enough Flux!','err'); return; }
@@ -11360,9 +10814,8 @@ console.log('%c  ✓ Multi-pull sequential animation', 'color:#22c55e');
 // 2. BANNER REVAMP: 10+ chars, 2+ T0s, banner-exclusive, clear rates
 // ─────────────────────────────────────────────────────────────
 
-// Override banner generation to produce proper banners with 10+ units and 2+ T0s
-const _origGetAvailableBanners = getAvailableBanners;
-window.getAvailableBanners = getAvailableBanners = function() {
+// [CONSOLIDATED] getAvailableBanners — final version (replaces original)
+getAvailableBanners = function() {
     const banners = [];
     const pool = S.images.filter(i => !i.isDefault);
     if(!pool.length) {
@@ -11427,10 +10880,9 @@ window.getAvailableBanners = getAvailableBanners = function() {
     return banners;
 };
 
-// Override rollUnit to enforce banner-exclusive pulls on featured banners
-// CONSOLIDATED: Includes compendium tracking, Apex Meter, and achievements (from earlier overrides)
-const _origRollUnit = rollUnit;
-window.rollUnit = rollUnit = function(guaranteeHigh = false) {
+// [CONSOLIDATED] rollUnit — final version (replaces original)
+// Includes banner-exclusive pulls, compendium tracking, Apex Meter, and achievements
+rollUnit = function(guaranteeHigh = false) {
     const fullPool = getPool();
     if(!fullPool.length) { toast('Add images first!','err'); return null; }
     S.pullCount++;
@@ -11523,9 +10975,8 @@ window.rollUnit = rollUnit = function(guaranteeHigh = false) {
     return {dup:false, unit};
 };
 
-// Override refreshGacha to show better banner cards with rates and exclusivity info
-const _origRefreshGacha = refreshGacha;
-window.refreshGacha = refreshGacha = function() {
+// [CONSOLIDATED] refreshGacha — final version (replaces original)
+refreshGacha = function() {
     document.getElementById('orbCount').textContent = S.ap;
     const _shEl = document.getElementById('gachaShardsCount'); if(_shEl) _shEl.textContent = S.shards || 0;
     const _atEl = document.getElementById('gachaTokenCount'); if(_atEl) _atEl.textContent = S.apexTokens || 0;
@@ -11688,18 +11139,7 @@ function renameTermsInUI() {
 // [CONSOLIDATED] Nav term renaming — merged into main nav()
 setTimeout(renameTermsInUI, 500);
 
-// Override the toast to rename terms
-const _origToast2 = window.toast;
-window.toast = function(msg, type) {
-    if(typeof msg === 'string') {
-        msg = msg.replace(/\bAP\b/g, 'Flux');
-        msg = msg.replace(/\bApex Token\b/g, 'Zenith Mark');
-        msg = msg.replace(/\bAPEX TOKEN\b/g, 'ZENITH MARK');
-        msg = msg.replace(/\bshards\b/g, 'Prisms');
-        msg = msg.replace(/\bSH\b(?=[^a-zA-Z]|$)/g, 'PR');
-    }
-    _origToast2(msg, type);
-};
+// [CONSOLIDATED] Toast term renaming merged into toast()
 
 // Add Glossary content to the compendium tab
 const _origSetHQTab = window.setHQTab;
@@ -11932,60 +11372,7 @@ console.log('%c  ✓ APEX difficulty mode added', 'color:#22c55e');
 // 5. DIFFICULTY SELECTION ON ALL MODES (including Campaign)
 // ─────────────────────────────────────────────────────────────
 
-// Campaign already calls startBattle directly without chooseDifficulty
-// Patch startCampaign and startExpandedCampaign to show difficulty picker
-const _origStartCampaign = startCampaign;
-window.startCampaign = startCampaign = function(id) {
-    chooseDifficulty(() => _origStartCampaign(id));
-};
-
-const _origStartExpandedCampaign = typeof startExpandedCampaign === 'function' ? startExpandedCampaign : null;
-if(_origStartExpandedCampaign) {
-    window.startExpandedCampaign = startExpandedCampaign = function(id) {
-        chooseDifficulty(() => _origStartExpandedCampaign(id));
-    };
-}
-
-// Tempest already doesn't use chooseDifficulty - add it for first stage
-const _origStartTempest = startTempest;
-window.startTempest = startTempest = function(stage = 1) {
-    if(stage === 1) {
-        chooseDifficulty(() => _origStartTempest(stage));
-    } else {
-        _origStartTempest(stage);
-    }
-};
-
-// Training tower floor launch — add difficulty
-const _origLaunchTrainingFloor = launchTrainingFloor;
-window.launchTrainingFloor = launchTrainingFloor = function(floor) {
-    chooseDifficulty(() => _origLaunchTrainingFloor(floor));
-};
-
-// Hall of Forms — add difficulty for initial start
-const _origStartHoF = typeof startHallOfForms === 'function' ? startHallOfForms : null;
-if(_origStartHoF) {
-    window.startHallOfForms = startHallOfForms = function() {
-        chooseDifficulty(() => _origStartHoF());
-    };
-}
-
-// Heroic Ordeal
-const _origStartOrdeal = typeof startHeroicOrdeal === 'function' ? startHeroicOrdeal : null;
-if(_origStartOrdeal) {
-    window.startHeroicOrdeal = startHeroicOrdeal = function(idx) {
-        chooseDifficulty(() => _origStartOrdeal(idx));
-    };
-}
-
-// BHB
-const _origStartBHB = typeof startBHB === 'function' ? startBHB : null;
-if(_origStartBHB) {
-    window.startBHB = startBHB = function() {
-        chooseDifficulty(() => _origStartBHB());
-    };
-}
-
+// [CONSOLIDATED] Difficulty picker wrappers merged into original function definitions
 console.log('%c  ✓ Difficulty selection on all modes', 'color:#22c55e');
 
 
@@ -12036,9 +11423,8 @@ function getDifficultyStars(clearsObj, id) {
 
 // [CONSOLIDATED] Difficulty tracking — merged into main checkBattleOver
 
-// Override refreshCampaign to show difficulty clear stars
-const _origRefreshCampaign2 = refreshCampaign;
-window.refreshCampaign = refreshCampaign = function() {
+// [CONSOLIDATED] refreshCampaign — final version with difficulty clear stars
+refreshCampaign = function() {
     const list = document.getElementById('campList');
     if(!list) return;
     list.innerHTML = '';
@@ -12079,9 +11465,8 @@ window.refreshCampaign = refreshCampaign = function() {
     });
 };
 
-// Override refreshModes to show difficulty clear status on mode cards
-const _origRefreshModes = refreshModes;
-window.refreshModes = refreshModes = function() {
+// [CONSOLIDATED] refreshModes — final version with difficulty clear stars
+refreshModes = function() {
     const el = document.getElementById('modesContent'); if(!el) return;
     el.innerHTML = '';
     const _ghbDay = new Date().getDay();
@@ -12126,9 +11511,8 @@ window.refreshModes = refreshModes = function() {
     });
 };
 
-// Training tower floor picker with difficulty stars
-const _origStartTrainingMode = startTrainingMode;
-window.startTrainingMode = startTrainingMode = function() {
+// [CONSOLIDATED] startTrainingMode — final version with difficulty stars
+startTrainingMode = function() {
     if(!S.trainingFloor) S.trainingFloor = 1;
     const floors = document.getElementById('modesContent');
     floors.innerHTML = `<div style="font-family:var(--display);font-size:.7rem;color:var(--t0);letter-spacing:1px;margin-bottom:10px">TRAINING TOWER — Select Floor</div>
@@ -12150,20 +11534,7 @@ window.startTrainingMode = startTrainingMode = function() {
     <button class="btn2 btn-sm" style="margin-top:10px" onclick="refreshModes()">Back</button>`;
 };
 
-// Update the showWin to display difficulty
-const _origShowWin = showWin;
-if(typeof _origShowWin === 'function') {
-    window.showWin = showWin = function(apReward, eloGain) {
-        _origShowWin(apReward, eloGain);
-        // Add difficulty badge to result
-        const resultSub = document.getElementById('resultSub');
-        if(resultSub) {
-            const diff = currentDifficulty || 'normal';
-            const info = DIFF_LABELS[diff];
-            resultSub.innerHTML += `<div style="margin-top:6px;font-family:var(--display);font-size:.7rem;color:${info.color};letter-spacing:2px">${info.icon} CLEARED ON ${info.name.toUpperCase()}</div>`;
-        }
-    };
-}
+// [CONSOLIDATED] Difficulty badge merged into showWin
 
 console.log('%c  ✓ Difficulty clear tracking & display', 'color:#22c55e');
 
@@ -13075,31 +12446,7 @@ window.launchCampaignBattle_v2 = function(battleNum) {
 
 // [CONSOLIDATED] checkBattleOver campaign_v2 tracking — merged into main checkBattleOver
 
-// Override result screen to show "Continue" button for campaign
-const _origShowWin_camp = window.showWin;
-window.showWin = function(ap, elo) {
-    _origShowWin_camp.apply(this, arguments);
-
-    if(currentBattleMode === 'campaign_v2') {
-        const battleNum = B._currentCampaignBattle || currentBattleConfig?.battleNum;
-        if(battleNum && battleNum < TOTAL_BATTLES) {
-            const resultBtns = document.querySelector('.result-btns');
-            // Guard: only add the button once (prevents duplicates from repeated showWin calls)
-            if(resultBtns && !resultBtns.querySelector('#campNextBattleBtn')) {
-                const contBtn = document.createElement('button');
-                contBtn.id = 'campNextBattleBtn';
-                contBtn.className = 'btn-t0';
-                contBtn.style.cssText = 'font-size:.75rem;padding:8px 14px';
-                contBtn.textContent = 'BACK TO CAMPAIGN ▸';
-                contBtn.onclick = function() {
-                    closeResult();
-                    setTimeout(function() { goToCampaign(); }, 120);
-                };
-                resultBtns.appendChild(contBtn);
-            }
-        }
-    }
-};
+// [CONSOLIDATED] Campaign continue button merged into showWin
 
 // ═══════════════════════════════════════════════════════════════
 // BOSS BATTLE ENHANCEMENTS — Bosses get special configs
