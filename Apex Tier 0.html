@@ -4223,11 +4223,11 @@ if(stage<totalStages){
 S.ap+=apReward;save(true);
 if(typeof gameConfirm==='function'){
 gameConfirm(`Stage ${stage}/${totalStages} complete! Continue to stage ${stage+1}?`,()=>{
-B.pUnits.forEach(bu=>{const ru=S.roster.find(r=>r.id===bu.id);if(ru)ru.tempestHp=bu.hp;});
+B.pUnits.forEach(bu=>{const ru=S.roster.find(r=>r.id===bu.id);if(ru)ru.tempestHp=Math.max(bu.hp,0);});
 startTempest(stage+1);
 });return true;
 }else if(confirm(`Stage ${stage}/${totalStages} complete! Continue to stage ${stage+1}?`)){
-B.pUnits.forEach(bu=>{const ru=S.roster.find(r=>r.id===bu.id);if(ru)ru.tempestHp=bu.hp;});
+B.pUnits.forEach(bu=>{const ru=S.roster.find(r=>r.id===bu.id);if(ru)ru.tempestHp=Math.max(bu.hp,0);});
 startTempest(stage+1);return true;
 }
 }else{apReward+=20;bLog('TEMPEST TRIALS COMPLETE! +20 AP bonus','spec');}
@@ -9073,7 +9073,7 @@ updateHomeScreen = function () {
     }
     function addSupport(idA, idB, amount) {
         const key = supportKey(idA, idB);
-        S.supportMap[key] = Math.min(BOND_MAX, (S.supportMap[key] || 0) + amount);
+        S.supportMap[key] = Math.max(0, Math.min(BOND_MAX, (S.supportMap[key] || 0) + amount));
     }
     function getSupportRank(val) {
         if(val >= 80) return {rank: 'S', stars: '★★★★★', color: '#ffd700'};
@@ -9190,6 +9190,11 @@ updateHomeScreen = function () {
     };
 
     window.dcAssignUnit = function(slot, uid) {
+        if(slot !== 0 && slot !== 1) return;
+        if(!S.roster.find(r => r.id === uid)) return;
+        // Prevent assigning same unit to both slots
+        const otherSlot = slot === 0 ? 1 : 0;
+        if(S.daycareSlots[otherSlot] === uid) return;
         S.daycareSlots[slot] = uid;
         save(true);
         // Rebuild the full daycare screen
@@ -13324,14 +13329,10 @@ window.showWin = function(ap, elo) {
                 contBtn.id = 'campNextBattleBtn';
                 contBtn.className = 'btn-t0';
                 contBtn.style.cssText = 'font-size:.75rem;padding:8px 14px';
-                contBtn.textContent = 'NEXT BATTLE ▸';
+                contBtn.textContent = 'BACK TO CAMPAIGN ▸';
                 contBtn.onclick = function() {
                     closeResult();
-                    // Delay launch so closeResult screen transition settles
-                    // and dialog/difficulty picker can render on a clean slate
-                    setTimeout(function() {
-                        launchCampaignBattle_v2(battleNum + 1);
-                    }, 120);
+                    setTimeout(function() { goToCampaign(); }, 120);
                 };
                 resultBtns.appendChild(contBtn);
             }
@@ -13876,143 +13877,18 @@ function goToCampaign() {
 }
 
 
-// ─── 1. NEXT BATTLE → BACK TO CAMPAIGN ──────────────────────
-// Use a MutationObserver to catch any DOM element containing
-// "Next Battle" text and replace it immediately.
+// [CONSOLIDATED] _nextBattleObserver removed — "Next Battle" button source at line ~13332
+// now directly creates "Back to Campaign" with goToCampaign() onclick, eliminating the need
+// for a MutationObserver watching the entire DOM tree.
 
-var _nextBattleObserver = new MutationObserver(function(mutations) {
-    for (var m = 0; m < mutations.length; m++) {
-        var added = mutations[m].addedNodes;
-        for (var n = 0; n < added.length; n++) {
-            var node = added[n];
-            if (!node || node.nodeType !== 1) continue;
-            _replaceNextBattleButtons(node);
-        }
-    }
-});
+// ─── RESET ALL DATA → also clear localStorage ────────────
+// Approach: monkey-patch known global reset functions.
 
-function _replaceNextBattleButtons(root) {
-    // Check the root element itself
-    _swapIfNextBattle(root);
-    // Check all descendants
-    if (root.querySelectorAll) {
-        var candidates = root.querySelectorAll('button, div, span, a, [onclick]');
-        for (var i = 0; i < candidates.length; i++) {
-            _swapIfNextBattle(candidates[i]);
-        }
-    }
-}
+// [CONSOLIDATED] _resetObserver MutationObserver removed — redundant with global function patching below.
+// The observer watched the entire DOM tree for "Reset All" buttons, but all reset functions
+// are already monkey-patched to clear localStorage/sessionStorage.
 
-function _swapIfNextBattle(el) {
-    if (!el) return;
-    var text = (el.textContent || '').trim();
-    // Match variations: "Next Battle", "NEXT BATTLE", "Next battle", "next battle"
-    if (/^next\s*battle$/i.test(text)) {
-        el.textContent = 'Back to Campaign';
-        // Override ALL click handlers
-        var newHandler = function(e) {
-            e.preventDefault();
-            e.stopPropagation();
-            e.stopImmediatePropagation();
-            goToCampaign();
-        };
-        // Remove existing onclick
-        el.onclick = null;
-        el.removeAttribute('onclick');
-        // Clone to strip addEventListener-attached handlers
-        var clone = el.cloneNode(true);
-        clone.textContent = 'Back to Campaign';
-        clone.addEventListener('click', newHandler, true);
-        if (el.parentNode) {
-            el.parentNode.replaceChild(clone, el);
-        }
-        return;
-    }
-    // Also check innerHTML for cases where it's inside a wrapper
-    if (el.innerHTML && /next\s*battle/i.test(el.innerHTML) && el.children.length === 0) {
-        el.innerHTML = el.innerHTML.replace(/next\s*battle/gi, 'Back to Campaign');
-        var handler2 = function(e) {
-            e.preventDefault();
-            e.stopPropagation();
-            goToCampaign();
-        };
-        el.onclick = null;
-        el.removeAttribute('onclick');
-        var clone2 = el.cloneNode(true);
-        clone2.addEventListener('click', handler2, true);
-        if (el.parentNode) {
-            el.parentNode.replaceChild(clone2, el);
-        }
-    }
-}
-
-// Start observing the entire document
-_nextBattleObserver.observe(document.body || document.documentElement, {
-    childList: true,
-    subtree: true
-});
-
-// Also do an initial sweep for any "Next Battle" already in the DOM
-_replaceNextBattleButtons(document.body || document.documentElement);
-
-
-// ─── 2. RESET ALL DATA → also clear localStorage ────────────
-// Approach: intercept every possible reset path.
-
-// 2a. MutationObserver to find "Reset All Data" buttons and wrap their handlers
-var _resetObserver = new MutationObserver(function(mutations) {
-    for (var m = 0; m < mutations.length; m++) {
-        var added = mutations[m].addedNodes;
-        for (var n = 0; n < added.length; n++) {
-            var node = added[n];
-            if (!node || node.nodeType !== 1) continue;
-            _wrapResetButtons(node);
-        }
-    }
-});
-
-function _wrapResetButtons(root) {
-    _wrapIfReset(root);
-    if (root.querySelectorAll) {
-        var elems = root.querySelectorAll('button, div, span, a, [onclick]');
-        for (var i = 0; i < elems.length; i++) {
-            _wrapIfReset(elems[i]);
-        }
-    }
-}
-
-function _wrapIfReset(el) {
-    if (!el || el._resetPatched) return;
-    var text = (el.textContent || '').trim().toLowerCase();
-    if (text.indexOf('reset all') !== -1 || text.indexOf('reset data') !== -1 ||
-        text.indexOf('delete all') !== -1 || text.indexOf('erase all') !== -1) {
-        el._resetPatched = true;
-        // Wrap existing onclick
-        var origOnclick = el.onclick;
-        el.onclick = function(e) {
-            // Clear browser storage FIRST
-            try { localStorage.clear(); } catch(ex) {}
-            try { sessionStorage.clear(); } catch(ex) {}
-            // Then call original handler
-            if (typeof origOnclick === 'function') {
-                return origOnclick.call(this, e);
-            }
-        };
-        // Also add a capturing listener as a safety net
-        el.addEventListener('click', function() {
-            try { localStorage.clear(); } catch(ex) {}
-            try { sessionStorage.clear(); } catch(ex) {}
-        }, true);
-    }
-}
-
-_resetObserver.observe(document.body || document.documentElement, {
-    childList: true,
-    subtree: true
-});
-_wrapResetButtons(document.body || document.documentElement);
-
-// 2b. Monkey-patch known global reset functions
+// 2. Monkey-patch known global reset functions
 var _globalResetNames = [
     'resetAll', 'resetAllData', 'resetGame', 'hardReset',
     'clearAllData', 'deleteAll', 'factoryReset', 'resetData',
@@ -14073,7 +13949,7 @@ window.confirm = function(msg) {
     return result;
 };
 
-console.log('[UI Tweaks] Patches active: Next Battle → Campaign, Reset clears localStorage');
+console.log('[UI Tweaks] Patches active: Reset clears localStorage');
 })();
 
 // ╔══════════════════════════════════════════════════════════════╗
