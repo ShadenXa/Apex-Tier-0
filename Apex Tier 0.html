@@ -9447,9 +9447,13 @@ updateHomeScreen = function () {
     // ─── Pet Both button ──────────────────────────────────────
     window.dcPetBoth = function() {
         if(S.daycareSlots[0] && S.daycareSlots[1]) {
-            addSupport(S.daycareSlots[0], S.daycareSlots[1], BOND_PER_PET);
+            const curBond = getSupport(S.daycareSlots[0], S.daycareSlots[1]);
+            if(curBond >= 50) {
+                toast('Bond maxed for Daycare! Fight together in battles to reach S-Rank!', 'gold');
+                return;
+            }
+            addSupport(S.daycareSlots[0], S.daycareSlots[1], Math.min(BOND_PER_PET, 50 - curBond));
             dcSprites.forEach(sp => { sp.wiggleTimer = 20; });
-            // Spawn hearts
             const garden = document.getElementById('dcGarden');
             if(garden) {
                 const rect = garden.getBoundingClientRect();
