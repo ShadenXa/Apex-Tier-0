@@ -902,9 +902,9 @@ input[type=range]{accent-color:var(--t0);width:100px}
 .comp-slot.unlocked{opacity:1;filter:grayscale(0%);border-color:var(--gold);box-shadow:0 0 10px rgba(251,191,36,.3)}
 .code-textarea{width:100%;height:80px;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:var(--mono);font-size:.6rem;padding:8px;border-radius:6px;resize:none;margin-bottom:8px}
 /* HQ Tabs */
-.hq-tab{display:none;flex:1;overflow:hidden;min-height:0;height:0}
-.hq-tab.active{display:flex;flex-direction:column;height:0}
-.hq-scroll{flex:1;overflow-y:auto;padding:16px;max-width:600px;margin:0 auto;width:100%;display:flex;flex-direction:column;gap:16px;min-height:0;-webkit-overflow-scrolling:touch;overscroll-behavior:contain}
+.hq-tab{display:none;flex:1;overflow:hidden;min-height:0}
+.hq-tab.active{display:flex;flex-direction:column;flex:1;min-height:0}
+.hq-scroll{flex:1;overflow-y:auto;padding:16px;max-width:720px;margin:0 auto;width:100%;display:flex;flex-direction:column;gap:16px;min-height:0;-webkit-overflow-scrolling:touch;overscroll-behavior:contain}
 .hq-scroll::-webkit-scrollbar{width:3px}
 .hq-scroll::-webkit-scrollbar-thumb{background:var(--t0);border-radius:2px}
 /* Title cards */
@@ -931,11 +931,11 @@ input[type=range]{accent-color:var(--t0);width:100px}
 <div class="home-stats-strip" id="homeStatStrip"></div>
 <div class="home-btns">
 <button class="btn-t0" onclick="nav('gacha')" data-tip="Spend AP to summon new heroes from your image pool">SUMMON UNITS</button>
-<div style="display:flex;gap:8px;width:260px">
+<div style="display:flex;gap:8px;width:100%">
 <button class="btn2" style="flex:1" onclick="nav('barracks')" data-tip="View and manage all your summoned heroes">BARRACKS</button>
 <button class="btn2" style="flex:1" onclick="nav('quests')" data-tip="Daily and story quests for bonus AP rewards">QUESTS <span id="homeQuestBadge" class="quest-badge" style="display:none">!</span></button>
 </div>
-<div style="display:flex;gap:8px;width:260px">
+<div style="display:flex;gap:8px;width:100%">
 <button class="btn2" style="flex:1" onclick="nav('campaign')" data-tip="Story battles with dialog and unique rewards">CAMPAIGN</button>
 <button class="btn2" style="flex:1" onclick="nav('modes')" data-tip="Training Tower, Arena, GHB, Tempest Trials, Hall of Forms, and more">MODES</button>
 </div>
@@ -1231,40 +1231,22 @@ input[type=range]{accent-color:var(--t0);width:100px}
 <!-- APEX HQ (Tokens & Social) -->
 <div class="screen" id="tavern">
 <div class="hdr"><div class="hdr-logo">APEX HQ</div>
-<div style="font-family:var(--mono);font-size:.6rem;color:var(--gold);margin-left:8px" id="hqTokens">0 AT</div>
 <div class="hdr-nav"><button class="nbtn" onclick="nav('home')">HOME</button></div></div>
 
 <!-- Tabs -->
 <div class="settings-tabs" id="hqTabs">
-<button class="stab active" onclick="setHQTab('tokens')">TOKENS</button>
+<button class="stab active" onclick="setHQTab('glossary')">GLOSSARY</button>
 <button class="stab" onclick="setHQTab('achievements')">MEDALS</button>
 <button class="stab" onclick="setHQTab('multiplayer')">MULTI</button>
-<button class="stab" onclick="setHQTab('compendium')">CODEX</button>
+<button class="stab" onclick="setHQTab('compendium')">COMPENDIUM</button>
 <button class="stab" onclick="setHQTab('profile')">PROFILE</button>
 </div>
 
 <div style="flex:1;overflow:hidden;display:flex;flex-direction:column;min-height:0" id="hqBody">
 
-<!-- TAB: MINIGAMES -->
-<div class="hq-tab active" id="hqTab_tokens">
-<div class="hq-scroll">
-
-<!-- Apex Token Meter -->
-<div class="settings-section">
-<h2 style="color:var(--gold)">APEX TOKEN METER</h2>
-<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
-<div style="flex:1">
-<div style="display:flex;justify-content:space-between;font-size:.6rem;color:var(--text2);margin-bottom:3px"><span>Progress</span><span id="atMeterPct">0%</span></div>
-<div style="height:8px;background:var(--panel2);border-radius:4px;border:1px solid var(--border);overflow:hidden"><div id="atMeterFill" style="height:100%;background:linear-gradient(90deg,var(--gold),#ff6b35);border-radius:4px;width:0%;transition:width .5s"></div></div>
-</div>
-<div style="font-family:var(--display);font-size:1rem;color:var(--gold)" id="atCount">0</div>
-</div>
-<p style="font-size:.6rem;color:var(--text2)">Earn meter from battles &amp; summons. At 100% you earn 1 Apex Token — spend it to get a guaranteed duplicate of any unit you own!</p>
-<button class="btn-t0" style="width:100%;background:linear-gradient(135deg,#ffd700,#ff6b35)" onclick="spendApexToken()" id="atRedeemBtn" disabled>REDEEM TOKEN (Select Unit in Barracks)</button>
-</div>
-
-
-</div>
+<!-- TAB: GLOSSARY (content populated by patcher) -->
+<div class="hq-tab active" id="hqTab_glossary">
+<div class="hq-scroll" id="glossaryScroll"></div>
 </div>
 
 <!-- TAB: ACHIEVEMENTS -->
@@ -10712,7 +10694,7 @@ updateHomeScreen = function () {
         const el = document.getElementById('hqTab_' + tab);
         if(el) el.classList.add('active');
         document.querySelectorAll('#hqTabs .stab').forEach((b, i) => {
-            b.classList.toggle('active', ['tokens','achievements','multiplayer','compendium','profile'][i] === tab);
+            b.classList.toggle('active', ['glossary','achievements','multiplayer','compendium','profile'][i] === tab);
         });
         if(tab === 'compendium') renderCompendium();
         if(tab === 'achievements') renderAchievements();
@@ -10908,17 +10890,26 @@ updateHomeScreen = function () {
         return u;
     };
 
-    window.renderCompendium = function() {
+    window._compPage = 0;
+    window.renderCompendium = function(page) {
         const grid = document.getElementById('compGrid');
         if(!grid) return;
         S.roster.forEach(u => { if(!S.compendium.includes(u.name)) S.compendium.push(u.name); });
-        const totalUnique = S.images.filter(i => !i.isDefault).length;
+        const allImgs = S.images.filter(i => !i.isDefault);
+        const totalUnique = allImgs.length;
         const compStats = document.getElementById('compStats');
         if(compStats) compStats.textContent = 'Collected: ' + S.compendium.length + ' / ' + (totalUnique > 0 ? totalUnique : '?');
         const bonusEl = document.getElementById('compBonus');
         if(bonusEl) bonusEl.textContent = '+' + Math.floor(getCompendiumBonus() * 100) + '%';
+
+        const PER_PAGE = 36;
+        const maxPage = Math.max(0, Math.ceil(allImgs.length / PER_PAGE) - 1);
+        if(page !== undefined) window._compPage = Math.max(0, Math.min(page, maxPage));
+        const p = window._compPage || 0;
+        const slice = allImgs.slice(p * PER_PAGE, (p + 1) * PER_PAGE);
+
         grid.innerHTML = '';
-        S.images.filter(i => !i.isDefault).forEach(img => {
+        slice.forEach(img => {
             const unlocked = S.compendium.includes(img.name);
             const el = document.createElement('img');
             el.src = img.src;
@@ -10926,6 +10917,23 @@ updateHomeScreen = function () {
             el.title = unlocked ? img.name : '???';
             grid.appendChild(el);
         });
+
+        // Pagination controls
+        let navEl = document.getElementById('compNav');
+        if(!navEl) {
+            navEl = document.createElement('div');
+            navEl.id = 'compNav';
+            navEl.style.cssText = 'display:flex;align-items:center;justify-content:center;gap:12px;padding:8px 0;font-family:var(--mono);font-size:.65rem;color:var(--text2)';
+            grid.parentNode.appendChild(navEl);
+        }
+        if(maxPage > 0) {
+            navEl.innerHTML = '<button class="btn2 btn-sm" onclick="renderCompendium('+(p-1)+')"'+(p<=0?' disabled':'')+'>&larr; Prev</button>' +
+                '<span>Page '+(p+1)+' / '+(maxPage+1)+'</span>' +
+                '<button class="btn2 btn-sm" onclick="renderCompendium('+(p+1)+')"'+(p>=maxPage?' disabled':'')+'>Next &rarr;</button>';
+            navEl.style.display = 'flex';
+        } else {
+            navEl.style.display = 'none';
+        }
     };
 
     // ─── 5. (Minigames removed) ───
@@ -15165,56 +15173,14 @@ console.log('%c [PATCHER] MaestroV4 music engine installed','color:#22c55e;font-
 <script>
 // ╔══════════════════════════════════════════════════════════════╗
 // ║  PATCHER: Apex HQ Tab Restructure                           ║
-// ║  - Remove Zenith tab (visible in Summon screen already)     ║
-// ║  - Glossary becomes its own tab                              ║
-// ║  - Compendium becomes its own properly-labeled tab           ║
+// ║  - Glossary is the default tab (defined in HTML)             ║
+// ║  - Compendium has pagination                                 ║
 // ║  - All tabs get proper scrollbars                            ║
 // ╚══════════════════════════════════════════════════════════════╝
 (function(){
 'use strict';
 
-// ── 1. REBUILD HQ TAB BUTTONS ──
-function rebuildHQTabs(){
-    var hqTabs=document.getElementById('hqTabs');
-    if(!hqTabs)return;
-    hqTabs.innerHTML='';
-    var tabs=[
-        {id:'glossary',label:'GLOSSARY'},
-        {id:'achievements',label:'MEDALS'},
-        {id:'multiplayer',label:'MULTI'},
-        {id:'compendium',label:'COMPENDIUM'},
-        {id:'profile',label:'PROFILE'},
-    ];
-    tabs.forEach(function(t,i){
-        var btn=document.createElement('button');
-        btn.className='stab'+(i===0?' active':'');
-        btn.textContent=t.label;
-        btn.onclick=function(){setHQTab(t.id);};
-        hqTabs.appendChild(btn);
-    });
-}
-
-// ── 2. HIDE OLD TOKENS TAB, CREATE GLOSSARY TAB ──
-function restructureHQBody(){
-    var hqBody=document.getElementById('hqBody');
-    if(!hqBody)return;
-
-    // Hide the old tokens tab
-    var tokensTab=document.getElementById('hqTab_tokens');
-    if(tokensTab){tokensTab.style.display='none';tokensTab.classList.remove('active');}
-
-    // Check if glossary tab already exists
-    if(document.getElementById('hqTab_glossary'))return;
-
-    // Create the Glossary tab
-    var glossaryTab=document.createElement('div');
-    glossaryTab.className='hq-tab active';
-    glossaryTab.id='hqTab_glossary';
-    glossaryTab.innerHTML='<div class="hq-scroll" id="glossaryScroll"></div>';
-    hqBody.insertBefore(glossaryTab,hqBody.firstChild);
-}
-
-// ── 3. RENDER GLOSSARY CONTENT ──
+// ── 1. RENDER GLOSSARY CONTENT ──
 function renderGlossaryTabContent(){
     var el=document.getElementById('glossaryScroll');
     if(!el)return;
@@ -15281,12 +15247,9 @@ function renderGlossaryTabContent(){
     </div>';
 }
 
-// ── 4. OVERRIDE setHQTab ──
+// ── 2. OVERRIDE setHQTab ──
 var _origSetHQTab=window.setHQTab;
 window.setHQTab=function(tab){
-    // Never allow 'tokens' tab
-    if(tab==='tokens')tab='glossary';
-
     // Hide all HQ tabs
     document.querySelectorAll('.hq-tab').forEach(function(t){t.classList.remove('active');});
 
@@ -15308,31 +15271,23 @@ window.setHQTab=function(tab){
     if(tab==='profile'&&typeof renderTitles==='function')renderTitles();
 };
 
-// ── 5. OVERRIDE refreshTavern ──
+// ── 3. OVERRIDE refreshTavern ──
 var _origRefreshTavern=window.refreshTavern;
 window.refreshTavern=function(){
-    rebuildHQTabs();
-    restructureHQBody();
-    // Don't call updateTokenUI — the tokens tab is gone
     if(typeof renderAchievements==='function')renderAchievements();
     if(typeof checkAchievements==='function')checkAchievements();
     renderGlossaryTabContent();
 };
 
-// ── 6. PREVENT renderGlossary from appending to compendium ──
+// ── 4. PREVENT renderGlossary from appending to compendium ──
 window.renderGlossary=function(){/* no-op: glossary is its own tab now */};
 
-// ── 7. OVERRIDE renameTermsInUI to not touch removed tabs ──
-var _origRename=window.renameTermsInUI;
-window.renameTermsInUI=function(){
-    // Only rename currency labels in gacha, not HQ tabs
-    var hqTokens=document.getElementById('hqTokens');
-    if(hqTokens)hqTokens.textContent=(S.apexTokens||0)+' ZM';
-};
+// ── 5. OVERRIDE renameTermsInUI ──
+window.renameTermsInUI=function(){};
 
 // ── Initial setup if already on tavern screen ──
 if(document.getElementById('tavern')&&document.getElementById('tavern').classList.contains('active')){
-    rebuildHQTabs();restructureHQBody();renderGlossaryTabContent();
+    renderGlossaryTabContent();
 }
 
 console.log('%c [PATCHER] HQ tabs restructured: Glossary + Compendium split','color:#22c55e;font-weight:bold');
