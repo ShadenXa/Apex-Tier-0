@@ -2090,6 +2090,33 @@ u.weaponEffect=we.id;
 u.weaponEffectName=we.name;
 }
 }
+// [CONSOLIDATED] 11K Unit Variety — rare abilities for A/S/T0 units
+if(typeof ABILITY_DB!=='undefined'&&['A','S','T0'].includes(u.grade)&&Math.random()<0.4){
+const rareAbilities=ABILITY_DB.filter(a=>['A','S','T0'].includes(a.rarity));
+if(rareAbilities.length){
+const randAb=rareAbilities[~~(Math.random()*rareAbilities.length)];
+const slot=['skillA','skillB','skillC'][~~(Math.random()*3)];
+u[slot]={name:randAb.name,desc:randAb.desc,trigger:randAb.trigger,condition:randAb.condition,effect:randAb.effect};
+}
+}
+// [CONSOLIDATED] 11K Unit Variety — procedural weapons (Prf system)
+const W_PREFIXES=['Void','Star','Thunder','Blood','Iron','Ancient','Cyber','Neon','Holy','Cursed','Royal','Savage'];
+const W_SUFFIXES=['of Might','of Speed','of Ruin','of Mercy','of the Night','of the Sun','of Storms','of Steel','of Honor','of Chaos'];
+if(u.grade==='T0'||Math.random()<0.3){
+const prefix=W_PREFIXES[~~(Math.random()*W_PREFIXES.length)];
+const suffix=W_SUFFIXES[~~(Math.random()*W_SUFFIXES.length)];
+const weaponBase=u.weapon.replace('Mag',' Tome');
+const weaponName=`${prefix} ${weaponBase} ${suffix}`;
+const statBump=['atk','spd','def','res'][~~(Math.random()*4)];
+u.baseStat[statBump]+=3;u[statBump]+=3;
+u.weaponEffectName=weaponName;
+if(typeof ABILITY_DB!=='undefined'&&ABILITY_DB.length){
+const effectSource=ABILITY_DB[~~(Math.random()*ABILITY_DB.length)];
+u.weaponEffect=effectSource.id||'prf_weapon';
+u.passives.push({name:'\u2694 '+weaponName,desc:`Signature weapon. ${effectSource.desc}`,trigger:effectSource.trigger,condition:effectSource.condition,effect:effectSource.effect});
+}
+u.passives=[u.skillA,u.skillB,u.skillC,u.skillS,...u.passives.filter(p=>p&&p.name&&p.name.startsWith('\u2694'))].filter(Boolean);
+}
 return u;
 }
 
@@ -2835,32 +2862,108 @@ function prepUnit(unit,side){
     return u;
 }
 
+// [CONSOLIDATED] Original + MAX difficulty + APEX difficulty + Distant Counter
 function createEnemyTeam(count,mult){
     const pool=S.images.length?S.images:PLACEHOLDERS.map(p=>({src:makePlaceholderSrc(p.hue),name:p.name,hue:p.hue}));
-    // Scale with elo
-    const eloMult=Math.min(2.5,1+S.elo/3000); // Bug #37: cap ELO multiplier
-    // Difficulty multiplier
-    const diffMult={normal:1,hard:1.2,lunatic:1.4}[currentDifficulty]||1;
-    const diffLvl={normal:0,hard:10,lunatic:20}[currentDifficulty]||0;
-    const m=mult*eloMult*diffMult;
     const AI_PERSONALITIES=['aggressive','defensive','coward','support'];
-    return Array.from({length:count},()=>{
-        const img=pool[~~(Math.random()*pool.length)];
-        const u=createUnit(img.src,img.name);u.hue=img.hue||0;
-        u.level=Math.min(40,u.level+diffLvl);
-        ['maxHp','atk','def','mag','res','spd'].forEach(s=>u[s]=Math.round(u[s]*m));
-        u.hp=u.maxHp;
-        const pu=prepUnit(u,'enemy');
-        pu.personality=AI_PERSONALITIES[~~(Math.random()*AI_PERSONALITIES.length)];
-        // Lunatic: give enemies full skill loadout
-        if(currentDifficulty==='lunatic'){
-            const lSkills=LEARNABLE_SKILLS.filter(s=>s.slot==='skillA');const bSkills=LEARNABLE_SKILLS.filter(s=>s.slot==='skillB');
-            if(lSkills.length)pu.skillA=lSkills[~~(Math.random()*lSkills.length)];
-            if(bSkills.length)pu.skillB=bSkills[~~(Math.random()*bSkills.length)];
-            pu.passives=[pu.skillA,pu.skillB,pu.skillC,pu.skillS].filter(Boolean);
-        }
-        return pu;
-    });
+    let team;
+
+    if(currentDifficulty==='apex'){
+        // APEX: All T0+10 with synergies, best items, full skills
+        const eloMult=Math.min(3.0,1+S.elo/2500);
+        const m=mult*eloMult*2.5;
+        const faction=typeof FACTIONS!=='undefined'?FACTIONS[~~(Math.random()*FACTIONS.length)]:null;
+        const unitClass=typeof CLASSES!=='undefined'?CLASSES[~~(Math.random()*CLASSES.length)]:null;
+        team=Array.from({length:count},()=>{
+            const img=pool[~~(Math.random()*pool.length)];
+            const u=createUnit(img.src,img.name,'T0');
+            u.hue=img.hue||0;u.level=40;u.plus=10;u.prestige=5;
+            if(u.baseStat)['hp','atk','def','mag','res','spd'].forEach(s=>{u.baseStat[s]+=15;});
+            if(typeof applyLevel==='function')applyLevel(u);
+            ['maxHp','atk','def','mag','res','spd'].forEach(s=>u[s]=Math.round(u[s]*m));
+            u.hp=u.maxHp;
+            if(faction)u.faction=faction;
+            if(unitClass)u.unitClass=unitClass;
+            const aSkills=LEARNABLE_SKILLS.filter(s=>s.slot==='skillA');
+            const bSkills=LEARNABLE_SKILLS.filter(s=>s.slot==='skillB');
+            const cSkills=LEARNABLE_SKILLS.filter(s=>s.slot==='skillC');
+            if(aSkills.length)u.skillA=aSkills[~~(Math.random()*aSkills.length)];
+            if(bSkills.length)u.skillB=bSkills[~~(Math.random()*bSkills.length)];
+            if(cSkills.length)u.skillC=cSkills[~~(Math.random()*cSkills.length)];
+            u.passives=[u.skillA,u.skillB,u.skillC,u.skillS].filter(Boolean);
+            const goodItems=typeof ITEM_DB!=='undefined'?ITEM_DB.filter(i=>i.rarity==='T0'):[];
+            if(goodItems.length)u.equippedItem={...goodItems[~~(Math.random()*goodItems.length)]};
+            else{const anyItems=typeof ITEM_DB!=='undefined'?ITEM_DB.filter(i=>i.rarity==='S'):[];if(anyItems.length)u.equippedItem={...anyItems[~~(Math.random()*anyItems.length)]};}
+            const goodAbils=typeof ABILITY_DB!=='undefined'?ABILITY_DB.filter(a=>a.rarity==='S'||a.rarity==='T0'):[];
+            u.equippedAbilities=[goodAbils.length?{...goodAbils[~~(Math.random()*goodAbils.length)]}:null,goodAbils.length?{...goodAbils[~~(Math.random()*goodAbils.length)]}:null];
+            u.boon='atk';u.bane=null;u.atk+=3;
+            const pu=prepUnit(u,'enemy');
+            pu.personality='aggressive';
+            if(typeof applyItemEffects==='function')applyItemEffects(pu);
+            return pu;
+        });
+    } else if(currentDifficulty==='max'){
+        // MAX: T0/S grade, Lv40+10, full skills+items
+        const eloMult=Math.min(2.5,1+S.elo/3000);
+        const m=mult*eloMult*2.0;
+        team=Array.from({length:count},()=>{
+            const img=pool[~~(Math.random()*pool.length)];
+            const u=createUnit(img.src,img.name,Math.random()<0.3?'T0':'S');
+            u.hue=img.hue||0;u.level=40;u.plus=10;u.prestige=3;
+            if(u.baseStat)['hp','atk','def','mag','res','spd'].forEach(s=>{u.baseStat[s]+=9;});
+            if(typeof applyLevel==='function')applyLevel(u);
+            ['maxHp','atk','def','mag','res','spd'].forEach(s=>u[s]=Math.round(u[s]*m));
+            u.hp=u.maxHp;
+            const aSkills=LEARNABLE_SKILLS.filter(s=>s.slot==='skillA');
+            const bSkills=LEARNABLE_SKILLS.filter(s=>s.slot==='skillB');
+            const cSkills=LEARNABLE_SKILLS.filter(s=>s.slot==='skillC');
+            if(aSkills.length)u.skillA=aSkills[~~(Math.random()*aSkills.length)];
+            if(bSkills.length)u.skillB=bSkills[~~(Math.random()*bSkills.length)];
+            if(cSkills.length)u.skillC=cSkills[~~(Math.random()*cSkills.length)];
+            u.passives=[u.skillA,u.skillB,u.skillC,u.skillS].filter(Boolean);
+            const goodItems=typeof ITEM_DB!=='undefined'?ITEM_DB.filter(i=>i.rarity==='S'||i.rarity==='T0'):[];
+            if(goodItems.length)u.equippedItem={...goodItems[~~(Math.random()*goodItems.length)]};
+            u.equippedAbilities=[
+                typeof ABILITY_DB!=='undefined'&&ABILITY_DB.filter(a=>a.rarity==='S'||a.rarity==='A').length?{...ABILITY_DB.filter(a=>a.rarity==='S'||a.rarity==='A')[~~(Math.random()*ABILITY_DB.filter(a=>a.rarity==='S'||a.rarity==='A').length)]}:null,
+                typeof ABILITY_DB!=='undefined'&&ABILITY_DB.filter(a=>a.rarity==='S'||a.rarity==='A').length?{...ABILITY_DB.filter(a=>a.rarity==='S'||a.rarity==='A')[~~(Math.random()*ABILITY_DB.filter(a=>a.rarity==='S'||a.rarity==='A').length)]}:null,
+            ];
+            const pu=prepUnit(u,'enemy');
+            pu.personality='aggressive';
+            if(typeof applyItemEffects==='function')applyItemEffects(pu);
+            return pu;
+        });
+    } else {
+        // Normal/Hard/Lunatic
+        const eloMult=Math.min(2.5,1+S.elo/3000);
+        const diffMult={normal:1,hard:1.2,lunatic:1.4}[currentDifficulty]||1;
+        const diffLvl={normal:0,hard:10,lunatic:20}[currentDifficulty]||0;
+        const m=mult*eloMult*diffMult;
+        team=Array.from({length:count},()=>{
+            const img=pool[~~(Math.random()*pool.length)];
+            const u=createUnit(img.src,img.name);u.hue=img.hue||0;
+            u.level=Math.min(40,u.level+diffLvl);
+            ['maxHp','atk','def','mag','res','spd'].forEach(s=>u[s]=Math.round(u[s]*m));
+            u.hp=u.maxHp;
+            const pu=prepUnit(u,'enemy');
+            pu.personality=AI_PERSONALITIES[~~(Math.random()*AI_PERSONALITIES.length)];
+            if(currentDifficulty==='lunatic'){
+                const lSkills=LEARNABLE_SKILLS.filter(s=>s.slot==='skillA');const bSkills=LEARNABLE_SKILLS.filter(s=>s.slot==='skillB');
+                if(lSkills.length)pu.skillA=lSkills[~~(Math.random()*lSkills.length)];
+                if(bSkills.length)pu.skillB=bSkills[~~(Math.random()*bSkills.length)];
+                pu.passives=[pu.skillA,pu.skillB,pu.skillC,pu.skillS].filter(Boolean);
+            }
+            return pu;
+        });
+    }
+    // Distant Counter chance for Lunatic+ difficulties
+    if(['lunatic','max','apex'].includes(currentDifficulty)){
+        const dcChance={lunatic:0.25,max:0.5,apex:0.8}[currentDifficulty]||0;
+        team.forEach(u=>{
+            const range=typeof getWeaponRange==='function'?getWeaponRange(u.weapon):1;
+            if(range===1&&Math.random()<dcChance)u._distantCounter=true;
+        });
+    }
+    return team;
 }
 
 // Difficulty selection before battle
@@ -2945,8 +3048,30 @@ B.canvas.onmouseleave=()=>{B.hover={x:-1,y:-1};hideFC();drawMap();};
 document.getElementById('bLog').innerHTML='';
 S.totalBattles++;
 B.battleId=(B.battleId||0)+1;
+// [CONSOLIDATED] Campaign v2 boss enhancement
+if(typeof currentBattleMode!=='undefined'&&currentBattleMode==='campaign_v2'&&currentBattleConfig?.boss){
+const bookIdx=currentBattleConfig.bookIdx||0;
+if(B.eUnits.length>0){
+const boss=B.eUnits[B.eUnits.length-1];
+boss.maxHp=Math.round(boss.maxHp*(1.5+bookIdx*0.15));boss.hp=boss.maxHp;
+boss.atk=Math.round(boss.atk*(1.2+bookIdx*0.1));boss.def=Math.round(boss.def*(1.2+bookIdx*0.1));
+if(bookIdx>=8)boss.grade='T0';else if(bookIdx>=5)boss.grade='S';else if(bookIdx>=3)boss.grade='A';
+if(bookIdx>=4)boss._distantCounter=true;
+boss.personality='aggressive';
+}
+}
 if(currentBiome)bLog(`Biome: ${currentBiome.name}`,'sys');
 bLog('Battle begins!','sys');
+// [CONSOLIDATED] APEX difficulty: disable auto-battle
+if(currentDifficulty==='apex'){
+B.autoPlay=false;
+const autoBtn=document.getElementById('autoBtn');
+if(autoBtn){autoBtn.classList.remove('auto-active');autoBtn.textContent='AUTO';autoBtn.disabled=true;autoBtn.style.opacity='0.3';autoBtn.title='Auto-battle disabled on APEX difficulty';}
+toast('APEX DIFFICULTY — Auto-battle DISABLED. All enemies are T0 +10 with full synergies!','err');
+}else{
+const autoBtn=document.getElementById('autoBtn');
+if(autoBtn){autoBtn.disabled=false;autoBtn.style.opacity='';autoBtn.title='';}
+}
 drawMap();updateBUI();updateEList();
 }
 
@@ -3277,6 +3402,8 @@ if(p.effect.tag==='buff_atk')localAtkBuff+=p.effect.val;
 if(p.effect.tag==='buff_spd')localSpdBuff+=p.effect.val;
 if(p.effect.tag==='wrath'&&atker.hp<atker.maxHp*.5)localAtkBuff+=p.effect.val;
 if(p.effect.tag==='spectrum'){localAtkBuff+=p.effect.val;defStat-=p.effect.val*0.5;localSpdBuff+=p.effect.val;}
+// [CONSOLIDATED] initiate_atk from HOTFIX
+if(p.effect?.tag==='initiate_atk')localAtkBuff+=p.effect.val;
 }
 });
 target.passives?.forEach(p=>{
@@ -3285,6 +3412,8 @@ if(p.effect.tag==='buff_def'||p.effect.tag==='buff_res')localDefBuff+=p.effect.v
 // Bug #38: guard and dodge applied at end as final damage reduction, not stat modification
 if(p.effect.tag==='guard')target._guardReduction=(target._guardReduction||0)+p.effect.val;
 if(p.effect.tag==='spd_reduction'&&evalCondition('Speed>Target',target,atker)){target._dodgeReduction=0.35;}
+// [CONSOLIDATED] defend_def from HOTFIX
+if(p.effect?.tag==='defend_def')localDefBuff+=p.effect.val;
 }
 });
 
@@ -3514,23 +3643,79 @@ if(u.frozen){toast('Unit is frozen!','err');return;}
 B.mode='move';B.highlights=getReachable(u);drawMap();sfx('click');
 }
 
+// [CONSOLIDATED] Original + bow blind spot tooltip
 function doAttack(){
 const u=B.sel;if(!u||u.acted)return;
 B.mode='attack';B.highlights=getAtkRange(u);
-if(!B.highlights.length){toast('No targets in range','err');B.mode='select';return;}
+if(!B.highlights.length){
+// Bow blind spot tooltip
+if(['Bow','Sniper'].includes(u.weapon)||u.role==='Sniper'){
+const adj=[[0,-1],[0,1],[-1,0],[1,0]];
+if(adj.some(([dx,dy])=>{const t=unitAt(u.x+dx,u.y+dy);return t&&t.side!==u.side;})){
+toast('Bows cannot attack adjacent enemies — they only hit at range 2+','err');
+}else{toast('No targets in range','err');}
+}else{toast('No targets in range','err');}
+B.mode='select';return;
+}
 drawMap();sfx('click');
 }
 
+// [CONSOLIDATED] Original + map-wide specials (HOTFIX) + gameConfirm (dialog patch)
 function doSpecial(){
 const u=B.sel;if(!u||u.specialCharges>0||u.acted){toast('Special not ready','err');return;}
+// Map-wide specials that don't need an enemy target
+const mapEffects=['heal_self','shield','aura_heal',
+'map_quake','map_blizzard','map_fire','map_heal','map_timestop',
+'heal_all','heal_all_full','buff_all_atk','buff_all_def',
+'buff_all_spd','buff_all_spectrum','buff_all_full',
+'debuff_all_aoe','panic_all','gravity_all'];
+if(mapEffects.includes(u.special.effect)){
 if(['heal_self','shield','aura_heal'].includes(u.special.effect)){
-// Bug #42: Show confirm before self-targeting special
+// Self-targeting specials get confirmation
+if(typeof gameConfirm==='function'){
+gameConfirm(`Use ${u.special.name}? (${u.special.desc})`,
+()=>{_executeMapSpecial(u);},()=>{B.mode='select';});
+}else{
 if(!confirm(`Use ${u.special.name}? (${u.special.desc})`)){B.mode='select';return;}
-performCombat(u,u,true);B.mode='select';B.highlights=[];return;
+_executeMapSpecial(u);
+}
+return;
+}
+_executeMapSpecial(u);return;
 }
 B.mode='special';B.highlights=getAtkRange(u);
 if(!B.highlights.length){toast('No targets','err');B.mode='select';return;}
 drawMap();sfx('click');
+}
+
+function _executeMapSpecial(u){
+const sp=u.special;sfx('special');
+bLog(u.name+': '+sp.name+'!','spec');
+const allies=B.allUnits.filter(a=>a.side===u.side&&a.hp>0);
+const enemies=B.allUnits.filter(a=>a.side!==u.side&&a.hp>0);
+const nearby=allies.filter(a=>a!==u&&Math.abs(a.x-u.x)+Math.abs(a.y-u.y)<=2);
+switch(sp.effect){
+case 'heal_self':{const h=Math.round(u.maxHp*sp.val);u.hp=Math.min(u.maxHp,u.hp+h);floatTxt(u.x,u.y,'+'+h,'#22c55e');break;}
+case 'shield':u.shielded=true;break;
+case 'aura_heal':nearby.forEach(a=>{a.hp=Math.min(a.maxHp,a.hp+sp.val);floatTxt(a.x,a.y,'+'+sp.val,'#22c55e');});break;
+case 'map_heal':case 'heal_all':allies.forEach(a=>{a.hp=Math.min(a.maxHp,a.hp+sp.val);floatTxt(a.x,a.y,'+'+sp.val,'#22c55e');});break;
+case 'heal_all_full':allies.forEach(a=>{a.hp=a.maxHp;floatTxt(a.x,a.y,'FULL','#22c55e');});break;
+case 'map_quake':B.allUnits.filter(a=>a.hp>0&&a!==u&&a.moveType!=='Flying').forEach(a=>{a.hp=Math.max(0,a.hp-sp.val);floatTxt(a.x,a.y,'-'+sp.val,'#f97316');});screenShake();break;
+case 'map_blizzard':enemies.forEach(a=>{a.hp=Math.max(0,a.hp-sp.val);a.frozen=true;floatTxt(a.x,a.y,'-'+sp.val,'#00e5ff');});break;
+case 'map_fire':enemies.forEach(a=>{a.hp=Math.max(0,a.hp-sp.val);a.burned=(a.burned||0)+sp.val;floatTxt(a.x,a.y,'-'+sp.val,'#f97316');});break;
+case 'map_timestop':case 'gravity_all':enemies.forEach(a=>{a.frozen=true;floatTxt(a.x,a.y,'STOP','#a855f7');});break;
+case 'panic_all':enemies.forEach(a=>{a._panicked=true;floatTxt(a.x,a.y,'PANIC','#ef4444');});break;
+case 'buff_all_atk':allies.forEach(a=>a._rallyAtk=(a._rallyAtk||0)+sp.val);break;
+case 'buff_all_def':allies.forEach(a=>a._rallyDef=(a._rallyDef||0)+sp.val);break;
+case 'buff_all_spd':allies.forEach(a=>a._rallySpd=(a._rallySpd||0)+sp.val);break;
+case 'buff_all_spectrum':case 'buff_all_full':allies.forEach(a=>{a._rallyAtk=(a._rallyAtk||0)+sp.val;a._rallyDef=(a._rallyDef||0)+sp.val;a._rallySpd=(a._rallySpd||0)+sp.val;});break;
+case 'debuff_all_aoe':enemies.forEach(a=>{a._rallyAtk=Math.min(a._rallyAtk||0,-sp.val);a._rallyDef=Math.min(a._rallyDef||0,-sp.val);a._rallySpd=Math.min(a._rallySpd||0,-sp.val);});break;
+}
+u.specialCharges=u.special.cd;
+markActed(u);
+if(B.dangerZone)calcDangerZone();
+drawMap();updateBUI();updateEList();
+if(!checkBattleOver())checkTurnEnd();
 }
 
 function doWait(){
@@ -3544,7 +3729,11 @@ function markActed(u){u.acted=u.moved=true;delete u._tempSpd;}
 
 // ═══ COMBAT EXECUTION ═══════════════════════════════════════
 function performCombat(atker,target,isSpecial=false,isInitiating=true){
+// [CONSOLIDATED] Original + special null guard + post-combat effects + bonding
 if(!atker||!target)return;
+// Ensure both have special objects (from null guard patch)
+if(atker && !atker.special) atker.special = {name:'None',desc:'No special skill',effect:'none',val:0,cd:99};
+if(target && !target.special) target.special = {name:'None',desc:'No special skill',effect:'none',val:0,cd:99};
 // Reset per-combat item flags
 if(atker){atker._firstHitTaken=false;atker._miracleUsed=false;}
 if(target&&target!==atker){target._firstHitTaken=false;target._miracleUsed=false;}
@@ -3743,6 +3932,43 @@ const rosterUnit=S.roster.find(u=>u.name===atker.name);
 if(rosterUnit){rosterUnit.shards=(rosterUnit.shards||0)+1;bLog(`${atker.name} earned an Apex Shard!`,'spec');}
 }
 }
+}
+
+// Post-combat effects (from item effects patch)
+if(target && target.hp>0 && atker) {
+    atker.passives?.forEach(p=>{
+        if(p.effect?.tag==='post_combat_debuff_atk'&&evalCondition(p.condition||'Always',atker,target))
+            target._rallyAtk=Math.min(target._rallyAtk||0,-(p.effect.val||5));
+    });
+}
+if(target && target.hp>0 && atker && atker.hp>0){
+    if(atker._itemOnHitBurn>0) target.burned=(target.burned||0)+atker._itemOnHitBurn;
+    if(atker._itemOnHitFreeze&&Math.random()<atker._itemOnHitFreeze) target.frozen=true;
+    if(atker._itemOnHitPoison>0) target.poisoned=(target.poisoned||0)+atker._itemOnHitPoison;
+    if(atker._itemOnHitPanic&&Math.random()<atker._itemOnHitPanic) target._panicked=true;
+}
+if(atker && atker._itemLifesteal>0&&atker.hp>0&&target){
+    const est=Math.max(1,atker.atk-(target.def||0));
+    const h=Math.round(est*atker._itemLifesteal);
+    if(h>0){ atker.hp=Math.min(atker.maxHp,atker.hp+h); floatTxt(atker.x,atker.y,'+'+h,'#22c55e'); }
+}
+if(target && target._itemReflect>0&&atker&&atker.hp>0){
+    const est=Math.max(1,atker.atk-(target.def||0));
+    const ref=Math.round(est*target._itemReflect);
+    if(ref>0){ atker.hp=Math.max(0,atker.hp-ref); floatTxt(atker.x,atker.y,'-'+ref,'#a855f7'); }
+}
+// Battle bonding (from support system patch)
+if(atker && atker.side === 'player' && atker.hp > 0 && typeof addSupport === 'function') {
+    const allies = B.pUnits.filter(u => u.hp > 0 && u !== atker &&
+        Math.abs(u.x - atker.x) + Math.abs(u.y - atker.y) <= 2);
+    allies.forEach(ally => {
+        addSupport(atker.id, ally.id, typeof BOND_PER_BATTLE_ADJ !== 'undefined' ? BOND_PER_BATTLE_ADJ : 3);
+        if(typeof spawnBattleHeart === 'function') spawnBattleHeart(atker.x, atker.y);
+    });
+}
+if(atker && target && atker.side === target.side && atker.side === 'player' && typeof addSupport === 'function') {
+    addSupport(atker.id, target.id, typeof BOND_PER_ASSIST !== 'undefined' ? BOND_PER_ASSIST : 5);
+    if(typeof spawnBattleHeart === 'function') spawnBattleHeart(target.x, target.y);
 }
 
 if(!atker.extraAction)markActed(atker);
@@ -4596,22 +4822,35 @@ bs.classList.remove('ready');bs.textContent='SPECIAL';
 }
 
 function updateEList(){
+// [CONSOLIDATED] Original + click-to-inspect
 const el=document.getElementById('enemyList');el.innerHTML='';
-B.eUnits.filter(u=>u.hp>0).forEach(u=>{
+const alive=B.eUnits.filter(u=>u.hp>0);
+alive.forEach(u=>{
 const pct=Math.round(u.hp/u.maxHp*100);
-el.innerHTML+=`<div style="font-size:.58rem;font-family:var(--mono)">
-<div style="display:flex;justify-content:space-between;color:var(--text2);margin-bottom:1px"><span>${esc(u.name)}</span><span style="color:var(--red)">${u.hp}</span></div>
-<div style="height:2px;background:var(--panel3);border-radius:1px"><div style="width:${pct}%;height:100%;background:var(--red);border-radius:1px"></div></div>
-</div>`;
+const div=document.createElement('div');
+div.style.cssText='font-size:.58rem;font-family:var(--mono);cursor:pointer';
+div.title='Click to inspect';
+div.innerHTML=`<div style="display:flex;justify-content:space-between;color:var(--text2);margin-bottom:1px"><span>${esc(u.name)}</span><span style="color:var(--red)">${u.hp}</span></div>
+<div style="height:2px;background:var(--panel3);border-radius:1px"><div style="width:${pct}%;height:100%;background:var(--red);border-radius:1px"></div></div>`;
+div.onclick=()=>{if(typeof openInspect==='function')openInspect(u);};
+el.appendChild(div);
 });
 }
 
 function bLog(msg,type='sys'){
+// [CONSOLIDATED] Original + turn number + log cap (40)
 const log=document.getElementById('bLog');
-if(!log)return;// Safe when called outside battle
+if(!log)return;
 const d=document.createElement('div');d.className='blog-e blog-'+type;d.textContent=msg;
+// Add turn number (from battle log patch)
+const turnNum = Math.floor((typeof B !== 'undefined' ? (B.turnCount || 0) : 0) / 2) + 1;
+const span = document.createElement('span');
+span.style.cssText = 'font-size:.4rem;color:var(--text3);margin-left:4px';
+span.textContent = 'T' + turnNum;
+d.appendChild(span);
 log.appendChild(d);log.scrollTop=log.scrollHeight;
-while(log.children.length>60)log.removeChild(log.firstChild);
+// Enforce cap of 40 entries (from memory leak fix)
+while(log.children.length>40){const ch=log.firstChild;ch.textContent='';log.removeChild(ch);}
 }
 
 function retreat(){
@@ -4748,6 +4987,13 @@ if(d.apexTokens)S.apexTokens=d.apexTokens;
 if(d.apexMeter)S.apexMeter=d.apexMeter;
 if(d.profileTitle)S.profileTitle=d.profileTitle;
 if(d.unlockedTitles)S.unlockedTitles=d.unlockedTitles;
+// Ensure defaults for v3.5 fields
+if(!S.achievements)S.achievements=[];
+if(!S.compendium)S.compendium=[];
+if(!S.apexTokens)S.apexTokens=0;
+if(!S.apexMeter)S.apexMeter=0;
+if(!S.profileTitle)S.profileTitle='Rookie';
+if(!S.unlockedTitles)S.unlockedTitles=['Rookie'];
 }else if(idbImgs.length)S.images=idbImgs;
 // Migrate all roster units
 // Restore team size from save
@@ -4809,6 +5055,8 @@ if(!S.loginStreak)S.loginStreak=0;
 if(!S.lastLoginDate)S.lastLoginDate='';
 if(!S.quests)S.quests={daily:[],story:[],lastDailyDate:''};
 if(!S.questProgress)S.questProgress={};
+// Auto-populate compendium from roster
+S.roster.forEach(u=>{if(u.name&&!S.compendium.includes(u.name))S.compendium.push(u.name);});
 refreshSettings();updateEloDisplay();
 }catch(e){console.warn('Load fail:',e);}
 }
@@ -5383,7 +5631,68 @@ if(hdNav&&!hdNav.querySelector('.merc-btn')){
 const btn2=document.createElement('button');btn2.className='btn2 btn-sm merc-btn';btn2.textContent='Merc';
 btn2.onclick=()=>window.exportMercenary(idx);hdNav.insertBefore(btn2,hdNav.firstChild);
 }
-// --- Item inventory (from expansion patch) ---
+// --- Item & Ability sections (from expansion patch) ---
+if(hdContent){
+hdContent.querySelectorAll('.expansion-section').forEach(el=>el.remove());
+// Item section
+const itemSec=document.createElement('div');
+itemSec.className='expansion-section';
+itemSec.style.cssText='background:var(--panel2);border:1px solid var(--border);border-radius:8px;padding:12px';
+let itemHTML='<div style="font-family:var(--display);font-size:.65rem;color:var(--gold);letter-spacing:1px;margin-bottom:6px">EQUIPPED ITEM</div>';
+if(u.equippedItem){
+itemHTML+=`<div style="font-size:.72rem;font-weight:600">${u.equippedItem.name} <span style="color:var(--text2);font-size:.6rem">${u.equippedItem.rarity}</span></div>`;
+itemHTML+=`<div style="font-size:.62rem;color:var(--text2);margin-top:2px">${u.equippedItem.desc}</div>`;
+itemHTML+=`<button class="btn2 btn-sm" style="margin-top:6px" onclick="unequipItem(${idx});openHeroDetail(${idx})">Unequip</button>`;
+}else{itemHTML+='<div style="font-size:.62rem;color:var(--text3)">No item equipped</div>';}
+if(S.itemInventory&&S.itemInventory.length>0){
+itemHTML+='<div style="margin-top:8px;font-size:.6rem;color:var(--text2)">Inventory ('+S.itemInventory.length+'):</div>';
+itemHTML+='<div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:4px;max-height:120px;overflow-y:auto">';
+S.itemInventory.slice(0,20).forEach(item=>{
+const rarityColor={D:'#8e99a4',C:'#00e5ff',B:'#7c4dff',A:'#ff6b35',S:'#ffd700',T0:'#ff2d55'}[item.rarity]||'#8e99a4';
+itemHTML+=`<button class="btn2 btn-sm" style="font-size:.5rem;border-color:${rarityColor};color:${rarityColor}" onclick="equipItem(${idx},'${item.instanceId}');openHeroDetail(${idx})" title="${item.desc}">${item.name}</button>`;
+});
+itemHTML+='</div>';
+}
+itemSec.innerHTML=itemHTML;
+hdContent.appendChild(itemSec);
+// Ability section
+const abSec=document.createElement('div');
+abSec.className='expansion-section';
+abSec.style.cssText='background:var(--panel2);border:1px solid var(--border);border-radius:8px;padding:12px';
+let abHTML='<div style="font-family:var(--display);font-size:.65rem;color:#7c4dff;letter-spacing:1px;margin-bottom:6px">EQUIPPED ABILITIES</div>';
+const eqAbs=u.equippedAbilities||[null,null];
+for(let slot=0;slot<2;slot++){
+const ab=eqAbs[slot];
+abHTML+=`<div style="margin-bottom:6px"><span style="font-size:.55rem;color:var(--text3)">Slot ${slot+1}:</span> `;
+if(ab){abHTML+=`<span style="font-size:.65rem;font-weight:600">${ab.name}</span> <span style="font-size:.55rem;color:var(--text2)">${ab.desc}</span>`;}
+else{abHTML+='<span style="font-size:.6rem;color:var(--text3)">Empty</span>';}
+abHTML+='</div>';
+}
+if(S.unlockedAbilities&&S.unlockedAbilities.length>0&&typeof ABILITY_DB!=='undefined'){
+abHTML+='<div style="margin-top:6px;font-size:.55rem;color:var(--text2)">Unlocked ('+S.unlockedAbilities.length+'/'+ABILITY_DB.length+'):</div>';
+abHTML+='<div style="display:flex;flex-wrap:wrap;gap:3px;margin-top:4px;max-height:100px;overflow-y:auto">';
+S.unlockedAbilities.slice(0,30).forEach(abId=>{
+const ab=ABILITY_DB.find(a=>a.id===abId);if(!ab)return;
+abHTML+=`<button class="btn2 btn-sm" style="font-size:.45rem" onclick="equipAbility(${idx},'${abId}',0);openHeroDetail(${idx})" title="${ab.desc}">${ab.name}</button>`;
+});
+abHTML+='</div>';
+}
+abSec.innerHTML=abHTML;
+hdContent.appendChild(abSec);
+}
+// Reroll button (from economy patch)
+const hdrNav=document.querySelector('#heroDetail .hdr-nav');
+if(hdrNav){
+const existingReroll=document.getElementById('hdRerollBtn');
+if(existingReroll)existingReroll.remove();
+if(typeof rerollUnit==='function'){
+const rBtn=document.createElement('button');rBtn.id='hdRerollBtn';rBtn.className='btn2 btn-sm';
+rBtn.style.cssText='color:#7c4dff;border-color:#7c4dff;';rBtn.textContent='\u27F3 Reroll (1 ZM)';
+rBtn.onclick=function(){rerollUnit(currentHeroDetailIdx);};
+const dismissBtn=hdrNav.querySelector('.btn-danger');
+if(dismissBtn)hdrNav.insertBefore(rBtn,dismissBtn);else hdrNav.appendChild(rBtn);
+}
+}
 if(typeof _renderHeroInventory==='function')_renderHeroInventory(idx);
 }
 
@@ -5702,7 +6011,14 @@ pills.innerHTML=events.map(e=>`<div class="event-pill">${e}</div>`).join('');
 }
 // Stats strip
 const stats=document.getElementById('homeStatStrip');
-if(stats)stats.textContent=`${S.roster.length} heroes | ${S.wins} wins | ELO: ${S.elo} | ${S.ap} AP`;
+if(stats){
+stats.textContent=`${S.roster.length} heroes | ${S.wins} wins | ELO: ${S.elo} | ${S.ap} AP`;
+// [CONSOLIDATED] Campaign progress from Infinite Convergence patch
+if(typeof TOTAL_BATTLES!=='undefined'){
+const total=S.campaignDone.filter(n=>n>=1&&n<=1000).length;
+stats.textContent+=` | Story: ${total}/${TOTAL_BATTLES}`;
+}
+}
 updateQuestBadge();
 }
 
@@ -5881,8 +6197,20 @@ function refreshSettings(){
 renderSettingsTab(activeSettingsTab||'images');
 }
 
+// [CONSOLIDATED] Original + banner expiry + export buttons from v3.5
 function refreshBannerList(){
 const el=document.getElementById('bannerList');if(!el)return;
+// Expire banners older than 3 days
+if(S.banners){
+const now=Date.now();
+S.banners=S.banners.filter(b=>{
+if(!b.createdAt){b.createdAt=now;return true;}
+const age=now-b.createdAt;
+if(age>3*24*60*60*1000){toast('Banner "'+b.name+'" expired!','');return false;}
+return true;
+});
+if(S.activeBannerId&&!S.banners.find(b=>b.id===S.activeBannerId))S.activeBannerId=null;
+}
 el.innerHTML='';
 if(!S.banners.length){
 el.innerHTML='<div style="font-size:.68rem;color:var(--text2);text-align:center;padding:20px">No banners created yet.<br>Create one to set focus heroes for summoning!</div>';
@@ -5900,6 +6228,18 @@ d.innerHTML=`<div>
   ${!isActive?`<button class="fbtn" onclick="setActiveBanner('${b.id}')">Set Active</button>`:`<button class="fbtn active">Active</button>`}
   <button class="fbtn" onclick="deleteBanner('${b.id}')" style="color:var(--red);border-color:rgba(239,68,68,.3)">Del</button>
 </div>`;
+// Export button + expiry display
+const act=d.querySelector('.banner-actions');
+if(act&&typeof window.exportBanner==='function'){
+const btn=document.createElement('button');btn.className='fbtn export-bn-btn';btn.textContent='Export';btn.style.color='#00e5ff';
+btn.onclick=()=>window.exportBanner(b.id);act.insertBefore(btn,act.firstChild);
+}
+if(act&&b.createdAt){
+const exp=document.createElement('span');exp.className='bn-expiry';
+const hoursLeft=Math.max(0,Math.floor((b.createdAt+3*24*60*60*1000-Date.now())/(60*60*1000)));
+exp.style.cssText='font-size:.5rem;color:var(--text3);font-family:var(--mono)';exp.textContent=hoursLeft+'h left';
+act.appendChild(exp);
+}
 el.appendChild(d);
 });
 }
@@ -6431,8 +6771,9 @@ ctx.fillText('★'.repeat(Math.min(u.prestige,3)),px+CS/2,py+1);
 }
 }
 
-// Override drawMap with enhanced version + self-sustaining RAF loop
+// [CONSOLIDATED] Override drawMap with enhanced version + RAF loop + auto-battle trigger
 let _mapAnimRAF=0;
+let _autoCheckPending=false;
 const _origDrawMap=window.drawMap;
 window.drawMap=function(){
 if(!B.ctx)return;
@@ -6445,6 +6786,14 @@ try{drawMapEnhanced();}catch(e){}
 _mapAnimRAF=requestAnimationFrame(_animLoop);
 }else{_mapAnimRAF=0;}
 });
+}
+// Auto-battle trigger (from auto-battle patch)
+if(B.autoPlay&&B.phase==='player'&&!_autoCheckPending){
+const hasUnacted=B.pUnits.some(u=>u.hp>0&&!u.acted);
+if(hasUnacted){
+_autoCheckPending=true;
+setTimeout(()=>{_autoCheckPending=false;if(B.autoPlay&&B.phase==='player')runAutoPlayer();},spd(CFG.AI_DELAY*0.5));
+}
 }
 };
 
@@ -6541,6 +6890,11 @@ const amt=a.id==='physic'?8:10;
 target.hp=Math.min(target.maxHp,target.hp+amt);
 floatTxt(target.x,target.y,'+'+amt,'#22c55e');
 bLog(`${user.name} heals ${target.name} +${amt}`,'spec');sfx('heal');
+}
+// [CONSOLIDATED] assist_buff from item effects (HOTFIX)
+if(user.equippedItem?.effect?.type==='assist_buff'){
+const v=user.equippedItem.effect.val||3;
+target._rallyAtk=(target._rallyAtk||0)+v;
 }
 markActed(user);if(B.dangerZone)calcDangerZone(); // Bug #36
 drawMap();updateBUI();updateEList();checkTurnEnd();
@@ -7160,6 +7514,28 @@ function applyItemEffects(bu) {
     // Weapon/move specific
     if(e.type === 'weapon_stat' && bu.weapon === e.weapon) bu[e.stat] = (bu[e.stat]||0) + e.val;
     if(e.type === 'move_stat' && bu.moveType === e.moveType) bu[e.stat] = (bu[e.stat]||0) + e.val;
+    // [CONSOLIDATED] Legendary item effects from HOTFIX
+    const legendaryHandlers = {
+        legendary_binding:   ()=> bu.passives.push({name:'Binding Blade',desc:'Triangle ±40%',trigger:'OnAttack',condition:'Always',effect:{tag:'triangle_adept',val:0}}),
+        legendary_falchion:  ()=> bu.passives.push({name:'Falchion',desc:'Heal 10/turn',trigger:'TurnStart',condition:'Always',effect:{tag:'heal',val:10}}),
+        legendary_armads:    ()=> bu.passives.push({name:'Armads',desc:'QR when HP>80%',trigger:'OnDefend',condition:'HP>75%',effect:{tag:'brave',val:2}}),
+        legendary_tyrfing:   ()=> bu.passives.push({name:'Tyrfing',desc:'DEF+10 <50%',trigger:'OnDefend',condition:'HP<50%',effect:{tag:'buff_def',val:10}}),
+        legendary_naga:      ()=> { bu.res=(bu.res||0)+5; },
+        legendary_booknaga:  ()=> { ['atk','def','mag','res','spd'].forEach(s=>bu[s]=(bu[s]||0)+3); bu._antiPanic=true; },
+        legendary_ragnell:   ()=> { bu._distantCounter=true; bu.atk=(bu.atk||0)+4; },
+        legendary_gradivus:  ()=> { bu._distantCounter=true; bu.passives.push({name:'Gradivus',desc:'Heal 10 post-combat',trigger:'OnAttack',condition:'Always',effect:{tag:'heal',val:10}}); },
+        legendary_siegmund:  ()=> bu.passives.push({name:'Siegmund',desc:'ATK+6 >90%',trigger:'OnAttack',condition:'HP>75%',effect:{tag:'buff_atk',val:6}}),
+        legendary_durandal:  ()=> bu.passives.push({name:'Durandal',desc:'ATK+8 initiate',trigger:'OnAttack',condition:'Always',effect:{tag:'buff_atk',val:8}}),
+        legendary_solkatti:  ()=> bu.passives.push({name:'Sol Katti',desc:'Desperation <75%',trigger:'OnAttack',condition:'HP<75%',effect:{tag:'desperation',val:0}}),
+        legendary_aura:      ()=> bu.passives.push({name:'Aura',desc:'Heal allies 7',trigger:'OnAttack',condition:'Always',effect:{tag:'heal',val:7}}),
+        legendary_excalibur: ()=> { bu.spd=(bu.spd||0)+5; },
+        legendary_forseti:   ()=> bu.passives.push({name:'Forseti',desc:'Follow-up if faster',trigger:'OnAttack',condition:'Speed>Target',effect:{tag:'brave',val:2}}),
+        legendary_mjolnir:   ()=> { bu.atk=(bu.atk||0)+5; bu.specialCharges=Math.max(0,(bu.specialCharges||0)-2); },
+        legendary_loptous:   ()=> { bu._shieldPct=Math.min(0.6,(bu._shieldPct||0)+0.5); },
+        legendary_chaos:     ()=> { ['atk','def','mag','res','spd'].forEach(s=>bu[s]=(bu[s]||0)+5); },
+        legendary_apex:      ()=> { ['atk','def','mag','res','spd'].forEach(s=>bu[s]=(bu[s]||0)+7); },
+    };
+    if(legendaryHandlers[e.type]) legendaryHandlers[e.type]();
 }
 
 // ═══ ABILITY SYSTEM ══════════════════════════════════════════
@@ -7417,21 +7793,7 @@ function openInspect(unit) {
     bc.addEventListener('touchmove', function() { clearTimeout(_inspectTimer); _inspectFired = false; }, {passive:true});
 })();
 
-// Also allow inspection from the enemy list sidebar
-const _origUpdateEList = updateEList;
-updateEList = function() {
-    _origUpdateEList();
-    const el = document.getElementById('enemyList');
-    if(!el) return;
-    el.querySelectorAll('div').forEach((div, i) => {
-        const enemy = B.eUnits.filter(u => u.hp > 0)[Math.floor(i/2)]; // rough mapping
-        if(enemy && i % 2 === 0) {
-            div.style.cursor = 'pointer';
-            div.title = 'Click to inspect';
-            div.onclick = () => openInspect(enemy);
-        }
-    });
-};
+// [CONSOLIDATED] updateEList click-to-inspect merged into original updateEList
 
 // ═══ MAX DIFFICULTY MODE ═════════════════════════════════════
 // Override the difficulty modal to include MAX
@@ -7452,60 +7814,15 @@ updateEList = function() {
     }
 })();
 
-// Patch setDifficulty to handle max
-const _origSetDifficulty = setDifficulty;
-setDifficulty = function(d) {
-    currentDifficulty = d;
-    _origSetDifficulty(d);
-};
+// [CONSOLIDATED] setDifficulty already tracks currentDifficulty in original
 
-// Patch createEnemyTeam to handle MAX difficulty
-const _origCreateEnemyTeam = createEnemyTeam;
-createEnemyTeam = function(count, mult) {
-    if(currentDifficulty === 'max') {
-        const pool = S.images.length ? S.images : PLACEHOLDERS.map(p => ({src:makePlaceholderSrc(p.hue),name:p.name,hue:p.hue}));
-        const eloMult = Math.min(2.5, 1 + S.elo/3000);
-        const m = mult * eloMult * 2.0; // MAX multiplier
-        return Array.from({length:count}, () => {
-            const img = pool[~~(Math.random()*pool.length)];
-            const u = createUnit(img.src, img.name, Math.random() < 0.3 ? 'T0' : 'S');
-            u.hue = img.hue || 0;
-            u.level = 40; u.plus = 10; u.prestige = 3;
-            // Apply prestige bonuses
-            if(u.baseStat) ['hp','atk','def','mag','res','spd'].forEach(s => { u.baseStat[s] += 9; });
-            applyLevel(u);
-            ['maxHp','atk','def','mag','res','spd'].forEach(s => u[s] = Math.round(u[s] * m));
-            u.hp = u.maxHp;
-            // Full skill loadout
-            const aSkills = LEARNABLE_SKILLS.filter(s => s.slot === 'skillA');
-            const bSkills = LEARNABLE_SKILLS.filter(s => s.slot === 'skillB');
-            const cSkills = LEARNABLE_SKILLS.filter(s => s.slot === 'skillC');
-            if(aSkills.length) u.skillA = aSkills[~~(Math.random()*aSkills.length)];
-            if(bSkills.length) u.skillB = bSkills[~~(Math.random()*bSkills.length)];
-            if(cSkills.length) u.skillC = cSkills[~~(Math.random()*cSkills.length)];
-            u.passives = [u.skillA, u.skillB, u.skillC, u.skillS].filter(Boolean);
-            // Equip random S/T0 item
-            const goodItems = ITEM_DB.filter(i => i.rarity === 'S' || i.rarity === 'T0');
-            if(goodItems.length) u.equippedItem = {...goodItems[~~(Math.random()*goodItems.length)]};
-            // Equip random abilities
-            const goodAbils = ABILITY_DB.filter(a => a.rarity === 'S' || a.rarity === 'A');
-            u.equippedAbilities = [
-                goodAbils.length ? {...goodAbils[~~(Math.random()*goodAbils.length)]} : null,
-                goodAbils.length ? {...goodAbils[~~(Math.random()*goodAbils.length)]} : null,
-            ];
-            const pu = prepUnit(u, 'enemy');
-            pu.personality = 'aggressive';
-            // Apply item effects
-            if(typeof applyItemEffects === 'function') applyItemEffects(pu);
-            return pu;
-        });
-    }
-    return _origCreateEnemyTeam(count, mult);
-};
+// [CONSOLIDATED] MAX difficulty createEnemyTeam merged into original
 
 // [CONSOLIDATED] MAX victory reward — merged into main checkBattleOver
 
+// [CONSOLIDATED] Original + victory XP from mega patch
 window.claimMaxReward = function(idx) {
+    if(typeof awardVictoryXPAndQuests==='function')awardVictoryXPAndQuests();
     const choices = window._maxRewardChoices;
     if(!choices || !choices[idx]) return;
     const img = choices[idx];
@@ -7569,82 +7886,7 @@ function startExpandedCampaign(id) {
 // [CONSOLIDATED] Stat caps + item effects merged into prepUnit
 const MAX_STAT_CAP = 99;
 
-// ═══ HERO DETAIL ITEM/ABILITY MANAGEMENT ═════════════════════
-// Patch hero detail to show item and ability equip options
-const _origOpenHeroDetail = openHeroDetail;
-openHeroDetail = function(idx) {
-    _origOpenHeroDetail(idx);
-    const u = S.roster[idx];
-    if(!u) return;
-    
-    // Add item section to hero detail
-    const hdContent = document.querySelector('.hd-content');
-    if(!hdContent) return;
-    
-    // Remove old expansion sections
-    hdContent.querySelectorAll('.expansion-section').forEach(el => el.remove());
-    
-    // Item section
-    const itemSec = document.createElement('div');
-    itemSec.className = 'expansion-section';
-    itemSec.style.cssText = 'background:var(--panel2);border:1px solid var(--border);border-radius:8px;padding:12px';
-    
-    let itemHTML = '<div style="font-family:var(--display);font-size:.65rem;color:var(--gold);letter-spacing:1px;margin-bottom:6px">EQUIPPED ITEM</div>';
-    if(u.equippedItem) {
-        itemHTML += `<div style="font-size:.72rem;font-weight:600">${u.equippedItem.name} <span style="color:var(--text2);font-size:.6rem">${u.equippedItem.rarity}</span></div>`;
-        itemHTML += `<div style="font-size:.62rem;color:var(--text2);margin-top:2px">${u.equippedItem.desc}</div>`;
-        itemHTML += `<button class="btn2 btn-sm" style="margin-top:6px" onclick="unequipItem(${idx});openHeroDetail(${idx})">Unequip</button>`;
-    } else {
-        itemHTML += '<div style="font-size:.62rem;color:var(--text3)">No item equipped</div>';
-    }
-    
-    // Show inventory for equipping
-    if(S.itemInventory && S.itemInventory.length > 0) {
-        itemHTML += '<div style="margin-top:8px;font-size:.6rem;color:var(--text2)">Inventory (' + S.itemInventory.length + '):</div>';
-        itemHTML += '<div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:4px;max-height:120px;overflow-y:auto">';
-        S.itemInventory.slice(0, 20).forEach(item => {
-            const rarityColor = {D:'#8e99a4',C:'#00e5ff',B:'#7c4dff',A:'#ff6b35',S:'#ffd700',T0:'#ff2d55'}[item.rarity] || '#8e99a4';
-            itemHTML += `<button class="btn2 btn-sm" style="font-size:.5rem;border-color:${rarityColor};color:${rarityColor}" onclick="equipItem(${idx},'${item.instanceId}');openHeroDetail(${idx})" title="${item.desc}">${item.name}</button>`;
-        });
-        itemHTML += '</div>';
-    }
-    
-    itemSec.innerHTML = itemHTML;
-    hdContent.appendChild(itemSec);
-    
-    // Ability section
-    const abSec = document.createElement('div');
-    abSec.className = 'expansion-section';
-    abSec.style.cssText = 'background:var(--panel2);border:1px solid var(--border);border-radius:8px;padding:12px';
-    
-    let abHTML = '<div style="font-family:var(--display);font-size:.65rem;color:#7c4dff;letter-spacing:1px;margin-bottom:6px">EQUIPPED ABILITIES</div>';
-    const eqAbs = u.equippedAbilities || [null, null];
-    for(let slot = 0; slot < 2; slot++) {
-        const ab = eqAbs[slot];
-        abHTML += `<div style="margin-bottom:6px"><span style="font-size:.55rem;color:var(--text3)">Slot ${slot+1}:</span> `;
-        if(ab) {
-            abHTML += `<span style="font-size:.65rem;font-weight:600">${ab.name}</span> <span style="font-size:.55rem;color:var(--text2)">${ab.desc}</span>`;
-        } else {
-            abHTML += '<span style="font-size:.6rem;color:var(--text3)">Empty</span>';
-        }
-        abHTML += '</div>';
-    }
-    
-    // Show unlocked abilities
-    if(S.unlockedAbilities && S.unlockedAbilities.length > 0) {
-        abHTML += '<div style="margin-top:6px;font-size:.55rem;color:var(--text2)">Unlocked (' + S.unlockedAbilities.length + '/' + ABILITY_DB.length + '):</div>';
-        abHTML += '<div style="display:flex;flex-wrap:wrap;gap:3px;margin-top:4px;max-height:100px;overflow-y:auto">';
-        S.unlockedAbilities.slice(0, 30).forEach(abId => {
-            const ab = ABILITY_DB.find(a => a.id === abId);
-            if(!ab) return;
-            abHTML += `<button class="btn2 btn-sm" style="font-size:.45rem" onclick="equipAbility(${idx},'${abId}',0);openHeroDetail(${idx})" title="${ab.desc}">${ab.name}</button>`;
-        });
-        abHTML += '</div>';
-    }
-    
-    abSec.innerHTML = abHTML;
-    hdContent.appendChild(abSec);
-};
+// [CONSOLIDATED] openHeroDetail item/ability sections merged into original
 
 // ═══ INSPECTION FROM BARRACKS ════════════════════════════════
 // Allow right-clicking barracks cards to inspect full stats
@@ -7699,151 +7941,11 @@ toast('Content Expansion loaded!', 'gold');
 // ╔══════════════════════════════════════════════════════════════╗
 
 
-// ======================================================================
-// ||  HOTFIX RUNTIME PATCH - Auto-applied by patch_apex.py             ||
-// ======================================================================
-
-// === FIX #3B: Map Specials castable without enemy target =====
-(function(){
-    const _origDoSpecial = doSpecial;
-    doSpecial = function(){
-        const u = B.sel;
-        if(!u || u.specialCharges > 0 || u.acted){ toast('Special not ready','err'); return; }
-        const mapEffects = [
-            'heal_self','shield','aura_heal',
-            'map_quake','map_blizzard','map_fire','map_heal','map_timestop',
-            'heal_all','heal_all_full','buff_all_atk','buff_all_def',
-            'buff_all_spd','buff_all_spectrum','buff_all_full',
-            'debuff_all_aoe','panic_all','gravity_all'
-        ];
-        if(mapEffects.includes(u.special.effect)){
-            _hfExecuteMapSpecial(u); return;
-        }
-        _origDoSpecial();
-    };
-
-    function _hfExecuteMapSpecial(u){
-        const sp = u.special; sfx('special');
-        bLog(u.name+': '+sp.name+'!','spec');
-        const allies = B.allUnits.filter(a=>a.side===u.side&&a.hp>0);
-        const enemies = B.allUnits.filter(a=>a.side!==u.side&&a.hp>0);
-        const nearby = allies.filter(a=>a!==u&&Math.abs(a.x-u.x)+Math.abs(a.y-u.y)<=2);
-        switch(sp.effect){
-            case 'heal_self':{ const h=Math.round(u.maxHp*sp.val); u.hp=Math.min(u.maxHp,u.hp+h); floatTxt(u.x,u.y,'+'+h,'#22c55e'); break; }
-            case 'shield': u.shielded=true; break;
-            case 'aura_heal': nearby.forEach(a=>{ a.hp=Math.min(a.maxHp,a.hp+sp.val); floatTxt(a.x,a.y,'+'+sp.val,'#22c55e'); }); break;
-            case 'map_heal': case 'heal_all': allies.forEach(a=>{ a.hp=Math.min(a.maxHp,a.hp+sp.val); floatTxt(a.x,a.y,'+'+sp.val,'#22c55e'); }); break;
-            case 'heal_all_full': allies.forEach(a=>{ a.hp=a.maxHp; floatTxt(a.x,a.y,'FULL','#22c55e'); }); break;
-            case 'map_quake': B.allUnits.filter(a=>a.hp>0&&a!==u&&a.moveType!=='Flying').forEach(a=>{ a.hp=Math.max(0,a.hp-sp.val); floatTxt(a.x,a.y,'-'+sp.val,'#f97316'); }); screenShake(); break;
-            case 'map_blizzard': enemies.forEach(a=>{ a.hp=Math.max(0,a.hp-sp.val); a.frozen=true; floatTxt(a.x,a.y,'-'+sp.val,'#00e5ff'); }); break;
-            case 'map_fire': enemies.forEach(a=>{ a.hp=Math.max(0,a.hp-sp.val); a.burned=(a.burned||0)+sp.val; floatTxt(a.x,a.y,'-'+sp.val,'#f97316'); }); break;
-            case 'map_timestop': case 'gravity_all': enemies.forEach(a=>{ a.frozen=true; floatTxt(a.x,a.y,'STOP','#a855f7'); }); break;
-            case 'panic_all': enemies.forEach(a=>{ a._panicked=true; floatTxt(a.x,a.y,'PANIC','#ef4444'); }); break;
-            case 'buff_all_atk': allies.forEach(a=>a._rallyAtk=(a._rallyAtk||0)+sp.val); break;
-            case 'buff_all_def': allies.forEach(a=>a._rallyDef=(a._rallyDef||0)+sp.val); break;
-            case 'buff_all_spd': allies.forEach(a=>a._rallySpd=(a._rallySpd||0)+sp.val); break;
-            case 'buff_all_spectrum': case 'buff_all_full': allies.forEach(a=>{ a._rallyAtk=(a._rallyAtk||0)+sp.val; a._rallyDef=(a._rallyDef||0)+sp.val; a._rallySpd=(a._rallySpd||0)+sp.val; }); break;
-            case 'debuff_all_aoe': enemies.forEach(a=>{ a._rallyAtk=Math.min(a._rallyAtk||0,-sp.val); a._rallyDef=Math.min(a._rallyDef||0,-sp.val); a._rallySpd=Math.min(a._rallySpd||0,-sp.val); }); break;
-        }
-        u.specialCharges = u.special.cd;
-        markActed(u);
-        if(B.dangerZone) calcDangerZone();
-        drawMap(); updateBUI(); updateEList();
-        if(!checkBattleOver()) checkTurnEnd();
-    }
-})();
-
-// === FIX #3D+: Hook ALL legendary item effects properly =====
-(function(){
-    const _origApply = applyItemEffects;
-    applyItemEffects = function(bu){
-        _origApply(bu);
-        const item = bu.equippedItem; if(!item) return;
-        const e = item.effect; if(!e) return;
-        const H = {
-            legendary_binding:   ()=> bu.passives.push({name:'Binding Blade',desc:'Triangle \u00b140%',trigger:'OnAttack',condition:'Always',effect:{tag:'triangle_adept',val:0}}),
-            legendary_falchion:  ()=> bu.passives.push({name:'Falchion',desc:'Heal 10/turn',trigger:'TurnStart',condition:'Always',effect:{tag:'heal',val:10}}),
-            legendary_armads:    ()=> bu.passives.push({name:'Armads',desc:'QR when HP>80%',trigger:'OnDefend',condition:'HP>75%',effect:{tag:'brave',val:2}}),
-            legendary_tyrfing:   ()=> bu.passives.push({name:'Tyrfing',desc:'DEF+10 <50%',trigger:'OnDefend',condition:'HP<50%',effect:{tag:'buff_def',val:10}}),
-            legendary_naga:      ()=> { bu.res=(bu.res||0)+5; },
-            legendary_booknaga:  ()=> { ['atk','def','mag','res','spd'].forEach(s=>bu[s]=(bu[s]||0)+3); bu._antiPanic=true; },
-            legendary_ragnell:   ()=> { bu._distantCounter=true; bu.atk=(bu.atk||0)+4; },
-            legendary_gradivus:  ()=> { bu._distantCounter=true; bu.passives.push({name:'Gradivus',desc:'Heal 10 post-combat',trigger:'OnAttack',condition:'Always',effect:{tag:'heal',val:10}}); },
-            legendary_siegmund:  ()=> bu.passives.push({name:'Siegmund',desc:'ATK+6 >90%',trigger:'OnAttack',condition:'HP>75%',effect:{tag:'buff_atk',val:6}}),
-            legendary_durandal:  ()=> bu.passives.push({name:'Durandal',desc:'ATK+8 initiate',trigger:'OnAttack',condition:'Always',effect:{tag:'buff_atk',val:8}}),
-            legendary_solkatti:  ()=> bu.passives.push({name:'Sol Katti',desc:'Desperation <75%',trigger:'OnAttack',condition:'HP<75%',effect:{tag:'desperation',val:0}}),
-            legendary_aura:      ()=> bu.passives.push({name:'Aura',desc:'Heal allies 7',trigger:'OnAttack',condition:'Always',effect:{tag:'heal',val:7}}),
-            legendary_excalibur: ()=> { bu.spd=(bu.spd||0)+5; },
-            legendary_forseti:   ()=> bu.passives.push({name:'Forseti',desc:'Follow-up if faster',trigger:'OnAttack',condition:'Speed>Target',effect:{tag:'brave',val:2}}),
-            legendary_mjolnir:   ()=> { bu.atk=(bu.atk||0)+5; bu.specialCharges=Math.max(0,(bu.specialCharges||0)-2); },
-            legendary_loptous:   ()=> { bu._shieldPct=Math.min(0.6,(bu._shieldPct||0)+0.5); },
-            legendary_chaos:     ()=> { ['atk','def','mag','res','spd'].forEach(s=>bu[s]=(bu[s]||0)+5); },
-            legendary_apex:      ()=> { ['atk','def','mag','res','spd'].forEach(s=>bu[s]=(bu[s]||0)+7); },
-        };
-        if(H[e.type]) H[e.type]();
-    };
-})();
-
-// === FIX #4: Hook phantom ability/item tags ==================
-(function(){
-    // initiate_atk / defend_def in calcDmg
-    const _origCalc = calcDmg;
-    calcDmg = function(atker, target, isSpecial){
-        let atkBonus=0, defBonus=0;
-        atker.passives?.forEach(p=>{
-            if(p.trigger==='OnAttack'&&p.effect?.tag==='initiate_atk'&&evalCondition(p.condition,atker,target)) atkBonus+=p.effect.val;
-        });
-        target.passives?.forEach(p=>{
-            if(p.trigger==='OnDefend'&&p.effect?.tag==='defend_def'&&evalCondition(p.condition,target,atker)) defBonus+=p.effect.val;
-        });
-        const sa=atker.atk, sd=target.def;
-        atker.atk+=atkBonus; target.def+=defBonus;
-        const r = _origCalc(atker, target, isSpecial);
-        atker.atk=sa; target.def=sd;
-        return r;
-    };
-
-    // [CONSOLIDATED] stack_spd/regen merged into endEnemyPhase, enemy regen merged into endPlayerPhase
-
-    // post_combat_debuff_atk + on-hit item effects + lifesteal + reflect
-    const _origPC = performCombat;
-    performCombat = function(atker, target, isSpecial, isInitiating){
-        _origPC(atker, target, isSpecial, isInitiating);
-        if(!target||!atker) return;
-        if(target.hp>0) atker.passives?.forEach(p=>{
-            if(p.effect?.tag==='post_combat_debuff_atk'&&evalCondition(p.condition||'Always',atker,target))
-                target._rallyAtk=Math.min(target._rallyAtk||0,-(p.effect.val||5));
-        });
-        if(target.hp>0&&atker.hp>0){
-            if(atker._itemOnHitBurn>0) target.burned=(target.burned||0)+atker._itemOnHitBurn;
-            if(atker._itemOnHitFreeze&&Math.random()<atker._itemOnHitFreeze) target.frozen=true;
-            if(atker._itemOnHitPoison>0) target.poisoned=(target.poisoned||0)+atker._itemOnHitPoison;
-            if(atker._itemOnHitPanic&&Math.random()<atker._itemOnHitPanic) target._panicked=true;
-        }
-        if(atker._itemLifesteal>0&&atker.hp>0&&target){
-            const est=Math.max(1,atker.atk-(target.def||0));
-            const h=Math.round(est*atker._itemLifesteal);
-            if(h>0){ atker.hp=Math.min(atker.maxHp,atker.hp+h); floatTxt(atker.x,atker.y,'+'+h,'#22c55e'); }
-        }
-        if(target._itemReflect>0&&atker.hp>0){
-            const est=Math.max(1,atker.atk-(target.def||0));
-            const ref=Math.round(est*target._itemReflect);
-            if(ref>0){ atker.hp=Math.max(0,atker.hp-ref); floatTxt(atker.x,atker.y,'-'+ref,'#a855f7'); }
-        }
-    };
-
-    // assist_buff from items
-    const _origAssist = executeAssist;
-    executeAssist = function(user, target){
-        _origAssist(user, target);
-        if(user.equippedItem?.effect?.type==='assist_buff'){
-            const v=user.equippedItem.effect.val||3;
-            target._rallyAtk=(target._rallyAtk||0)+v;
-        }
-    };
-})();
-
-console.log('%c APEX TIER 0 HOTFIX PATCH APPLIED','color:#22c55e;font-weight:bold;font-size:14px');
+// [CONSOLIDATED] HOTFIX RUNTIME PATCH — all overrides merged into original functions:
+// doSpecial: map-wide specials merged into original + _executeMapSpecial helper
+// applyItemEffects: legendary items merged into original
+// calcDmg: initiate_atk/defend_def merged into buff calculation
+// executeAssist: assist_buff merged into original
 
 
 // ═══════════════════════════════════════════════════════════════
@@ -8507,6 +8609,8 @@ updateHomeScreen = function () {
     };
 
     window.toggleAutoBattle = function() {
+        // [CONSOLIDATED] APEX difficulty block from mega patch
+        if(currentDifficulty==='apex'){toast('Auto-battle is DISABLED on APEX difficulty!','err');return;}
         B.autoPlay = !B.autoPlay;
         const btn = document.getElementById('autoBtn');
         if(btn) {
@@ -8599,27 +8703,7 @@ updateHomeScreen = function () {
         next();
     };
 
-    // Hook into the player phase start to auto-play
-    const _origEndEnemyPhase = endEnemyPhase;
-    // We need to hook AFTER the player phase begins.
-    // The player phase code runs at the end of endEnemyPhase, ending at drawMap/updateBUI.
-    // We'll patch the beginning of each player phase by watching for the turnInd change.
-    const _origDrawMap = drawMap;
-    let _autoCheckPending = false;
-    window.drawMap = function() {
-        _origDrawMap.apply(this, arguments);
-        // After map draws, if auto is on and it's player phase, start auto
-        if(B.autoPlay && B.phase === 'player' && !_autoCheckPending) {
-            const hasUnacted = B.pUnits.some(u => u.hp > 0 && !u.acted);
-            if(hasUnacted) {
-                _autoCheckPending = true;
-                setTimeout(() => {
-                    _autoCheckPending = false;
-                    if(B.autoPlay && B.phase === 'player') runAutoPlayer();
-                }, spd(CFG.AI_DELAY * 0.5));
-            }
-        }
-    };
+    // [CONSOLIDATED] drawMap auto-battle hook merged into enhanced drawMap override
 
     console.log('%c AUTO-BATTLE PATCH APPLIED', 'color:#22c55e;font-weight:bold');
 })();
@@ -8760,74 +8844,7 @@ updateHomeScreen = function () {
     console.log('%c INVENTORY UI PATCH APPLIED', 'color:#22c55e;font-weight:bold');
 })();
 
-// ═══════════════════════════════════════════════════════════════
-// 11K UNIT VARIETY PATCH — PROCEDURAL WEAPONS & SKILLS
-// ═══════════════════════════════════════════════════════════════
-(function() {
-    console.log('%c APPLYING 11K UNIT VARIETY PATCH...', 'color:#f97316;font-weight:bold');
-
-    const W_PREFIXES = ['Void', 'Star', 'Thunder', 'Blood', 'Iron', 'Ancient', 'Cyber', 'Neon', 'Holy', 'Cursed', 'Royal', 'Savage'];
-    const W_SUFFIXES = ['of Might', 'of Speed', 'of Ruin', 'of Mercy', 'of the Night', 'of the Sun', 'of Storms', 'of Steel', 'of Honor', 'of Chaos'];
-
-    const _origCreateUnit = createUnit;
-    window.createUnit = function(src, name, overrideGrade) {
-        const u = _origCreateUnit(src, name, overrideGrade);
-
-        // INJECT VARIETY: Pick skills from the massive expansion ABILITY_DB (200 skills)
-        // Give A/S/T0 units a 40% chance to start with a Rare ability
-        if(typeof ABILITY_DB !== 'undefined' && ['A','S','T0'].includes(u.grade) && Math.random() < 0.4) {
-            const rareAbilities = ABILITY_DB.filter(a => ['A','S','T0'].includes(a.rarity));
-            if(rareAbilities.length) {
-                const randAb = rareAbilities[~~(Math.random() * rareAbilities.length)];
-                const slot = ['skillA','skillB','skillC'][~~(Math.random()*3)];
-                u[slot] = {
-                    name: randAb.name,
-                    desc: randAb.desc,
-                    trigger: randAb.trigger,
-                    condition: randAb.condition,
-                    effect: randAb.effect
-                };
-            }
-        }
-
-        // GENERATE PROCEDURAL WEAPON (The "Prf" System)
-        // 30% chance for regular units, 100% for T0 units
-        if(u.grade === 'T0' || Math.random() < 0.3) {
-            const prefix = W_PREFIXES[~~(Math.random() * W_PREFIXES.length)];
-            const suffix = W_SUFFIXES[~~(Math.random() * W_SUFFIXES.length)];
-            const weaponBase = u.weapon.replace('Mag', ' Tome');
-            const weaponName = `${prefix} ${weaponBase} ${suffix}`;
-
-            // Apply random stat bump from the weapon
-            const statBump = ['atk','spd','def','res'][~~(Math.random()*4)];
-            u.baseStat[statBump] += 3;
-            u[statBump] += 3;
-
-            // Set the weapon name
-            u.weaponEffectName = weaponName;
-
-            // Attach a random ability from ABILITY_DB as the weapon's inherent effect
-            if(typeof ABILITY_DB !== 'undefined' && ABILITY_DB.length) {
-                const effectSource = ABILITY_DB[~~(Math.random() * ABILITY_DB.length)];
-                u.weaponEffect = effectSource.id || 'prf_weapon';
-                u.passives.push({
-                    name: '\u2694 ' + weaponName,
-                    desc: `Signature weapon. ${effectSource.desc}`,
-                    trigger: effectSource.trigger,
-                    condition: effectSource.condition,
-                    effect: effectSource.effect
-                });
-            }
-        }
-
-        // Rebuild passives list to include weapon passive and updated skill slots
-        u.passives = [u.skillA, u.skillB, u.skillC, u.skillS, ...u.passives.filter(p => p && p.name && p.name.startsWith('\u2694'))].filter(Boolean);
-
-        return u;
-    };
-
-    console.log('%c VARIETY PATCH APPLIED: Procedural Weapons Active', 'color:#22c55e;font-weight:bold');
-})();
+// [CONSOLIDATED] 11K Unit Variety patch merged into original createUnit
 
 // ═══════════════════════════════════════════════════════════════
 // UNIT DAYCARE + CHAO GARDEN + FUSION CHILDREN
@@ -9182,10 +9199,15 @@ updateHomeScreen = function () {
     };
 
     // ─── Welcome Child (Fusion) ───────────────────────────────
+    // [CONSOLIDATED] Original + validation from bonding patch
     window.dcWelcomeChild = function() {
         const uA = S.roster.find(r => r.id === S.daycareSlots[0]);
         const uB = S.roster.find(r => r.id === S.daycareSlots[1]);
         if(!uA || !uB) return;
+        // Validation from bonding patch
+        if(uA.level<40||uB.level<40){toast('Both parents must be Level 40 to fuse!','err');return;}
+        if((S.shards||0)<10){toast('Fusion requires 10 Prisms (PR)! You earn them from dupes.','err');return;}
+        S.shards-=10;
 
         // Determine child grade — highest of parents, or upgrade if both are same
         const gradeOrder = ['D','C','B','A','S','T0'];
@@ -9306,48 +9328,11 @@ updateHomeScreen = function () {
     };
 
     // ─── FUSION GATES: Level 40 + 10 Prisms ─────────────────
-    const _origDcWelcomeChild = window.dcWelcomeChild;
-    window.dcWelcomeChild = function() {
-        const uA = S.roster.find(r => r.id === S.daycareSlots[0]);
-        const uB = S.roster.find(r => r.id === S.daycareSlots[1]);
-        if(!uA || !uB) return;
-
-        if(uA.level < 40 || uB.level < 40) {
-            toast('Both parents must be Level 40 to fuse!', 'err');
-            return;
-        }
-        if((S.shards || 0) < 10) {
-            toast('Fusion requires 10 Prisms (PR)! You earn them from dupes.', 'err');
-            return;
-        }
-
-        S.shards -= 10;
-        _origDcWelcomeChild();
-    };
+    // [CONSOLIDATED] dcWelcomeChild validation merged into original
 
     // ─── BATTLEFIELD BONDING ──────────────────────────────────
     // Hook into performCombat to track adjacency bonds after combat
-    const _origPerformCombat = performCombat;
-    window.performCombat = function(atker, target, isSpecial, isInitiating) {
-        _origPerformCombat.apply(this, arguments);
-
-        // After combat, check for adjacent allies to bond with
-        if(atker && atker.side === 'player' && atker.hp > 0) {
-            const allies = B.pUnits.filter(u => u.hp > 0 && u !== atker &&
-                Math.abs(u.x - atker.x) + Math.abs(u.y - atker.y) <= 2);
-            allies.forEach(ally => {
-                addSupport(atker.id, ally.id, BOND_PER_BATTLE_ADJ);
-                // Spawn visual heart on the map
-                spawnBattleHeart(atker.x, atker.y);
-            });
-        }
-
-        // Check if an assist was used (heal/dance)
-        if(atker && target && atker.side === target.side && atker.side === 'player') {
-            addSupport(atker.id, target.id, BOND_PER_ASSIST);
-            spawnBattleHeart(target.x, target.y);
-        }
-    };
+    // [CONSOLIDATED] performCombat bonding merged into original performCombat
 
     function spawnBattleHeart(gx, gy) {
         const canvas = document.getElementById('battleCanvas');
@@ -9372,24 +9357,7 @@ updateHomeScreen = function () {
         setTimeout(() => h.remove(), 800);
     }
 
-    // Show support stars in battle unit info
-    const _origUpdateBUI = updateBUI;
-    window.updateBUI = function() {
-        _origUpdateBUI.apply(this, arguments);
-        // Add support indicators to unit cards in battle
-        if(B.phase === 'over') return;
-        B.pUnits.filter(u => u.hp > 0).forEach(u => {
-            const bestAlly = B.pUnits.filter(a => a.hp > 0 && a !== u)
-                .map(a => ({a, sup: getSupport(u.id, a.id)}))
-                .sort((a, b) => b.sup - a.sup)[0];
-            if(bestAlly && bestAlly.sup >= 20) {
-                const rank = getSupportRank(bestAlly.sup);
-                // We can't easily modify the BUI DOM here without knowing its structure,
-                // so we apply combat bonuses silently based on support rank
-                // S-rank support gives +2 ATK/DEF during battle adjacency
-            }
-        });
-    };
+    // [CONSOLIDATED] updateBUI support indicators — no-op override removed (bonuses applied in combat calc)
 
     // ─── PROCEDURAL CHARACTER DESCRIPTIONS ────────────────────
     const TITLES = {
@@ -9949,36 +9917,8 @@ updateHomeScreen = function () {
 
     // [CONSOLIDATED] Victory music — merged into main checkBattleOver
 
-    // ─── 8. ADDITIONAL NULL GUARDS ───────────────────────────
-    // Guard special access in combat resolution
-    const _origPC = performCombat;
-    if(typeof _origPC === 'function') {
-        // Already overridden by bonding patch, so we chain onto the current version
-        const _currentPC = window.performCombat;
-        window.performCombat = function(atker, target, isSpecial, isInitiating) {
-            // Ensure specials exist before combat
-            if(atker && !atker.special) atker.special = {name:'None',desc:'',effect:'none',val:0,cd:99};
-            if(target && !target.special) target.special = {name:'None',desc:'',effect:'none',val:0,cd:99};
-            return _currentPC.apply(this, arguments);
-        };
-    }
-
-    // ─── 9. UI POLISH: BATTLE LOG TIMESTAMPS ─────────────────
-    const _origBlog = typeof bLog === 'function' ? bLog : null;
-    if(_origBlog) {
-        window.bLog = function(msg, type) {
-            _origBlog(msg, type);
-            // Add turn number to latest log entry
-            const logEl = document.getElementById('bLog');
-            if(logEl && logEl.lastChild) {
-                const turnNum = Math.floor((B.turnCount || 0) / 2) + 1;
-                const span = document.createElement('span');
-                span.style.cssText = 'font-size:.4rem;color:var(--text3);margin-left:4px';
-                span.textContent = `T${turnNum}`;
-                logEl.lastChild.appendChild(span);
-            }
-        };
-    }
+    // [CONSOLIDATED] performCombat null guards merged into original performCombat
+    // [CONSOLIDATED] bLog turn timestamps merged into original bLog
 
     // [CONSOLIDATED] Turn counter merged into endPlayerPhase
     if(typeof B !== 'undefined') B.turnCount = 0;
@@ -10151,6 +10091,7 @@ updateHomeScreen = function () {
     if(!S.unlockedTitles) S.unlockedTitles = ['Rookie'];
 
     // ─── HQ TAB SYSTEM ───
+    // [CONSOLIDATED] Original + glossary rendering from mega patch
     window.setHQTab = function(tab) {
         document.querySelectorAll('.hq-tab').forEach(t => t.classList.remove('active'));
         const el = document.getElementById('hqTab_' + tab);
@@ -10158,7 +10099,7 @@ updateHomeScreen = function () {
         document.querySelectorAll('#hqTabs .stab').forEach((b, i) => {
             b.classList.toggle('active', ['glossary','achievements','multiplayer','compendium','profile'][i] === tab);
         });
-        if(tab === 'compendium') renderCompendium();
+        if(tab === 'compendium'){renderCompendium();setTimeout(()=>{if(typeof renderGlossary==='function')renderGlossary();},50);}
         if(tab === 'achievements') renderAchievements();
         if(tab === 'profile') renderTitles();
     };
@@ -10376,50 +10317,7 @@ updateHomeScreen = function () {
         });
     };
 
-    // ─── 9. BANNER EXPIRY & BOOSTED RATES ───
-    // Add created timestamp to new banners
-    const _origRefreshBannerList_v35 = window.refreshBannerList;
-    window.refreshBannerList = function() {
-        // Expire banners older than 3 days
-        if(S.banners) {
-            const now = Date.now();
-            S.banners = S.banners.filter(b => {
-                if(!b.createdAt) { b.createdAt = now; return true; }
-                const age = now - b.createdAt;
-                const threeDays = 3 * 24 * 60 * 60 * 1000;
-                if(age > threeDays) { toast('Banner "' + b.name + '" expired!', ''); return false; }
-                return true;
-            });
-            if(S.activeBannerId && !S.banners.find(b => b.id === S.activeBannerId)) {
-                S.activeBannerId = null;
-            }
-        }
-        _origRefreshBannerList_v35.apply(this, arguments);
-        // Add export buttons and expiry display
-        const actions = document.querySelectorAll('.banner-actions');
-        actions.forEach((act, i) => {
-            const banner = S.banners ? S.banners[i] : null;
-            if(banner) {
-                if(!act.querySelector('.export-bn-btn')) {
-                    const btn = document.createElement('button');
-                    btn.className = 'fbtn export-bn-btn';
-                    btn.textContent = 'Export';
-                    btn.style.color = '#00e5ff';
-                    btn.onclick = () => window.exportBanner(banner.id);
-                    act.insertBefore(btn, act.firstChild);
-                }
-                // Show expiry
-                if(banner.createdAt && !act.querySelector('.bn-expiry')) {
-                    const exp = document.createElement('span');
-                    exp.className = 'bn-expiry';
-                    const hoursLeft = Math.max(0, Math.floor((banner.createdAt + 3*24*60*60*1000 - Date.now()) / (60*60*1000)));
-                    exp.style.cssText = 'font-size:.5rem;color:var(--text3);font-family:var(--mono)';
-                    exp.textContent = hoursLeft + 'h left';
-                    act.appendChild(exp);
-                }
-            }
-        });
-    };
+    // [CONSOLIDATED] refreshBannerList expiry + export buttons merged into original
 
     // [CONSOLIDATED] rollUnit Layer 3 removed — banner rate boost merged into MEGA PATCH rollUnit
 
@@ -10507,30 +10405,7 @@ updateHomeScreen = function () {
         checkAchievements();
     };
 
-    // ─── 12. SAVE/LOAD INTEGRATION ───
-    const _origSave_v35 = window.save;
-    window.save = function(quiet) {
-        if(!S.achievements) S.achievements=[];
-        if(!S.compendium) S.compendium=[];
-        if(!S.apexTokens) S.apexTokens=0;
-        if(!S.apexMeter) S.apexMeter=0;
-        if(!S.profileTitle) S.profileTitle='Rookie';
-        if(!S.unlockedTitles) S.unlockedTitles=['Rookie'];
-        return _origSave_v35.apply(this, arguments);
-    };
-
-    const _origLoadGame_v35 = window.loadGame;
-    window.loadGame = function() {
-        const result = _origLoadGame_v35.apply(this, arguments);
-        if(!S.achievements) S.achievements=[];
-        if(!S.compendium) S.compendium=[];
-        if(!S.apexTokens) S.apexTokens=0;
-        if(!S.apexMeter) S.apexMeter=0;
-        if(!S.profileTitle) S.profileTitle='Rookie';
-        if(!S.unlockedTitles) S.unlockedTitles=['Rookie'];
-        S.roster.forEach(u=>{if(u.name&&!S.compendium.includes(u.name))S.compendium.push(u.name);});
-        return result;
-    };
+    // [CONSOLIDATED] Save/load v3.5 fields merged into save() and loadGame()
 
     // [CONSOLIDATED] Merc cleanup — merged into main checkBattleOver
 
@@ -11142,13 +11017,7 @@ setTimeout(renameTermsInUI, 500);
 // [CONSOLIDATED] Toast term renaming merged into toast()
 
 // Add Glossary content to the compendium tab
-const _origSetHQTab = window.setHQTab;
-window.setHQTab = function(tab) {
-    _origSetHQTab(tab);
-    if(tab === 'compendium') {
-        setTimeout(renderGlossary, 50);
-    }
-};
+// [CONSOLIDATED] setHQTab glossary rendering merged into original
 
 function renderGlossary() {
     const compTab = document.getElementById('hqTab_compendium');
@@ -11262,108 +11131,9 @@ console.log('%c  ✓ Renamed terms + Glossary added', 'color:#22c55e');
     diffModal.insertBefore(apexBtn, cancelBtn);
 })();
 
-// Patch createEnemyTeam for APEX difficulty
-const _origCreateEnemyTeam2 = createEnemyTeam;
-window.createEnemyTeam = createEnemyTeam = function(count, mult) {
-    if(currentDifficulty === 'apex') {
-        const pool = S.images.length ? S.images : PLACEHOLDERS.map(p => ({src:makePlaceholderSrc(p.hue),name:p.name,hue:p.hue}));
-        const eloMult = Math.min(3.0, 1 + S.elo/2500);
-        const m = mult * eloMult * 2.5; // APEX multiplier: 2.5x
+// [CONSOLIDATED] APEX difficulty createEnemyTeam merged into original
 
-        // Build a SYNERGIZED team: pick a faction and class, fill the team
-        const faction = FACTIONS[~~(Math.random()*FACTIONS.length)];
-        const unitClass = CLASSES[~~(Math.random()*CLASSES.length)];
-
-        return Array.from({length: count}, (_, idx) => {
-            const img = pool[~~(Math.random()*pool.length)];
-            // ALL units are T0 grade
-            const u = createUnit(img.src, img.name, 'T0');
-            u.hue = img.hue || 0;
-            u.level = 40;
-            u.plus = 10;
-            u.prestige = 5; // Max prestige
-            // Apply prestige bonuses
-            if(u.baseStat) ['hp','atk','def','mag','res','spd'].forEach(s => { u.baseStat[s] += 15; });
-            if(typeof applyLevel === 'function') applyLevel(u);
-            ['maxHp','atk','def','mag','res','spd'].forEach(s => u[s] = Math.round(u[s] * m));
-            u.hp = u.maxHp;
-
-            // Force synergized faction/class
-            u.faction = faction;
-            u.unitClass = unitClass;
-
-            // Full skill loadout — pick the BEST skills
-            const aSkills = LEARNABLE_SKILLS.filter(s => s.slot === 'skillA');
-            const bSkills = LEARNABLE_SKILLS.filter(s => s.slot === 'skillB');
-            const cSkills = LEARNABLE_SKILLS.filter(s => s.slot === 'skillC');
-            if(aSkills.length) u.skillA = aSkills[~~(Math.random()*aSkills.length)];
-            if(bSkills.length) u.skillB = bSkills[~~(Math.random()*bSkills.length)];
-            if(cSkills.length) u.skillC = cSkills[~~(Math.random()*cSkills.length)];
-            u.passives = [u.skillA, u.skillB, u.skillC, u.skillS].filter(Boolean);
-
-            // Best items and abilities
-            const goodItems = typeof ITEM_DB !== 'undefined' ? ITEM_DB.filter(i => i.rarity === 'T0') : [];
-            if(goodItems.length) u.equippedItem = {...goodItems[~~(Math.random()*goodItems.length)]};
-            else {
-                const anyItems = typeof ITEM_DB !== 'undefined' ? ITEM_DB.filter(i => i.rarity === 'S') : [];
-                if(anyItems.length) u.equippedItem = {...anyItems[~~(Math.random()*anyItems.length)]};
-            }
-            const goodAbils = typeof ABILITY_DB !== 'undefined' ? ABILITY_DB.filter(a => a.rarity === 'S' || a.rarity === 'T0') : [];
-            u.equippedAbilities = [
-                goodAbils.length ? {...goodAbils[~~(Math.random()*goodAbils.length)]} : null,
-                goodAbils.length ? {...goodAbils[~~(Math.random()*goodAbils.length)]} : null,
-            ];
-
-            // Boon on best stat, no bane
-            u.boon = 'atk';
-            u.bane = null;
-            u.atk += 3;
-
-            const pu = prepUnit(u, 'enemy');
-            pu.personality = 'aggressive'; // Always aggressive AI
-            if(typeof applyItemEffects === 'function') applyItemEffects(pu);
-            return pu;
-        });
-    }
-    return _origCreateEnemyTeam2(count, mult);
-};
-
-// Apply synergies to APEX enemies (they share faction+class, so they get max bonuses)
-const _origStartBattle = startBattle;
-window.startBattle = startBattle = async function(campaignData = null) {
-    await _origStartBattle(campaignData);
-
-    // If APEX difficulty, disable auto-battle and force synergies
-    if(currentDifficulty === 'apex') {
-        B.autoPlay = false;
-        const autoBtn = document.getElementById('autoBtn');
-        if(autoBtn) {
-            autoBtn.classList.remove('auto-active');
-            autoBtn.textContent = 'AUTO';
-            autoBtn.disabled = true;
-            autoBtn.style.opacity = '0.3';
-            autoBtn.title = 'Auto-battle disabled on APEX difficulty';
-        }
-        toast('APEX DIFFICULTY — Auto-battle DISABLED. All enemies are T0 +10 with full synergies!', 'err');
-    } else {
-        const autoBtn = document.getElementById('autoBtn');
-        if(autoBtn) {
-            autoBtn.disabled = false;
-            autoBtn.style.opacity = '';
-            autoBtn.title = '';
-        }
-    }
-};
-
-// Block auto-battle toggle on APEX difficulty
-const _origToggleAuto = window.toggleAutoBattle;
-window.toggleAutoBattle = function() {
-    if(currentDifficulty === 'apex') {
-        toast('Auto-battle is DISABLED on APEX difficulty!', 'err');
-        return;
-    }
-    if(typeof _origToggleAuto === 'function') _origToggleAuto();
-};
+// [CONSOLIDATED] APEX startBattle/toggleAutoBattle overrides merged into originals
 
 console.log('%c  ✓ APEX difficulty mode added', 'color:#22c55e');
 
@@ -11544,7 +11314,9 @@ console.log('%c  ✓ Difficulty clear tracking & display', 'color:#22c55e');
 
 // [CONSOLIDATED] APEX victory — merged into main checkBattleOver
 
+// [CONSOLIDATED] Original + victory XP from mega patch
 window.claimApexReward = function(idx) {
+    if(typeof awardVictoryXPAndQuests==='function')awardVictoryXPAndQuests();
     const choices = window._apexRewardChoices;
     if(!choices || !choices[idx]) return;
     const img = choices[idx];
@@ -11605,22 +11377,7 @@ function awardVictoryXPAndQuests() {
 }
 
 // Patch the MAX victory handler to also award XP/quests
-const _origClaimMaxReward = window.claimMaxReward;
-if(_origClaimMaxReward) {
-    window.claimMaxReward = function(idx) {
-        awardVictoryXPAndQuests();
-        _origClaimMaxReward(idx);
-    };
-}
-
-// Patch the APEX victory handler to also award XP/quests
-const _origClaimApexReward = window.claimApexReward;
-if(_origClaimApexReward) {
-    window.claimApexReward = function(idx) {
-        awardVictoryXPAndQuests();
-        _origClaimApexReward(idx);
-    };
-}
+// [CONSOLIDATED] claimMaxReward/claimApexReward XP wrappers merged into originals
 
 console.log('%c  ✓ Home currency + victory XP fixes', 'color:#22c55e');
 
@@ -11649,95 +11406,17 @@ console.log('%c  ✓ Home currency + victory XP fixes', 'color:#22c55e');
         document.getElementById('gcmNo').onclick = () => { gcm.style.display = 'none'; if(onNo) onNo(); };
     };
 
-    // Patch doSpecial to use gameConfirm instead of confirm()
-    const _origDoSpecial = doSpecial;
-    window.doSpecial = doSpecial = function() {
-        const u = B.sel;
-        if(!u || u.specialCharges > 0 || u.acted) { toast('Special not ready','err'); return; }
-        if(['heal_self','shield','aura_heal'].includes(u.special.effect)) {
-            gameConfirm(
-                `Use ${u.special.name}? (${u.special.desc})`,
-                () => { performCombat(u, u, true); B.mode = 'select'; B.highlights = []; },
-                () => { B.mode = 'select'; }
-            );
-            return;
-        }
-        _origDoSpecial();
-    };
-
-    // Patch retreat button to use gameConfirm
-    const _origRetreat = retreat;
-    window.retreat = retreat = function() {
-        if(B.phase === 'over') { nav('home'); return; }
-        gameConfirm('Retreat from battle?', () => nav('home'));
-    };
+    // [CONSOLIDATED] doSpecial gameConfirm merged into original doSpecial
+    // [CONSOLIDATED] retreat gameConfirm merged into original retreat
 
     console.log('%c  ✓ Battle confirm() replaced with in-game modal', 'color:#22c55e');
 })();
 
-// ─────────────────────────────────────────────────────────────
-// FIX: Bow melee blind spot tooltip + Campaign 5 gate
-// ─────────────────────────────────────────────────────────────
-(function() {
-    // Patch the attack mode tooltip: when a bow unit selects ATTACK,
-    // show a tip if there's an adjacent enemy but no valid targets
-    const _origBattleClick = battleClick;
-    window.battleClick = battleClick = function(e) {
-        _origBattleClick(e);
-        // After click, check if a bow unit has no attack targets
-        if(B.sel && B.mode === 'attack' && B.highlights.length === 0) {
-            if(['Bow','Sniper'].includes(B.sel.weapon) || B.sel.role === 'Sniper') {
-                // Check if there are adjacent enemies
-                const adj = [[0,-1],[0,1],[-1,0],[1,0]];
-                const hasAdjacentEnemy = adj.some(([dx,dy]) => {
-                    const u = unitAt(B.sel.x+dx, B.sel.y+dy);
-                    return u && u.side !== B.sel.side;
-                });
-                if(hasAdjacentEnemy) {
-                    toast('Bows cannot attack adjacent enemies — they only hit at range 2+', 'err');
-                }
-            }
-        }
-    };
+// [CONSOLIDATED] Bow tooltip merged into doAttack; Campaign 5 description set inline
+if(typeof CAMPAIGN!=='undefined'){const c5=CAMPAIGN.find(c=>c.id===5);if(c5)c5.desc='The ultimate test. Prove you are Tier 0. (Recommended: Lv.20+ with A/S grade units)';}
+if(typeof CAMPAIGN_EXPANDED!=='undefined'){const c5e=CAMPAIGN_EXPANDED.find(c=>c.id===105);if(c5e&&c5e.name==='APEX Challenge')c5e.desc=(c5e.desc||'')+' (Recommended: Lv.20+ with A/S grade units)';}
 
-    // Add recommended level to Campaign 5
-    if(typeof CAMPAIGN !== 'undefined') {
-        const c5 = CAMPAIGN.find(c => c.id === 5);
-        if(c5) c5.desc = 'The ultimate test. Prove you are Tier 0. (Recommended: Lv.20+ with A/S grade units)';
-    }
-    if(typeof CAMPAIGN_EXPANDED !== 'undefined') {
-        const c5e = CAMPAIGN_EXPANDED.find(c => c.id === 105);
-        if(c5e && c5e.name === 'APEX Challenge') {
-            c5e.desc = (c5e.desc || '') + ' (Recommended: Lv.20+ with A/S grade units)';
-        }
-    }
-
-    console.log('%c  ✓ Bow tooltip + Campaign 5 power gate', 'color:#22c55e');
-})();
-
-// ─────────────────────────────────────────────────────────────
-// FIX: Give enemies Distant Counter at higher difficulties
-// ─────────────────────────────────────────────────────────────
-(function() {
-    const _origCreateEnemyTeamDC = createEnemyTeam;
-    window.createEnemyTeam = createEnemyTeam = function(count, mult) {
-        const team = _origCreateEnemyTeamDC(count, mult);
-        // On Lunatic+, melee enemies get a chance at Distant Counter
-        if(['lunatic','max','apex'].includes(currentDifficulty)) {
-            const dcChance = {lunatic: 0.25, max: 0.5, apex: 0.8}[currentDifficulty] || 0;
-            team.forEach(u => {
-                const range = getWeaponRange(u.weapon);
-                // Only give DC to melee units (range 1)
-                if(range === 1 && Math.random() < dcChance) {
-                    u._distantCounter = true;
-                }
-            });
-        }
-        return team;
-    };
-
-    console.log('%c  ✓ Enemy Distant Counter on high difficulty', 'color:#22c55e');
-})();
+// [CONSOLIDATED] Distant Counter override merged into original createEnemyTeam
 
 console.log('%c ═══ MEGA PATCH COMPLETE ═══', 'color:#ff6b35;font-weight:bold;font-size:14px');
 })();
@@ -12453,54 +12132,13 @@ window.launchCampaignBattle_v2 = function(battleNum) {
 // ═══════════════════════════════════════════════════════════════
 
 // Patch startBattle to apply book-specific boss enhancements
-const _origStartBattle_camp = window.startBattle;
-window.startBattle = async function(campaignData) {
-    await _origStartBattle_camp.apply(this, arguments);
-
-    // If this is a campaign_v2 boss battle, enhance enemies
-    if(currentBattleMode === 'campaign_v2' && currentBattleConfig?.boss) {
-        const config = currentBattleConfig;
-        const bookIdx = config.bookIdx || 0;
-
-        // Enhance the last enemy as the "boss"
-        if(B.eUnits.length > 0) {
-            const boss = B.eUnits[B.eUnits.length - 1];
-
-            // Boss gets bonus HP and stats
-            boss.maxHp = Math.round(boss.maxHp * (1.5 + bookIdx * 0.15));
-            boss.hp = boss.maxHp;
-            boss.atk = Math.round(boss.atk * (1.2 + bookIdx * 0.1));
-            boss.def = Math.round(boss.def * (1.2 + bookIdx * 0.1));
-
-            // Boss grade scales with book
-            if(bookIdx >= 8) boss.grade = 'T0';
-            else if(bookIdx >= 5) boss.grade = 'S';
-            else if(bookIdx >= 3) boss.grade = 'A';
-
-            // Give boss Distant Counter in later books
-            if(bookIdx >= 4) boss._distantCounter = true;
-
-            // Boss personality is always aggressive
-            boss.personality = 'aggressive';
-        }
-    }
-};
+// [CONSOLIDATED] startBattle campaign boss enhancements merged into original startBattle
 
 // ═══════════════════════════════════════════════════════════════
 // HOME SCREEN — Show campaign progress
 // ═══════════════════════════════════════════════════════════════
 
-const _origUpdateHome_camp = window.updateHomeScreen;
-window.updateHomeScreen = function() {
-    _origUpdateHome_camp.apply(this, arguments);
-
-    // Add campaign progress to home
-    const stats = document.getElementById('homeStatStrip');
-    if(stats) {
-        const total = S.campaignDone.filter(n => n >= 1 && n <= 1000).length;
-        stats.textContent += ` | Story: ${total}/${TOTAL_BATTLES}`;
-    }
-};
+// [CONSOLIDATED] updateHomeScreen campaign progress merged into original
 
 // ═══════════════════════════════════════════════════════════════
 // INITIALIZATION
@@ -14132,33 +13770,7 @@ window.toggleBatchMode = function() {
 //  2. ZENITH MARK REROLL SYSTEM
 // ═══════════════════════════════════════════════════════════════
 
-// Inject reroll button into Hero Detail header on each open
-var _origOHD_econ = window.openHeroDetail;
-window.openHeroDetail = function(idx) {
-    _origOHD_econ.apply(this, arguments);
-
-    var hdrNav = document.querySelector('#heroDetail .hdr-nav');
-    if(!hdrNav) return;
-
-    // Remove old reroll button if present
-    var existing = document.getElementById('hdRerollBtn');
-    if(existing) existing.remove();
-
-    var btn = document.createElement('button');
-    btn.id = 'hdRerollBtn';
-    btn.className = 'btn2 btn-sm';
-    btn.style.cssText = 'color:#7c4dff;border-color:#7c4dff;';
-    btn.textContent = '\u27F3 Reroll (1 ZM)';
-    btn.onclick = function() { rerollUnit(currentHeroDetailIdx); };
-
-    // Insert before the dismiss button
-    var dismissBtn = hdrNav.querySelector('.btn-danger');
-    if(dismissBtn) {
-        hdrNav.insertBefore(btn, dismissBtn);
-    } else {
-        hdrNav.appendChild(btn);
-    }
-};
+// [CONSOLIDATED] openHeroDetail reroll button merged into original
 
 function rerollUnit(idx) {
     var u = S.roster[idx];
