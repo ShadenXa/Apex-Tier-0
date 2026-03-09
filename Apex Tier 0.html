@@ -8563,76 +8563,7 @@ updateHomeScreen = function () {
 (function() {
     console.log('%c APEX TIER 0 HOTFIX v2.1 LOADING...', 'color:#00e5ff;font-weight:bold;font-size:14px');
 
-    // 1. OVERRIDE rollUnit TO SEARCH ALL BANNERS (Fixes "Unable to select auto banners")
-    // Previous logic only looked in S.banners (custom only). Now looks in getAvailableBanners()
-    window.rollUnit = function(guaranteeHigh=false) {
-        const pool = getPool();
-        if(!pool.length){ toast('Add images first!','err'); return null; }
-        
-        S.pullCount++;
-        let img;
-        
-        // Find the active banner object from the FULL list (Standard + Custom + Auto)
-        const allBanners = getAvailableBanners();
-        const activeBanner = allBanners.find(b => b.id === S.activeBannerId);
-
-        if(activeBanner && (activeBanner.heroNames?.length || activeBanner.heroIds?.length)) {
-            // Create weighted pool
-            const weighted = [];
-            // Map IDs/Names to actual image objects
-            const focusNames = activeBanner.heroIds 
-                ? activeBanner.heroIds.map(id => {
-                    const u = S.roster.find(r => r.id === id); 
-                    if(!u) return null;
-                    const im = S.images.find(i => i.src === u.src);
-                    return im ? im.name : u.name;
-                }).filter(Boolean)
-                : activeBanner.heroNames;
-
-            // Add focus units 4x times
-            pool.forEach(p => {
-                const isFocus = focusNames.includes(p.name);
-                // Boost weight: 4x for focus, 1x for non-focus
-                const weight = isFocus ? 4 : 1;
-                for(let k=0; k<weight; k++) weighted.push(p);
-            });
-            img = weighted[~~(Math.random() * weighted.length)];
-        } else {
-            // Standard pool
-            img = pool[~~(Math.random() * pool.length)];
-        }
-
-        const grade = rollGrade(guaranteeHigh || S.pullCount >= CFG.PITY);
-        trackQuest('summons');
-        if(['A','S','T0'].includes(grade)) trackQuest('highPull');
-
-        // Check duplicate
-        const existing = S.roster.find(u => u.name === img.name);
-        if(existing) {
-            existing.totalPulls = (existing.totalPulls||1) + 1;
-            if(existing.plus >= CFG.MAX_PLUS) {
-                existing.shards = (existing.shards||0) + 3;
-                existing.sp = (existing.sp||0) + 100;
-                return {dup:true, unit:existing, gained:0, overMax:true};
-            }
-            const gain = CFG.PLUS_PER_DUP;
-            const before = existing.plus;
-            existing.plus = Math.min(CFG.MAX_PLUS, existing.plus + gain);
-            const gained = existing.plus - before;
-            if(gained > 0) {
-                const stats = ['maxHp','atk','def','mag','res','spd'];
-                for(let g=0;g<gained;g++){const s=stats[~~(Math.random()*stats.length)];existing[s]=(existing[s]||0)+1;const bk=s==='maxHp'?'hp':s;if(existing.baseStat)existing.baseStat[bk]=(existing.baseStat[bk]||0)+1;}
-            }
-            return {dup:true, unit:existing, gained};
-        }
-        
-        const unit = createUnit(img.src, img.name, grade);
-        unit.hue = img.hue || 0;
-        unit.isAnimated = img.isAnimated || false;
-        unit.format = img.format || 'jpeg';
-        S.roster.push(unit);
-        return {dup:false, unit};
-    };
+    // [CONSOLIDATED] rollUnit Layer 1 removed — superseded by MEGA PATCH banner-exclusive rollUnit
 
     // 2. OVERRIDE refreshGacha TO FIX BUTTONS & ICONS
     window.refreshGacha = function() {
@@ -10619,19 +10550,7 @@ updateHomeScreen = function () {
     console.log('%c  ✓ Battle log turn timestamps', 'color:#22c55e');
 
     // ─── 10. AUTO-LORE GENERATION ON HERO DETAIL ─────────────
-    // Ensure lore is always populated even if storyText is empty
-    const _origOpenHDFinal = openHeroDetail;
-    window.openHeroDetail = function(idx) {
-        _origOpenHDFinal(idx);
-        const u = S.roster[idx];
-        const loreEl = document.getElementById('hdLore');
-        if(u && loreEl && typeof generateLore === 'function') {
-            if(!u.storyText || u.storyText.trim() === '') {
-                loreEl.textContent = generateLore(u);
-            }
-        }
-    };
-
+    // [CONSOLIDATED] Auto-lore override removed — already handled in Layer 3 (lore/class change section)
     console.log('%c  ✓ Auto-lore generation on hero detail', 'color:#22c55e');
 })();
 
@@ -10950,17 +10869,7 @@ updateHomeScreen = function () {
         return res;
     };
 
-    // Hook into summons
-    const _origRollUnit_v35 = window.rollUnit;
-    window.rollUnit = function(guaranteeHigh) {
-        const res = _origRollUnit_v35.apply(this, arguments);
-        if(res && res.unit && !res.overMax) {
-            if(!S.compendium.includes(res.unit.name)) S.compendium.push(res.unit.name);
-        }
-        addApexMeter(15); // summons give meter
-        checkAchievements();
-        return res;
-    };
+    // [CONSOLIDATED] rollUnit Layer 2 removed — compendium/meter/achievements merged into MEGA PATCH rollUnit
 
     // ─── 4. COMPENDIUM ───
     window.getCompendiumBonus = function() {
@@ -11101,82 +11010,7 @@ updateHomeScreen = function () {
         });
     };
 
-    // Boost banner rates: focus units 8x weight, T0 grade 3x more likely on banner
-    const _origRollUnit_v35_banner = window.rollUnit;
-    window.rollUnit = function(guaranteeHigh) {
-        // Override the image selection for active banners with higher weights
-        const pool = typeof getPool === 'function' ? getPool() : [];
-        if(!pool.length) return _origRollUnit_v35_banner.apply(this, arguments);
-
-        const allBanners = typeof getAvailableBanners === 'function' ? getAvailableBanners() : S.banners || [];
-        const activeBanner = allBanners.find(b => b.id === S.activeBannerId);
-
-        if(activeBanner && (activeBanner.heroNames?.length || activeBanner.heroIds?.length)) {
-            S.pullCount++;
-            const focusNames = activeBanner.heroIds
-                ? activeBanner.heroIds.map(id => { const u = S.roster.find(r => r.id === id); if(!u) return null; const im = S.images.find(i => i.src === u.src); return im ? im.name : u.name; }).filter(Boolean)
-                : activeBanner.heroNames || [];
-
-            // 8x weight for focus units (was 4x)
-            const weighted = [];
-            pool.forEach(p => {
-                const w = focusNames.includes(p.name) ? 8 : 1;
-                for(let k = 0; k < w; k++) weighted.push(p);
-            });
-            const img = weighted[~~(Math.random() * weighted.length)];
-            const isFocus = focusNames.includes(img.name);
-
-            // Grade: banner T0 chance tripled for focus
-            let grade;
-            if(S.pullCount >= CFG.PITY) {
-                S.pullCount = 0;
-                if(isFocus) grade = Math.random() < 0.45 ? 'T0' : Math.random() < 0.6 ? 'S' : 'A';
-                else grade = Math.random() < 0.15 ? 'T0' : Math.random() < 0.4 ? 'S' : 'A';
-            } else if(guaranteeHigh) {
-                if(isFocus) grade = Math.random() < 0.45 ? 'T0' : Math.random() < 0.6 ? 'S' : 'A';
-                else grade = Math.random() < 0.15 ? 'T0' : Math.random() < 0.4 ? 'S' : 'A';
-            } else {
-                grade = rollGrade(false);
-                // Boost T0 chance for focus heroes
-                if(isFocus && grade !== 'T0' && Math.random() < 0.08) grade = 'T0';
-                if(isFocus && (grade === 'D' || grade === 'C') && Math.random() < 0.5) grade = 'B';
-            }
-
-            if(typeof trackQuest === 'function') { trackQuest('summons'); if(['A','S','T0'].includes(grade)) trackQuest('highPull'); }
-
-            // Check duplicate
-            const existing = S.roster.find(u => u.name === img.name);
-            if(existing) {
-                existing.totalPulls = (existing.totalPulls || 1) + 1;
-                if(existing.plus >= (CFG.MAX_PLUS || 10)) {
-                    existing.shards = (existing.shards || 0) + 3;
-                    existing.sp = (existing.sp || 0) + 100;
-                    if(!S.compendium.includes(existing.name)) S.compendium.push(existing.name);
-                    addApexMeter(5); checkAchievements();
-                    return {dup: true, unit: existing, gained: 0, overMax: true};
-                }
-                const gain = CFG.PLUS_PER_DUP || 1;
-                const before = existing.plus || 0;
-                existing.plus = Math.min(CFG.MAX_PLUS || 10, (existing.plus || 0) + gain);
-                const gained = existing.plus - before;
-                if(gained > 0) { const stats = ['maxHp','atk','def','mag','res','spd']; for(let g=0;g<gained;g++){const s=stats[~~(Math.random()*stats.length)];existing[s]=(existing[s]||0)+1;const bk=s==='maxHp'?'hp':s;if(existing.baseStat)existing.baseStat[bk]=(existing.baseStat[bk]||0)+1;} }
-                if(!S.compendium.includes(existing.name)) S.compendium.push(existing.name);
-                addApexMeter(5); checkAchievements();
-                return {dup: true, unit: existing, gained};
-            }
-
-            const unit = createUnit(img.src, img.name, grade);
-            unit.hue = img.hue || 0;
-            S.roster.push(unit);
-            if(!S.compendium.includes(unit.name)) S.compendium.push(unit.name);
-            addApexMeter(5); checkAchievements();
-            return {dup: false, unit};
-        }
-
-        // No active banner — use default logic
-        const res = _origRollUnit_v35_banner.apply(this, arguments);
-        return res;
-    };
+    // [CONSOLIDATED] rollUnit Layer 3 removed — banner rate boost merged into MEGA PATCH rollUnit
 
     // ─── 10. EXPORT/IMPORT (kept from v3.0) ───
     const _origOpenHD_v35 = window.openHeroDetail;
@@ -11755,6 +11589,7 @@ window.getAvailableBanners = getAvailableBanners = function() {
 };
 
 // Override rollUnit to enforce banner-exclusive pulls on featured banners
+// CONSOLIDATED: Includes compendium tracking, Apex Meter, and achievements (from earlier overrides)
 const _origRollUnit = rollUnit;
 window.rollUnit = rollUnit = function(guaranteeHigh = false) {
     const fullPool = getPool();
@@ -11815,6 +11650,9 @@ window.rollUnit = rollUnit = function(guaranteeHigh = false) {
         if(existing.plus >= CFG.MAX_PLUS) {
             existing.shards = (existing.shards || 0) + 3;
             existing.sp = (existing.sp || 0) + 100;
+            if(!S.compendium.includes(existing.name)) S.compendium.push(existing.name);
+            if(typeof addApexMeter === 'function') addApexMeter(15);
+            if(typeof checkAchievements === 'function') checkAchievements();
             return {dup:true, unit:existing, gained:0, overMax:true};
         }
         const gain = CFG.PLUS_PER_DUP;
@@ -11830,6 +11668,9 @@ window.rollUnit = rollUnit = function(guaranteeHigh = false) {
                 if(existing.baseStat) existing.baseStat[bsKey] = (existing.baseStat[bsKey]||0) + 1;
             }
         }
+        if(!S.compendium.includes(existing.name)) S.compendium.push(existing.name);
+        if(typeof addApexMeter === 'function') addApexMeter(15);
+        if(typeof checkAchievements === 'function') checkAchievements();
         return {dup:true, unit:existing, gained};
     }
     const unit = createUnit(img.src, img.name, grade);
@@ -11837,6 +11678,9 @@ window.rollUnit = rollUnit = function(guaranteeHigh = false) {
     unit.isAnimated = img.isAnimated || false;
     unit.format = img.format || 'jpeg';
     S.roster.push(unit);
+    if(!S.compendium.includes(unit.name)) S.compendium.push(unit.name);
+    if(typeof addApexMeter === 'function') addApexMeter(15);
+    if(typeof checkAchievements === 'function') checkAchievements();
     return {dup:false, unit};
 };
 
@@ -14451,14 +14295,9 @@ console.log('[UI Tweaks] Patches active: Next Battle → Campaign, Reset clears 
         }
     }
 
-    // Hook into nav() to clean on every screen change
-    var _origNav = window.nav;
-    if (_origNav) {
-        window.nav = function() {
-            cleanPool();
-            return _origNav.apply(this, arguments);
-        };
-    }
+    // [CONSOLIDATED] nav cleanup hook moved to fixNavCleanup consolidated nav wrapper
+    // Expose cleanPool for the consolidated wrapper to call
+    window._cleanAnimPool = cleanPool;
 
     // Also run periodically
     setInterval(cleanPool, 30000);
@@ -14570,20 +14409,8 @@ console.log('[UI Tweaks] Patches active: Next Battle → Campaign, Reset clears 
         };
     }
 
-    // Aggressively cancel map RAF when leaving battle
-    var _origNavRAF = window.nav;
-    if (_origNavRAF) {
-        window.nav = function(id) {
-            if (id !== 'battle') {
-                // Cancel ALL possible RAF handles
-                if (typeof _mapAnimRAF !== 'undefined' && _mapAnimRAF) {
-                    cancelAnimationFrame(_mapAnimRAF);
-                    window._mapAnimRAF = 0;
-                }
-            }
-            return _origNavRAF.apply(this, arguments);
-        };
-    }
+    // [CONSOLIDATED] nav RAF cancel moved to fixDaycareRAF consolidated nav wrapper
+    // (Also already done in the transition handler nav override)
 
     console.log('%c  [MLF] Background RAF loop management installed', 'color:#22c55e');
 })();
@@ -14697,19 +14524,26 @@ console.log('[UI Tweaks] Patches active: Next Battle → Campaign, Reset clears 
 //          away from the daycare screen.
 // Fix:    Cancel dcAnimId on navigation away from daycare.
 
-(function fixDaycareRAF() {
+// CONSOLIDATED: All nav() cleanup hooks merged here (was 3 separate overrides)
+(function fixNavCleanup() {
     var _origNav = window.nav;
     if (!_origNav) return;
 
     window.nav = function(id) {
+        // [From AnimElPool] Clean animation element pool on screen change
+        if (typeof window._cleanAnimPool === 'function') window._cleanAnimPool();
+
+        // [From fixDaycareRAF] Cancel daycare RAF when leaving daycare
         if (id !== 'daycare' && typeof dcAnimId !== 'undefined' && dcAnimId) {
             cancelAnimationFrame(dcAnimId);
             window.dcAnimId = null;
         }
+
+        // Note: _mapAnimRAF cancel already handled by the transition nav override
         return _origNav.apply(this, arguments);
     };
 
-    console.log('%c  [MLF] Daycare RAF cleanup installed', 'color:#22c55e');
+    console.log('%c  [MLF] Consolidated nav cleanup installed', 'color:#22c55e');
 })();
 
 
