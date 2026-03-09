@@ -2163,8 +2163,8 @@ ctx.fillStyle='rgba(6,8,14,.15)';ctx.fillRect(0,0,c.width,c.height);
 stars.forEach(s=>{s.a+=s.s*.008;ctx.fillStyle=`rgba(200,210,240,${.1+Math.sin(s.a)*.35})`;ctx.beginPath();ctx.arc(s.x,s.y,s.r,0,Math.PI*2);ctx.fill();});
 _bgRAF=requestAnimationFrame(draw);
 }draw();
-// Restart loop when navigating back to home
-const _origNavBG=window.nav;window.nav=function(id){const r=_origNavBG.apply(this,arguments);if(id==='home'&&!_bgRAF)draw();return r;};
+// Export restart function for consolidated nav
+window._restartBG=function(){if(!_bgRAF)draw();};
 window.addEventListener('resize',()=>{c.width=window.innerWidth;c.height=window.innerHeight;});
 })();
 
@@ -2190,7 +2190,7 @@ grd.addColorStop(0,`rgba(255,45,85,${.3+Math.sin(t*2)*.2})`);grd.addColorStop(1,
 ctx.fillStyle=grd;ctx.fillRect(70,70,100,100);
 _emblemRAF=requestAnimationFrame(draw);
 }draw();
-const _origNavE=window.nav;window.nav=function(id){const r=_origNavE.apply(this,arguments);if(id==='home'&&!_emblemRAF)draw();return r;};
+window._restartEmblem=function(){if(!_emblemRAF)draw();};
 })();
 
 // Animated orb
@@ -2208,18 +2208,18 @@ ctx.beginPath();ctx.ellipse(75,65,30,15,-.4,0,Math.PI*2);ctx.fill();
 ctx.fillStyle='rgba(0,0,0,.3)';ctx.beginPath();ctx.ellipse(100,185,50,8,0,0,Math.PI*2);ctx.fill();
 _orbRAF=requestAnimationFrame(draw);
 }draw();
-const _origNavO=window.nav;window.nav=function(id){const r=_origNavO.apply(this,arguments);if(id==='home'&&!_orbRAF)draw();return r;};
+window._restartOrb=function(){if(!_orbRAF)draw();};
 })();
 
 // ═══ NAVIGATION ═════════════════════════════════════════════
-function nav(id){
+// Core navigation logic (screen switching, refreshing)
+function _navCore(id){
 // Bug #9: Cancel map animation RAF when leaving battle to prevent memory leak
 if(id!=='battle'&&typeof _mapAnimRAF!=='undefined'&&_mapAnimRAF){cancelAnimationFrame(_mapAnimRAF);_mapAnimRAF=0;}
 // Bug #50: Force surrender state when navigating away from an active battle
 if(id!=='battle'&&B.phase&&B.phase!=='over'){
 B.phase='over';
 B.battleId=(B.battleId||0)+1;
-// Clean up HoF temp units
 if(typeof hofState!=='undefined'&&hofState){const _ids=hofState.savedTeamIds||[];hofState=null;S.roster=S.roster.filter(u=>!u.isForma);S.team=_ids.map(id=>S.roster.findIndex(u=>u.id===id)).filter(i=>i>=0);}
 save(true);
 }
@@ -2234,10 +2234,67 @@ if(id==='daycare'&&typeof refreshDaycare==='function')refreshDaycare();
 if(id==='quests'){renderQuests();updateQuestBadge();}
 if(id==='tavern'&&typeof refreshTavern==='function')refreshTavern();
 if(id==='home')updateHomeScreen();
-// Tutorial hint btn: show on home, hide on battle
 const hintBtn=document.getElementById('tutHintBtn');
 if(hintBtn)hintBtn.style.display=(id==='battle'||tutActive)?'none':'flex';
 updateEloDisplay();
+// Restart home animations if returning to home
+if(id==='home'){
+if(typeof _restartBG==='function')_restartBG();
+if(typeof _restartEmblem==='function')_restartEmblem();
+if(typeof _restartOrb==='function')_restartOrb();
+// Update home currency strip
+setTimeout(()=>{
+let strip=document.getElementById('homeCurrencyStrip');
+if(!strip){
+strip=document.createElement('div');strip.id='homeCurrencyStrip';
+strip.style.cssText='font-family:var(--mono);font-size:.7rem;display:flex;align-items:center;gap:12px;justify-content:center;padding:6px 0';
+const statStrip=document.getElementById('homeStatStrip');
+if(statStrip)statStrip.after(strip);
+else{const btns=document.querySelector('.home-btns');if(btns)btns.before(strip);}
+}
+strip.innerHTML=`<span style="color:var(--gold)">★ ${S.ap} Flux</span> · <span style="color:#7c4dff">◆ ${S.shards||0} Prisms</span> · <span style="color:#ff6b35">● ${S.apexTokens||0} ZM</span>`;
+},60);
+}
+// Memory cleanup on screen change
+if(typeof window._cleanAnimPool==='function')window._cleanAnimPool();
+if(id!=='daycare'&&typeof dcAnimId!=='undefined'&&dcAnimId){cancelAnimationFrame(dcAnimId);window.dcAnimId=null;}
+// Rename UI terms after screen switch
+if(typeof renameTermsInUI==='function')setTimeout(renameTermsInUI,50);
+}
+
+// Transition map for cinematic screen transitions
+let _navTransActive=false;
+const _NAV_TRANS_MAP={battle:'shutter',gacha:'light',daycare:'fade',settings:'slide-left',barracks:'slide-right',heroDetail:'slide-left',modes:'slide-right',home:'fade',quests:'slide-left',campaign:'slide-right'};
+
+// Public nav function with cinematic transitions
+function nav(id){
+if(_navTransActive)return;
+const currentScreen=document.querySelector('.screen.active');
+if(currentScreen&&currentScreen.id===id)return;
+// Set BGM intensity
+if(bgm&&bgm.setIntensity){
+if(id==='battle')bgm.setIntensity('player');
+else if(id==='home')bgm.setIntensity('menu');
+}
+// Cancel map RAF immediately when leaving battle
+if(id!=='battle'&&typeof _mapAnimRAF!=='undefined'&&_mapAnimRAF){cancelAnimationFrame(_mapAnimRAF);_mapAnimRAF=0;}
+const transType=_NAV_TRANS_MAP[id]||'fade';
+const layer=document.getElementById('transLayer');
+if(!layer){_navCore(id);return;}
+_navTransActive=true;
+layer.innerHTML='';
+let inner='';
+if(transType==='shutter'){inner='<div class="sbar-l"></div><div class="sbar-r"></div>';layer.className='transition-layer active trans-shutter in';}
+else if(transType==='light'){inner='<div class="flash"></div>';layer.className='transition-layer active trans-light in';}
+else if(transType==='fade'){inner='<div class="blur"></div>';layer.className='transition-layer active trans-fade in';}
+else if(transType.startsWith('slide')){inner='<div class="panel"></div>';layer.className=`transition-layer active trans-slide ${transType} in`;}
+layer.innerHTML=inner;
+setTimeout(()=>{
+try{_navCore(id);if(id==='battle'&&typeof resizeCanvas==='function')resizeCanvas();}
+catch(e){console.warn('Nav transition error:',e);}
+layer.classList.remove('in');layer.classList.add('out');
+setTimeout(()=>{layer.className='transition-layer';layer.innerHTML='';_navTransActive=false;},500);
+},450);
 }
 
 function updateEloDisplay(){
@@ -10335,88 +10392,7 @@ updateHomeScreen = function () {
     bgm.tempo = _oldTempo;
     if(_wasPlaying && S.soundOn) bgm.start();
 
-    // ─── 5. CINEMATIC SCREEN TRANSITIONS ─────────────────────
-    const TRANS_MAP = {
-        battle:   'shutter',
-        gacha:    'light',
-        daycare:  'fade',
-        settings: 'slide-left',
-        barracks: 'slide-right',
-        heroDetail: 'slide-left',
-        modes:    'slide-right',
-        home:     'fade',
-        quests:   'slide-left',
-        campaign: 'slide-right',
-    };
-
-    let _transActive = false;
-    const _origNav = nav;
-    window.nav = function(id) {
-        // Skip transition if already transitioning or if navigating to same screen
-        if(_transActive) return;
-        const currentScreen = document.querySelector('.screen.active');
-        if(currentScreen && currentScreen.id === id) return;
-
-        // Set music intensity based on destination
-        if(bgm && bgm.setIntensity) {
-            if(id === 'battle') bgm.setIntensity('player');
-            else if(id === 'home') bgm.setIntensity('menu');
-        }
-
-        // Cancel map animation RAF immediately when leaving battle (don't wait for transition)
-        if(id !== 'battle' && typeof _mapAnimRAF !== 'undefined' && _mapAnimRAF) {
-            cancelAnimationFrame(_mapAnimRAF);
-            _mapAnimRAF = 0;
-        }
-
-
-        const transType = TRANS_MAP[id] || 'fade';
-        const layer = document.getElementById('transLayer');
-        if(!layer) { _origNav(id); return; }
-
-        _transActive = true;
-        layer.innerHTML = '';
-
-        // Build transition DOM
-        let inner = '';
-        if(transType === 'shutter') {
-            inner = '<div class="sbar-l"></div><div class="sbar-r"></div>';
-            layer.className = 'transition-layer active trans-shutter in';
-        } else if(transType === 'light') {
-            inner = '<div class="flash"></div>';
-            layer.className = 'transition-layer active trans-light in';
-        } else if(transType === 'fade') {
-            inner = '<div class="blur"></div>';
-            layer.className = 'transition-layer active trans-fade in';
-        } else if(transType.startsWith('slide')) {
-            inner = '<div class="panel"></div>';
-            layer.className = `transition-layer active trans-slide ${transType} in`;
-        }
-        layer.innerHTML = inner;
-
-        // At midpoint (450ms), do the actual screen switch
-        setTimeout(() => {
-            try {
-                _origNav(id);
-
-                // Fix: Recalculate canvas after battle screen becomes visible
-                if(id === 'battle' && typeof resizeCanvas === 'function') resizeCanvas();
-            } catch(e) {
-                console.warn('Nav transition error:', e);
-            }
-
-            // Reverse animation
-            layer.classList.remove('in');
-            layer.classList.add('out');
-
-            // Cleanup — guaranteed to run even if _origNav threw
-            setTimeout(() => {
-                layer.className = 'transition-layer';
-                layer.innerHTML = '';
-                _transActive = false;
-            }, 500);
-        }, 450);
-    };
+    // [CONSOLIDATED] Cinematic transitions — merged into main nav()
 
     // Hook into battle phase changes for music intensity
     const _origEndPlayerPhase = endPlayerPhase;
@@ -11130,14 +11106,7 @@ updateHomeScreen = function () {
         }
     };
 
-    // ─── 3. SMOOTHER TRANSITION TIMING ────────────────────────
-    // Speed up transitions slightly for snappier feel
-    const FAST_TRANS = { shutter: 300, light: 350, fade: 250 };
-    const _origNavPatch = window.nav;
-    const _patchOrigNav = (function() {
-        // Read the midpoint from the patched nav — we just make the cleanup faster
-        // This is a no-op patch since transitions already exist, just logging
-    })();
+    // [CONSOLIDATED] Transition timing — transitions built into main nav()
 
     // ─── 4. ENHANCED TOAST WITH ICONS ─────────────────────────
     const _origToast = toast;
@@ -11716,12 +11685,7 @@ function renameTermsInUI() {
     // CSS comments are harmless, leave them
 }
 
-// Call on init and when navigating
-const _origNav = nav;
-window.nav = nav = function(screen) {
-    _origNav(screen);
-    setTimeout(renameTermsInUI, 50);
-};
+// [CONSOLIDATED] Nav term renaming — merged into main nav()
 setTimeout(renameTermsInUI, 500);
 
 // Override the toast to rename terms
@@ -12245,29 +12209,7 @@ document.querySelectorAll('[data-tip]').forEach(el => {
 // ─────────────────────────────────────────────────────────────
 // FIX: Home screen currency display (Flux + Zenith Marks)
 // ─────────────────────────────────────────────────────────────
-(function addHomeCurrency() {
-    const _origNavHome = nav;
-    window.nav = nav = function(screen) {
-        _origNavHome(screen);
-        if(screen === 'home') {
-            setTimeout(() => {
-                let strip = document.getElementById('homeCurrencyStrip');
-                if(!strip) {
-                    strip = document.createElement('div');
-                    strip.id = 'homeCurrencyStrip';
-                    strip.style.cssText = 'font-family:var(--mono);font-size:.7rem;display:flex;align-items:center;gap:12px;justify-content:center;padding:6px 0';
-                    const statStrip = document.getElementById('homeStatStrip');
-                    if(statStrip) statStrip.after(strip);
-                    else {
-                        const btns = document.querySelector('.home-btns');
-                        if(btns) btns.before(strip);
-                    }
-                }
-                strip.innerHTML = `<span style="color:var(--gold)">★ ${S.ap} Flux</span> · <span style="color:#7c4dff">◆ ${S.shards||0} Prisms</span> · <span style="color:#ff6b35">● ${S.apexTokens||0} ZM</span>`;
-            }, 60);
-        }
-    };
-})();
+// [CONSOLIDATED] Home currency strip — merged into _navCore()
 
 // ─────────────────────────────────────────────────────────────
 // FIX: Max/Apex victory handlers — award XP, SP, and quest tracking
@@ -14091,27 +14033,7 @@ console.log('[UI Tweaks] Patches active: Reset clears localStorage');
 //          away from the daycare screen.
 // Fix:    Cancel dcAnimId on navigation away from daycare.
 
-// CONSOLIDATED: All nav() cleanup hooks merged here (was 3 separate overrides)
-(function fixNavCleanup() {
-    var _origNav = window.nav;
-    if (!_origNav) return;
-
-    window.nav = function(id) {
-        // [From AnimElPool] Clean animation element pool on screen change
-        if (typeof window._cleanAnimPool === 'function') window._cleanAnimPool();
-
-        // [From fixDaycareRAF] Cancel daycare RAF when leaving daycare
-        if (id !== 'daycare' && typeof dcAnimId !== 'undefined' && dcAnimId) {
-            cancelAnimationFrame(dcAnimId);
-            window.dcAnimId = null;
-        }
-
-        // Note: _mapAnimRAF cancel already handled by the transition nav override
-        return _origNav.apply(this, arguments);
-    };
-
-    console.log('%c  [MLF] Consolidated nav cleanup installed', 'color:#22c55e');
-})();
+// [CONSOLIDATED] Nav cleanup hooks — merged into _navCore()
 
 
 // ═══ 10. GLOBAL PERIODIC GC HINT ════════════════════════════
