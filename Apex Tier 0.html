@@ -2156,60 +2156,59 @@ const c=document.getElementById('bgCanvas');
 const ctx=c.getContext('2d');
 c.width=window.innerWidth;c.height=window.innerHeight;
 const stars=Array.from({length:80},()=>({x:Math.random()*c.width,y:Math.random()*c.height,r:.3+Math.random()*1.5,s:.5+Math.random()*2,a:Math.random()}));
+let _bgRAF=0;
 function draw(){
-requestAnimationFrame(draw);
-if(document.hidden||!document.getElementById('home').classList.contains('active'))return;
+if(document.hidden||!document.getElementById('home').classList.contains('active')){_bgRAF=0;return;}
 ctx.fillStyle='rgba(6,8,14,.15)';ctx.fillRect(0,0,c.width,c.height);
 stars.forEach(s=>{s.a+=s.s*.008;ctx.fillStyle=`rgba(200,210,240,${.1+Math.sin(s.a)*.35})`;ctx.beginPath();ctx.arc(s.x,s.y,s.r,0,Math.PI*2);ctx.fill();});
+_bgRAF=requestAnimationFrame(draw);
 }draw();
+// Restart loop when navigating back to home
+const _origNavBG=window.nav;window.nav=function(id){const r=_origNavBG.apply(this,arguments);if(id==='home'&&!_bgRAF)draw();return r;};
 window.addEventListener('resize',()=>{c.width=window.innerWidth;c.height=window.innerHeight;});
 })();
 
 // Draw home emblem
 (function drawHomeEmblem(){
 const c=document.getElementById('homeEmblem'),ctx=c.getContext('2d');
-let t=0;
+let t=0,_emblemRAF=0;
 function draw(){
-requestAnimationFrame(draw);
-if(document.hidden||!document.getElementById('home').classList.contains('active'))return;
+if(document.hidden||!document.getElementById('home').classList.contains('active')){_emblemRAF=0;return;}
 ctx.clearRect(0,0,240,240);
 t+=.015;
-// Outer ring
 ctx.strokeStyle=`rgba(255,45,85,${.3+Math.sin(t)*.2})`;ctx.lineWidth=2;
 ctx.beginPath();ctx.arc(120,120,110,0,Math.PI*2);ctx.stroke();
-// Inner ring
 ctx.save();ctx.translate(120,120);ctx.rotate(t*.5);
 ctx.strokeStyle='rgba(255,215,0,.2)';ctx.lineWidth=1.5;
 ctx.beginPath();ctx.arc(0,0,85,0,Math.PI*2);ctx.stroke();
-// Diamond
 ctx.rotate(t);ctx.fillStyle='rgba(255,45,85,.6)';
 ctx.beginPath();ctx.moveTo(0,-40);ctx.lineTo(25,0);ctx.lineTo(0,40);ctx.lineTo(-25,0);ctx.closePath();ctx.fill();
 ctx.strokeStyle='rgba(255,215,0,.8)';ctx.lineWidth=1;ctx.stroke();
 ctx.restore();
-// Center glow
 const grd=ctx.createRadialGradient(120,120,5,120,120,50);
 grd.addColorStop(0,`rgba(255,45,85,${.3+Math.sin(t*2)*.2})`);grd.addColorStop(1,'transparent');
 ctx.fillStyle=grd;ctx.fillRect(70,70,100,100);
+_emblemRAF=requestAnimationFrame(draw);
 }draw();
+const _origNavE=window.nav;window.nav=function(id){const r=_origNavE.apply(this,arguments);if(id==='home'&&!_emblemRAF)draw();return r;};
 })();
 
 // Animated orb
 (function drawOrb(){
 const c=document.getElementById('orbCanvas'),ctx=c.getContext('2d');
-let t=0;
+let t=0,_orbRAF=0;
 function draw(){
-requestAnimationFrame(draw);
-if(document.hidden||!document.getElementById('home').classList.contains('active'))return;
+if(document.hidden||!document.getElementById('home').classList.contains('active')){_orbRAF=0;return;}
 ctx.clearRect(0,0,200,200);t+=.02;
 const g=ctx.createRadialGradient(70,60,10,100,100,90);
 g.addColorStop(0,'#fff8e0');g.addColorStop(.3,'#ffd700');g.addColorStop(.7,'#8a6000');g.addColorStop(1,'#3a2500');
 ctx.fillStyle=g;ctx.beginPath();ctx.arc(100,100,88,0,Math.PI*2);ctx.fill();
-// Shimmer
 ctx.fillStyle=`rgba(255,255,255,${.1+Math.sin(t*3)*.08})`;
 ctx.beginPath();ctx.ellipse(75,65,30,15,-.4,0,Math.PI*2);ctx.fill();
-// Shadow
 ctx.fillStyle='rgba(0,0,0,.3)';ctx.beginPath();ctx.ellipse(100,185,50,8,0,0,Math.PI*2);ctx.fill();
+_orbRAF=requestAnimationFrame(draw);
 }draw();
+const _origNavO=window.nav;window.nav=function(id){const r=_origNavO.apply(this,arguments);if(id==='home'&&!_orbRAF)draw();return r;};
 })();
 
 // ═══ NAVIGATION ═════════════════════════════════════════════
@@ -9489,11 +9488,12 @@ updateHomeScreen = function () {
                 fctx.strokeRect(2, 2, 156, 156);
 
                 // Load the blended image
+                const fusionDataURL = fc.toDataURL();
                 const fusionImg = new Image();
-                fusionImg.src = fc.toDataURL();
-                fusionImg.onload = () => { child.img = fusionImg; child.src = fc.toDataURL(); };
+                fusionImg.src = fusionDataURL;
+                fusionImg.onload = () => { child.img = fusionImg; };
                 child.img = primary.img; // fallback until loaded
-                child.src = fc.toDataURL();
+                child.src = fusionDataURL;
             } catch(e) {
                 child.img = primary.img;
                 child.src = primary.src;
@@ -14160,36 +14160,8 @@ console.log('[UI Tweaks] Patches active: Reset clears localStorage');
 })();
 
 
-// ═══ 5. BACKGROUND RAF LOOP MANAGEMENT ══════════════════════
-// Problem: The home emblem, orb canvas, and star field each run
-//          their own requestAnimationFrame loop FOREVER, even
-//          when the home screen is not visible. They check
-//          document.hidden but still schedule the next frame.
-// Fix:    Replace their RAF scheduling with a single managed loop
-//         that only runs when the home screen is active.
-
-(function fixBackgroundRAF() {
-    // The three home-screen loops are IIFEs that captured their
-    // own RAF references. We cannot cancel them directly, but
-    // they already check:
-    //   if(document.hidden || !document.getElementById('home').classList.contains('active')) return;
-    // The problem is they call requestAnimationFrame(draw) BEFORE
-    // the early return, so the RAF chain continues even when the
-    // screen is inactive. This wastes CPU but technically the draw
-    // function returns early.
-    //
-    // The real RAF leak is the battle map animation loop.
-    // _mapAnimRAF is supposed to be cancelled on nav() but multiple
-    // drawMap override chains can each start their own loop.
-
-    // [CONSOLIDATED] No-op drawMap wrapper removed (had comment but no actual cancel code)
-    // RAF mutex is handled by the drawMap mutex lock wrapper below
-
-    // [CONSOLIDATED] nav RAF cancel moved to fixDaycareRAF consolidated nav wrapper
-    // (Also already done in the transition handler nav override)
-
-    console.log('%c  [MLF] Background RAF loop management installed', 'color:#22c55e');
-})();
+// [CONSOLIDATED] fixBackgroundRAF removed — home screen RAF loops (starfield, emblem, orb)
+// now properly stop when leaving home screen and restart on nav('home') via source-level fix.
 
 
 // ═══ 6. BATTLE EVENT LISTENER CLEANUP ═══════════════════════
