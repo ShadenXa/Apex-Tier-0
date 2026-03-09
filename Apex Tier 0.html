@@ -4444,7 +4444,7 @@ r.onsuccess=e=>{_idb=e.target.result;res(_idb);};r.onerror=()=>rej(r.error);
 
 async function saveIDB(images){
 try{const db=await openIDB();const tx=db.transaction(IDB_STORE,'readwrite');const st=tx.objectStore(IDB_STORE);st.clear();
-images.forEach(img=>st.put({name:img.name,src:img.src,isDefault:img.isDefault||false,hue:img.hue||0}));
+images.forEach(img=>st.put({name:img.name,src:img.src,isDefault:img.isDefault||false,hue:img.hue||0,isAnimated:img.isAnimated||false,format:img.format||''}));
 return new Promise((res,rej)=>{tx.oncomplete=res;tx.onerror=()=>rej(tx.error);});}catch(e){console.warn('IDB save fail:',e);}
 }
 
@@ -4557,10 +4557,10 @@ u.equippedItem=u.equippedItem??null;
 u.equippedAbilities=u.equippedAbilities??[null,null];
 u.passives=[u.skillA,u.skillB,u.skillC,u.skillS].filter(Boolean);
 // Bug #10: Reconstruct src from images by name (try originalImageName first for renamed units)
-if(!u.src){
-const imgMatch=S.images.find(i=>i.name===(u.originalImageName||u.name));
-if(imgMatch)u.src=imgMatch.src;
-}
+// Also deduplicate src references so all units sharing an image point to the same string
+{const imgMatch=S.images.find(i=>i.name===(u.originalImageName||u.name));
+if(imgMatch){u.src=imgMatch.src;u.isAnimated=imgMatch.isAnimated||u.isAnimated||false;}
+else if(!u.src){u.src='';}}
 });
 if(!S.banners)S.banners=[];
 if(!S.activeBannerId)S.activeBannerId=null;
