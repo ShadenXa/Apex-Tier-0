@@ -8319,94 +8319,7 @@ getAvailableBanners = function () {
   return banners;
 };
 
-// ═══════════════════════════════════════════════════════════════
-// FIX #4B: refreshGacha — Show exact rates on each banner card
-// ═══════════════════════════════════════════════════════════════
-const _origRefreshGacha = refreshGacha;
-refreshGacha = function () {
-  document.getElementById('orbCount').textContent = S.ap;
-  const pct = Math.min(100, (S.pullCount / CFG.PITY) * 100);
-  document.getElementById('pityFill').style.width = pct + '%';
-  document.getElementById('pityText').textContent = `${S.pullCount}/${CFG.PITY}`;
-
-  const listEl = document.getElementById('fehBannerList');
-  if (!listEl) return;
-  listEl.innerHTML = '';
-
-  const banners = getAvailableBanners();
-  if (!banners.length) {
-    listEl.innerHTML = '<div style="text-align:center;color:var(--text2);padding:40px;">No banners available. Upload images in Settings!</div>';
-    return;
-  }
-
-  banners.forEach((banner, idx) => {
-    // Dynamic pity-adjusted rates
-    let t0Rate = banner.t0Rate || (2.0 + (S.pullCount > 30 ? (S.pullCount - 30) * 0.1 : 0));
-    let sRate = banner.sRate || (7.0 + (S.pullCount > 30 ? (S.pullCount - 30) * 0.5 : 0));
-    let aRate = banner.aRate || 14;
-    let bRate = banner.bRate || 22;
-    let cRate = banner.cRate || 30;
-    let dRate = banner.dRate || Math.max(0, 100 - t0Rate - sRate - aRate - bRate - cRate);
-
-    // Get hero images
-    let focusImages = [];
-    if (banner.isStandard) {
-      focusImages = S.images.filter(i => !i.isDefault).slice(0, 4);
-    } else {
-      focusImages = (banner.heroNames || [])
-        .map(name => S.images.find(i => i.name === name))
-        .filter(Boolean).slice(0, 5);
-    }
-    const thumbsHTML = focusImages.map(img =>
-      `<img src="${img.src}" draggable="false" style="width:44px;height:44px;border-radius:50%;object-fit:cover;border:2px solid var(--gold);pointer-events:none;" title="${esc(img.name)}">`
-    ).join('');
-
-    const isActive = banner.id === S.activeBannerId || (banner.isStandard && !S.activeBannerId);
-    const label = banner.isStandard ? 'STANDARD POOL' : esc(banner.name);
-    const hasT0Focus = banner.t0FocusName;
-
-    const card = document.createElement('div');
-    card.style.cssText = `background:var(--panel);border:${isActive ? '2px solid var(--gold)' : '1px solid var(--border)'};border-radius:12px;padding:16px;position:relative;overflow:hidden;${isActive ? 'box-shadow:0 0 20px rgba(251,191,36,.15);' : ''}`;
-
-    card.innerHTML = `
-    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;">
-      <div>
-        <div style="font-family:var(--display);font-size:.8rem;color:${isActive ? 'var(--gold)' : 'var(--text)'};letter-spacing:1px;font-weight:700">${isActive ? '★ ' : ''}${label}</div>
-        <div style="font-size:.6rem;color:var(--text2);font-family:var(--mono);margin-top:2px">
-          ${banner.isStandard ? 'All images equally weighted' : `${focusImages.length} focus heroes (${banner.focusBoost || '4×'} rate)`}
-        </div>
-        ${hasT0Focus ? `<div style="font-size:.58rem;color:var(--t0);font-family:var(--display);margin-top:3px;letter-spacing:.5px">★ T0 FOCUS: ${esc(banner.t0FocusName)} (${banner.t0FocusGrade || 'T0'})</div>` : ''}
-      </div>
-      <div style="text-align:right;">
-        <div class="banner-rates">
-          <span class="banner-rate-chip" style="color:var(--t0);border-color:rgba(255,45,85,.3)">T0: ${t0Rate.toFixed(1)}%</span>
-          <span class="banner-rate-chip" style="color:var(--s);border-color:rgba(255,215,0,.3)">S: ${sRate.toFixed(1)}%</span>
-          <span class="banner-rate-chip" style="color:var(--a);border-color:rgba(255,107,53,.3)">A: ${aRate.toFixed(0)}%</span>
-        </div>
-        <div style="font-family:var(--mono);font-size:.5rem;color:var(--text3);margin-top:3px">
-          B:${bRate}% C:${cRate}% D:${dRate.toFixed(0)}%
-        </div>
-      </div>
-    </div>
-    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;">${thumbsHTML || '<span style="font-size:.6rem;color:var(--text3)">Upload images to populate</span>'}</div>
-    <div style="display:flex;gap:8px;flex-wrap:wrap;">
-      ${!banner.isStandard && !banner.isAuto ? `<button class="btn-t0" style="font-size:.68rem;padding:6px 14px" onclick="setActiveBanner('${banner.id}');refreshGacha()">SET ACTIVE</button>` : ''}
-      <button class="btn2 btn-sm" onclick="activeBannerIndex=${idx};${banner.isStandard || banner.isAuto ? 'S.activeBannerId=null;' : ''}startSession()">SESSION (5 AP)</button>
-      <button class="btn2 btn-sm" onclick="activeBannerIndex=${idx};pull1()">1 PULL</button>
-      <button class="btn2 btn-sm" onclick="activeBannerIndex=${idx};pull10()">10 PULL</button>
-    </div>
-    ${isActive ? '<div style="position:absolute;top:0;left:0;right:0;height:2px;background:var(--t0g);background-size:200% 200%;animation:t0shift 3s ease infinite"></div>' : ''}`;
-
-    listEl.appendChild(card);
-  });
-
-  // Pool info footer
-  const pool = getPool();
-  const poolNote = document.createElement('div');
-  poolNote.style.cssText = 'font-size:.6rem;color:var(--text3);text-align:center;padding:8px;font-family:var(--mono);line-height:1.6';
-  poolNote.textContent = `Pool: ${pool.length} images | Pity: ${S.pullCount}/${CFG.PITY} | Banners rotate weekly`;
-  listEl.appendChild(poolNote);
-};
+// [CONSOLIDATED] refreshGacha Layer 1 removed — superseded by HOTFIX v2.1 (direct override, no chain)
 
 
 // ═══════════════════════════════════════════════════════════════
@@ -14393,21 +14306,8 @@ console.log('[UI Tweaks] Patches active: Next Battle → Campaign, Reset clears 
     // _mapAnimRAF is supposed to be cancelled on nav() but multiple
     // drawMap override chains can each start their own loop.
 
-    // Ensure only one battle RAF is ever active
-    var _battleRAFActive = false;
-
-    var _origDrawMap = window.drawMap;
-    if (_origDrawMap) {
-        window.drawMap = function() {
-            // Call the real draw
-            _origDrawMap.apply(this, arguments);
-
-            // The chained drawMap already starts a RAF loop via
-            // _mapAnimRAF. We just need to make sure there's at
-            // most one. Cancel any existing before the override
-            // starts a new one.
-        };
-    }
+    // [CONSOLIDATED] No-op drawMap wrapper removed (had comment but no actual cancel code)
+    // RAF mutex is handled by the drawMap mutex lock wrapper below
 
     // [CONSOLIDATED] nav RAF cancel moved to fixDaycareRAF consolidated nav wrapper
     // (Also already done in the transition handler nav override)
