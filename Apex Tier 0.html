@@ -4193,9 +4193,159 @@ if(B.dangerZone)calcDangerZone();
 drawMap();updateBUI();updateEList();
 }
 
+// Helper: clean up mercenary units after battle
+function _cleanupMercenaries(){
+const mercs=S.roster.filter(u=>u.isMercenary);
+if(!mercs.length)return;
+const teamIds=S.team.map(idx=>S.roster[idx]?.id).filter(Boolean);
+const presetIds=S.teamPresets?S.teamPresets.map(p=>{
+if(!p||!p.team)return null;
+return {...p,_ids:p.team.map(idx=>S.roster[idx]?.id).filter(Boolean)};
+}):null;
+S.roster=S.roster.filter(u=>!u.isMercenary);
+S.team=teamIds.map(id=>S.roster.findIndex(u=>u.id===id)).filter(idx=>idx>=0);
+if(presetIds){
+S.teamPresets=presetIds.map(p=>{
+if(!p)return null;
+const team=p._ids.map(id=>S.roster.findIndex(u=>u.id===id)).filter(idx=>idx>=0);
+const {_ids,...rest}=p;
+return {...rest,team};
+});
+}
+toast(mercs.length===1?'Mercenary '+mercs[0].name+' departed.':mercs.length+' mercs departed.','');
+}
+
+// Helper: track difficulty clears for modes and campaigns
+function _trackDifficultyClears(){
+const diff=currentDifficulty||'normal';
+if(B.isCampaign&&B.campaignId){
+if(!S.campaignClears)S.campaignClears={};
+if(!S.campaignClears[B.campaignId])S.campaignClears[B.campaignId]=[];
+if(!S.campaignClears[B.campaignId].includes(diff))S.campaignClears[B.campaignId].push(diff);
+}
+const mode=currentBattleMode||'ladder';
+const modeKey=mode+'_'+(currentBattleConfig?.floor||currentBattleConfig?.ghb?.id||currentBattleConfig?.stage||'default');
+if(!S.modeClears)S.modeClears={};
+if(!S.modeClears[modeKey])S.modeClears[modeKey]=[];
+if(!S.modeClears[modeKey].includes(diff))S.modeClears[modeKey].push(diff);
+}
+
+// Helper: track campaign_v2 victories
+function _trackCampaignV2(){
+const battleNum=B._currentCampaignBattle||currentBattleConfig?.battleNum;
+if(!battleNum)return;
+if(!S.campaignDone.includes(battleNum))S.campaignDone.push(battleNum);
+if(!S.campaignClears)S.campaignClears={};
+if(!S.campaignClears[battleNum])S.campaignClears[battleNum]=[];
+const diff=currentDifficulty||'normal';
+if(!S.campaignClears[battleNum].includes(diff))S.campaignClears[battleNum].push(diff);
+const config=typeof generateBattleConfig==='function'?generateBattleConfig(battleNum):null;
+const isFirstClear=S.campaignClears[battleNum].length===1;
+if(isFirstClear&&config){
+S.ap+=config.fluxReward;
+if(battleNum%100===0){S.ap+=50;toast(`BOOK ${Math.ceil(battleNum/100)} COMPLETE! +50 Bonus Flux!`,'gold');}
+}
+if(typeof addApexMeter==='function'&&config)addApexMeter(15+Math.floor(config.enemyMult*5));
+}
+
+// Post-battle hooks: BGM, achievements, mercs, tracking (consolidated from 6 patches)
+function _onBattleEnd(prevPhase,isVictory){
+const pe=B.pUnits.filter(u=>u.hp>0).length;
+// BGM intensity
+if(bgm&&bgm.setIntensity)bgm.setIntensity(isVictory?'victory':'menu');
+// Only on phase transition
+if(prevPhase==='over'||B.phase!=='over')return;
+if(isVictory){
+if(typeof checkAchievements==='function')checkAchievements();
+const meterByDiff={normal:25,hard:50,lunatic:80,max:120,apex:200};
+if(typeof addApexMeter==='function')addApexMeter(meterByDiff[currentDifficulty]||25);
+_trackDifficultyClears();
+if(currentBattleMode==='campaign_v2')_trackCampaignV2();
+}
+_cleanupMercenaries();
+}
+
 function checkBattleOver(){
 const pe=B.pUnits.filter(u=>u.hp>0).length;
 const ee=B.eUnits.filter(u=>u.hp>0).length;
+const prevPhase=B.phase;
+
+// APEX difficulty special victory — custom reward screen
+if(ee===0&&pe>0&&currentDifficulty==='apex'&&B.phase!=='over'){
+B.phase='over';S.wins++;
+const eloGain=75;
+S.elo+=eloGain;S.ap+=50;
+_onBattleEnd(prevPhase,true);
+save(true);
+setTimeout(()=>{
+const pool=getPool();
+if(pool.length){
+const choices=[];const used=new Set();
+for(let i=0;i<Math.min(3,pool.length);i++){
+let img;do{img=pool[~~(Math.random()*pool.length)];}while(used.has(img.name)&&used.size<pool.length);
+used.add(img.name);choices.push(img);
+}
+let html='<div style="font-family:var(--display);color:#ff0040;font-size:1.4rem;letter-spacing:4px;margin-bottom:16px;text-shadow:0 0 40px rgba(255,0,64,.6);animation:t0shift 2s ease infinite;background:linear-gradient(90deg,#ff0040,#ff6b35,#ffd700);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-size:200% 200%">APEX VICTORY!</div>';
+html+='<div style="font-size:.75rem;color:var(--text2);margin-bottom:12px">You conquered the impossible. Choose your TIER 0 reward:</div>';
+html+='<div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap">';
+choices.forEach((img,i)=>{
+html+=`<div onclick="claimApexReward(${i})" style="cursor:pointer;text-align:center;padding:12px;background:var(--panel2);border:2px solid #ff0040;border-radius:10px;width:100px;transition:all .15s;box-shadow:0 0 20px rgba(255,0,64,.2)" onmouseover="this.style.transform='scale(1.05)'" onmouseout="this.style.transform='scale(1)'">
+<img src="${img.src}" style="width:60px;height:60px;border-radius:50%;border:2px solid var(--gold);object-fit:cover"><br>
+<div style="font-size:.65rem;margin-top:4px;color:var(--text)">${typeof esc==='function'?esc(img.name):img.name}</div>
+<div style="font-family:var(--display);font-size:.6rem;color:var(--t0)">TIER 0</div>
+</div>`;
+});
+html+='</div>';
+html+='<div style="font-size:.6rem;color:var(--text3);margin-top:12px">+50 Flux | +75 ELO</div>';
+window._apexRewardChoices=choices;
+const resultBg=document.getElementById('resultBg');
+if(resultBg){const card=resultBg.querySelector('.result-card');if(card)card.innerHTML=html;resultBg.classList.add('show');}
+}
+if(typeof sfx==='function')sfx('victory');
+if(typeof spawnParticles==='function')spawnParticles();
+},800);
+return true;
+}
+
+// MAX difficulty special victory — T0 reward selection
+if(ee===0&&pe>0&&currentDifficulty==='max'&&B.phase!=='over'){
+B.phase='over';S.wins++;
+const eloGain=50;
+S.elo+=eloGain;S.ap+=30;
+_onBattleEnd(prevPhase,true);
+save(true);
+setTimeout(()=>{
+const pool=getPool();
+if(pool.length){
+const choices=[];const used=new Set();
+for(let i=0;i<Math.min(3,pool.length);i++){
+let img;do{img=pool[~~(Math.random()*pool.length)];}while(used.has(img.name)&&used.size<pool.length);
+used.add(img.name);choices.push(img);
+}
+let html='<div style="font-family:var(--display);color:var(--gold);font-size:1.2rem;letter-spacing:3px;margin-bottom:16px;text-shadow:0 0 30px rgba(255,215,0,.5)">MAX VICTORY!</div>';
+html+='<div style="font-size:.75rem;color:var(--text2);margin-bottom:12px">Choose your TIER 0 reward:</div>';
+html+='<div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap">';
+choices.forEach((img,i)=>{
+html+=`<div onclick="claimMaxReward(${i})" style="cursor:pointer;text-align:center;padding:12px;background:var(--panel2);border:2px solid var(--gold);border-radius:10px;width:100px;transition:all .15s" onmouseover="this.style.transform='scale(1.05)'" onmouseout="this.style.transform='scale(1)'">
+<img src="${img.src}" style="width:60px;height:60px;border-radius:50%;border:2px solid var(--gold);object-fit:cover"><br>
+<div style="font-size:.65rem;margin-top:4px;color:var(--text)">${esc(img.name)}</div>
+<div style="font-family:var(--display);font-size:.6rem;color:var(--t0)">TIER 0</div>
+</div>`;
+});
+html+='</div>';
+html+='<div style="font-size:.6rem;color:var(--text3);margin-top:12px">+30 AP | +50 ELO</div>';
+window._maxRewardChoices=choices;
+document.getElementById('resultTitle').textContent='MAX CLEARED';
+document.getElementById('resultTitle').className='win';
+document.getElementById('resultSub').innerHTML=html;
+document.getElementById('resultReward').textContent='';
+document.getElementById('resultBg').classList.add('show');
+}
+},500);
+sfx('victory');spawnParticles();
+return true;
+}
+
 if(ee===0){
 B.phase='over';S.wins++;
 const mode=currentBattleMode||'ladder';
@@ -4215,11 +4365,12 @@ let apReward=2+~~(Math.random()*4);
 if(mode==='ghb')apReward+=15;
 if(mode==='tempest'){
 apReward+=(currentBattleConfig?.stage||1)*2;
-// Tempest stage progression
 const stage=currentBattleConfig?.stage||1;
 const totalStages=currentBattleConfig?.totalStages||7;
 if(stage<totalStages){
-S.ap+=apReward;save(true);
+S.ap+=apReward;
+_onBattleEnd(prevPhase,true);
+save(true);
 if(typeof gameConfirm==='function'){
 gameConfirm(`Stage ${stage}/${totalStages} complete! Continue to stage ${stage+1}?`,()=>{
 B.pUnits.forEach(bu=>{const ru=S.roster.find(r=>r.id===bu.id);if(ru)ru.tempestHp=Math.max(bu.hp,0);});
@@ -4237,7 +4388,6 @@ const alreadyCleared=S.ghbCleared&&S.ghbCleared.includes(ghbId);
 const seal=SEAL_POOL[~~(Math.random()*SEAL_POOL.length)];
 if(!alreadyCleared){S.seals.push({...seal});if(!S.ghbCleared)S.ghbCleared=[];S.ghbCleared.push(ghbId);}
 bLog(`Grand Hero Battle cleared!${alreadyCleared?' (Already cleared - no boss reward)':' Earned: '+seal.name}`,'spec');
-// Give the GHB boss unit to the player (first clear only)
 const ghb=currentBattleConfig?.ghb;
 if(!alreadyCleared){
 if(ghb&&S.images.length){
@@ -4247,7 +4397,6 @@ if(ghb.boss){
 const b=ghb.boss;
 if(b.statBoost)Object.entries(b.statBoost).forEach(([k,v])=>{
 if(bossUnit[k]!=null){bossUnit[k]+=v;}
-// Also update baseStat so applyLevel() cannot erase the difficulty bonus
 const bsKey=k==='maxHp'?'hp':k;
 if(bossUnit.baseStat&&bossUnit.baseStat[bsKey]!=null)bossUnit.baseStat[bsKey]+=v;
 });
@@ -4272,7 +4421,8 @@ if(!S.campaignDone.includes(B.campaignId)){S.campaignDone.push(B.campaignId);}el
 if(mode==='ordeal'){const ordealUnit=S.roster[currentBattleConfig?.ordealUnit];if(ordealUnit){awardSP(ordealUnit,100);bLog(ordealUnit.name+' earned +100 SP from Heroic Ordeal!','spec');}}
 if(mode==='training'){trackQuest('trainingDone');const fl=currentBattleConfig?.floor||1;if(fl>=S.trainingFloor)S.trainingFloor=Math.min(10,fl+1);}
 if(mode==='ordeal'&&S._savedOrdealTeamIds){S.team=S._savedOrdealTeamIds.map(id=>S.roster.findIndex(u=>u.id===id)).filter(i=>i>=0);delete S._savedOrdealTeamIds;}
-if(mode==='hof'&&typeof hofVictoryReward==='function'){hofVictoryReward();return true;}
+if(mode==='hof'&&typeof hofVictoryReward==='function'){_onBattleEnd(prevPhase,true);hofVictoryReward();return true;}
+_onBattleEnd(prevPhase,true);
 trackQuest('wins');
 checkStoryQuests();
 save(true);
@@ -4284,6 +4434,7 @@ B.phase='over';
 let eloLoss=Math.min(S.elo,10+~~(Math.random()*5));
 if(currentBattleMode==='training')eloLoss=0;
 S.elo=Math.max(0,S.elo-eloLoss);
+_onBattleEnd(prevPhase,false);
 save(true);showLose(eloLoss);sfx('defeat');return true;
 }
 return false;
@@ -5085,6 +5236,81 @@ awakDesc.textContent=`Prestige ${prestige}/∞ — Reset to Lv.1 and gain a perm
 awakSec.style.display='none';
 }
 }
+// --- Lore (from v3.5 expansion) ---
+const loreEl=document.getElementById('hdLore');
+if(loreEl){loreEl.textContent=u.storyText||((typeof generateLore==='function')?generateLore(u):'');}
+// --- Class Change options ---
+const classInfo=document.getElementById('hdClassInfo');
+const classOpts=document.getElementById('hdClassOptions');
+if(classInfo&&classOpts&&typeof RECLASS_OPTIONS!=='undefined'){
+classInfo.textContent=`Current: ${u.role} (${u.weapon}/${u.moveType}). Costs ${typeof RECLASS_COST_AP!=='undefined'?RECLASS_COST_AP:100} AP to change class.`;
+let classHtml='';
+RECLASS_OPTIONS.forEach((cls,ci)=>{
+const isCurrent=u.role===cls.name;
+const wc=(typeof WEAPON_COLORS!=='undefined'?WEAPON_COLORS[cls.weapon]:null)||'#fff';
+classHtml+=`<button class="class-btn${isCurrent?' current':''}" ${isCurrent?'disabled':''} onclick="doClassChange(${idx},${ci})" style="border-color:${wc}${isCurrent?'':';color:'+wc}">${cls.name}<br><span style="font-size:.4rem;opacity:.7">${cls.weapon}/${cls.move}</span></button>`;
+});
+classOpts.innerHTML=classHtml;
+}
+// --- Fusion info ---
+const fusionEl=document.getElementById('hdFusionInfo');
+const fusionParents=document.getElementById('hdFusionParents');
+if(fusionEl&&fusionParents){
+if(u.fusedFrom&&u.fusedFrom.length===2){
+fusionEl.style.display='block';
+fusionParents.innerHTML=`Fused from <strong>${u.fusedFrom[0]}</strong> & <strong>${u.fusedFrom[1]}</strong>`;
+const portrait=document.getElementById('hdPortrait');
+if(portrait)portrait.classList.add('fusion-glow');
+}else{fusionEl.style.display='none';}
+}
+// --- Extra fusion skill slots ---
+const skillsEl=document.getElementById('hdSkills');
+if(skillsEl&&u.isFusion){
+['D','E','F'].forEach(sl=>{
+const skill=u['skill'+sl];
+if(skill){
+const div=document.createElement('div');
+div.style.cssText='background:var(--panel2);border:1px solid rgba(255,45,85,.3);border-radius:6px;padding:6px';
+div.innerHTML=`<div style="font-size:.55rem;color:#ff2d55;font-weight:700">${sl}</div><div style="font-size:.65rem;font-weight:600">${skill.name}</div><div style="font-size:.55rem;color:var(--text2)">${skill.desc||''}</div>`;
+skillsEl.appendChild(div);
+}
+});
+}
+// --- Weapon Viewer (from polish patch) ---
+const hdContent=document.querySelector('.hd-content');
+if(hdContent){
+hdContent.querySelectorAll('.weapon-viewer').forEach(el=>el.remove());
+const wv=document.createElement('div');wv.className='weapon-viewer';
+const wc=(typeof WEAPON_COLORS!=='undefined'?WEAPON_COLORS[u.weapon]:null)||'#fff';
+const moveLabel=MOVE_STATS[u.moveType]?.label||u.moveType;
+const wRange=typeof getWeaponRange==='function'?getWeaponRange(u.weapon):(['Bow'].includes(u.weapon)?2:1);
+const beats=WEAPON_TRIANGLE[u.weapon]||'None';
+const losesTo=Object.entries(WEAPON_TRIANGLE).find(([k,v])=>v===u.weapon);
+let wvHtml=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><span style="font-family:var(--display);font-size:.65rem;color:${wc};letter-spacing:1px">${u.weapon.toUpperCase()}</span><span class="weapon-tag" style="border-color:${wc};color:${wc}">${moveLabel} • Range ${wRange}</span></div>`;
+wvHtml+=`<div style="font-size:.58rem;color:var(--text2);margin-bottom:4px"><span style="color:#22c55e">Strong vs:</span> ${beats} &nbsp;<span style="color:#ef4444">Weak vs:</span> ${losesTo?losesTo[0]:'None'}</div>`;
+if(u.weaponEffectName){
+wvHtml+=`<div class="weapon-effect-box"><div style="font-weight:700;color:var(--gold);margin-bottom:2px">${u.weaponEffectName}</div></div>`;
+}else{wvHtml+=`<div style="font-size:.55rem;color:var(--text3);margin-top:4px">Standard ${u.weapon} — No special effect</div>`;}
+wvHtml+=`<details style="margin-top:8px"><summary style="font-size:.55rem;color:var(--text3);cursor:pointer">All Weapon Types</summary><div style="display:flex;flex-wrap:wrap;gap:3px;margin-top:4px">`;
+WEAPON_TYPES.forEach(w=>{const c2=(typeof WEAPON_COLORS!=='undefined'?WEAPON_COLORS[w]:null)||'#fff';const active=w===u.weapon;wvHtml+=`<span class="weapon-tag" style="border-color:${c2};color:${active?'#fff':c2};${active?'background:'+c2:''}font-size:.45rem">${w}</span>`;});
+wvHtml+='</div></details>';
+wv.innerHTML=wvHtml;
+const statsSection=hdContent.querySelector('#hdStats');
+if(statsSection&&statsSection.parentElement)statsSection.parentElement.after(wv);
+else hdContent.appendChild(wv);
+}
+// --- Export/Import buttons (from v3.5) ---
+const hdNav=document.querySelector('#heroDetail .hdr-nav');
+if(hdNav&&!hdNav.querySelector('.export-btn')){
+const btn=document.createElement('button');btn.className='btn2 btn-sm export-btn';btn.textContent='Export';
+btn.onclick=()=>window.exportUnit(idx);hdNav.insertBefore(btn,hdNav.firstChild);
+}
+if(hdNav&&!hdNav.querySelector('.merc-btn')){
+const btn2=document.createElement('button');btn2.className='btn2 btn-sm merc-btn';btn2.textContent='Merc';
+btn2.onclick=()=>window.exportMercenary(idx);hdNav.insertBefore(btn2,hdNav.firstChild);
+}
+// --- Item inventory (from expansion patch) ---
+if(typeof _renderHeroInventory==='function')_renderHeroInventory(idx);
 }
 
 let hdPreviewLvlVal=1;
@@ -7238,63 +7464,7 @@ createEnemyTeam = function(count, mult) {
     return _origCreateEnemyTeam(count, mult);
 };
 
-// ═══ MAX VICTORY REWARD — Choose a T0 unit ══════════════════
-const _origCheckBattleOver = checkBattleOver;
-checkBattleOver = function() {
-    const pe = B.pUnits.filter(u => u.hp > 0).length;
-    const ee = B.eUnits.filter(u => u.hp > 0).length;
-    if(ee === 0 && pe > 0 && currentDifficulty === 'max') {
-        // MAX victory! Let player choose a T0 unit
-        B.phase = 'over';
-        S.wins++;
-        const eloGain = 50;
-        S.elo += eloGain;
-        S.ap += 30;
-        save(true);
-        
-        // Show T0 reward selection
-        setTimeout(() => {
-            const pool = getPool();
-            if(pool.length) {
-                const choices = [];
-                const used = new Set();
-                for(let i = 0; i < Math.min(3, pool.length); i++) {
-                    let img;
-                    do { img = pool[~~(Math.random()*pool.length)]; } while(used.has(img.name) && used.size < pool.length);
-                    used.add(img.name);
-                    choices.push(img);
-                }
-                
-                let html = '<div style="font-family:var(--display);color:var(--gold);font-size:1.2rem;letter-spacing:3px;margin-bottom:16px;text-shadow:0 0 30px rgba(255,215,0,.5)">MAX VICTORY!</div>';
-                html += '<div style="font-size:.75rem;color:var(--text2);margin-bottom:12px">Choose your TIER 0 reward:</div>';
-                html += '<div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap">';
-                choices.forEach((img, i) => {
-                    html += `<div onclick="claimMaxReward(${i})" style="cursor:pointer;text-align:center;padding:12px;background:var(--panel2);border:2px solid var(--gold);border-radius:10px;width:100px;transition:all .15s" onmouseover="this.style.transform='scale(1.05)'" onmouseout="this.style.transform='scale(1)'">
-                        <img src="${img.src}" style="width:60px;height:60px;border-radius:50%;border:2px solid var(--gold);object-fit:cover"><br>
-                        <div style="font-size:.65rem;margin-top:4px;color:var(--text)">${esc(img.name)}</div>
-                        <div style="font-family:var(--display);font-size:.6rem;color:var(--t0)">TIER 0</div>
-                    </div>`;
-                });
-                html += '</div>';
-                html += '<div style="font-size:.6rem;color:var(--text3);margin-top:12px">+30 AP | +50 ELO</div>';
-                
-                // Store choices for callback
-                window._maxRewardChoices = choices;
-                
-                document.getElementById('resultTitle').textContent = 'MAX CLEARED';
-                document.getElementById('resultTitle').className = 'win';
-                document.getElementById('resultSub').innerHTML = html;
-                document.getElementById('resultReward').textContent = '';
-                document.getElementById('resultBg').classList.add('show');
-            }
-        }, 500);
-        
-        sfx('victory');
-        spawnParticles();
-        return true;
-    }
-    return _origCheckBattleOver();
-};
+// [CONSOLIDATED] MAX victory reward — merged into main checkBattleOver
 
 window.claimMaxReward = function(idx) {
     const choices = window._maxRewardChoices;
@@ -8893,19 +9063,16 @@ updateHomeScreen = function () {
         });
     }
 
-    // Override the item inventory rendering in openHeroDetail
-    const _origOpenHD2 = openHeroDetail;
-    window.openHeroDetail = function(idx) {
-        _origOpenHD2(idx);
+    // [CONSOLIDATED] Item inventory rendering — called from main openHeroDetail
+    window._renderHeroInventory = function(idx) {
         const u = S.roster[idx];
         if(!u) return;
 
         const hdContent = document.querySelector('.hd-content');
         if(!hdContent) return;
 
-        // Find existing expansion sections and replace the item one
         const sections = hdContent.querySelectorAll('.expansion-section');
-        const itemSec = sections[0]; // First expansion section is items
+        const itemSec = sections[0];
         if(!itemSec) return;
 
         function renderInventory() {
@@ -9708,72 +9875,7 @@ updateHomeScreen = function () {
         openHeroDetail(idx);
     };
 
-    // ─── HERO DETAIL OVERRIDES ────────────────────────────────
-    // Patch openHeroDetail to show lore, class change, and fusion info
-    const _origOpenHD3 = openHeroDetail;
-    window.openHeroDetail = function(idx) {
-        _origOpenHD3(idx);
-        const u = S.roster[idx];
-        if(!u) return;
-
-        // Lore
-        const loreEl = document.getElementById('hdLore');
-        if(loreEl) {
-            const lore = u.storyText || generateLore(u);
-            loreEl.textContent = lore;
-        }
-
-        // Class Change options
-        const classInfo = document.getElementById('hdClassInfo');
-        const classOpts = document.getElementById('hdClassOptions');
-        if(classInfo && classOpts) {
-            classInfo.textContent = `Current: ${u.role} (${u.weapon}/${u.moveType}). Costs ${RECLASS_COST_AP} AP to change class.`;
-            let html = '';
-            RECLASS_OPTIONS.forEach((cls, ci) => {
-                const isCurrent = u.role === cls.name;
-                const wc = WEAPON_COLORS[cls.weapon] || '#fff';
-                html += `<button class="class-btn${isCurrent?' current':''}"
-                    ${isCurrent?'disabled':''}
-                    onclick="doClassChange(${idx},${ci})"
-                    style="border-color:${wc}${isCurrent?'':';color:'+wc}">
-                    ${cls.name}<br><span style="font-size:.4rem;opacity:.7">${cls.weapon}/${cls.move}</span>
-                </button>`;
-            });
-            classOpts.innerHTML = html;
-        }
-
-        // Fusion info
-        const fusionEl = document.getElementById('hdFusionInfo');
-        const fusionParents = document.getElementById('hdFusionParents');
-        if(fusionEl && fusionParents) {
-            if(u.fusedFrom && u.fusedFrom.length === 2) {
-                fusionEl.style.display = 'block';
-                fusionParents.innerHTML = `💫 Fused from <strong>${u.fusedFrom[0]}</strong> & <strong>${u.fusedFrom[1]}</strong>`;
-                // Add glow to portrait
-                const portrait = document.getElementById('hdPortrait');
-                if(portrait) portrait.classList.add('fusion-glow');
-            } else {
-                fusionEl.style.display = 'none';
-            }
-        }
-
-        // Show extra skill slots for fusion units
-        const skillsEl = document.getElementById('hdSkills');
-        if(skillsEl && u.isFusion) {
-            const extraSlots = ['D','E','F'];
-            extraSlots.forEach(sl => {
-                const skill = u['skill' + sl];
-                if(skill) {
-                    const div = document.createElement('div');
-                    div.style.cssText = 'background:var(--panel2);border:1px solid rgba(255,45,85,.3);border-radius:6px;padding:6px';
-                    div.innerHTML = `<div style="font-size:.55rem;color:#ff2d55;font-weight:700">${sl}</div>
-                        <div style="font-size:.65rem;font-weight:600">${skill.name}</div>
-                        <div style="font-size:.55rem;color:var(--text2)">${skill.desc||''}</div>`;
-                    skillsEl.appendChild(div);
-                }
-            });
-        }
-    };
+    // [CONSOLIDATED] Lore/class/fusion — merged into main openHeroDetail
 
     // ─── GRAND TUTORIAL REWRITE ───────────────────────────────
     TUTORIAL_STEPS.length = 0;
@@ -10328,93 +10430,9 @@ updateHomeScreen = function () {
         if(bgm && bgm.setIntensity && B.phase === 'player') bgm.setIntensity('player');
     };
 
-    // ─── 6. WEAPON VIEWER ────────────────────────────────────
-    // Add weapon info to Hero Detail screen
-    const _origOpenHD4 = openHeroDetail;
-    window.openHeroDetail = function(idx) {
-        _origOpenHD4(idx);
-        const u = S.roster[idx];
-        if(!u) return;
+    // [CONSOLIDATED] Weapon viewer — merged into main openHeroDetail
 
-        const hdContent = document.querySelector('.hd-content');
-        if(!hdContent) return;
-
-        // Remove old weapon viewer
-        hdContent.querySelectorAll('.weapon-viewer').forEach(el => el.remove());
-
-        // Build weapon info section
-        const wv = document.createElement('div');
-        wv.className = 'weapon-viewer';
-
-        const wc = WEAPON_COLORS[u.weapon] || '#fff';
-        const moveLabel = MOVE_STATS[u.moveType]?.label || u.moveType;
-        const wRange = typeof getWeaponRange === 'function' ? getWeaponRange(u.weapon) : (['Bow'].includes(u.weapon) ? 2 : 1);
-
-        // Weapon triangle info
-        const beats = WEAPON_TRIANGLE[u.weapon] || 'None';
-        const losesTo = Object.entries(WEAPON_TRIANGLE).find(([k,v]) => v === u.weapon);
-
-        let html = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-            <span style="font-family:var(--display);font-size:.65rem;color:${wc};letter-spacing:1px">${u.weapon.toUpperCase()}</span>
-            <span class="weapon-tag" style="border-color:${wc};color:${wc}">${moveLabel} • Range ${wRange}</span>
-        </div>`;
-
-        // Triangle
-        html += `<div style="font-size:.58rem;color:var(--text2);margin-bottom:4px">
-            <span style="color:#22c55e">Strong vs:</span> ${beats} &nbsp;
-            <span style="color:#ef4444">Weak vs:</span> ${losesTo ? losesTo[0] : 'None'}
-        </div>`;
-
-        // Weapon effect
-        if(u.weaponEffectName) {
-            const effectDesc = u.passives?.find(p => p && p.name && p.name.includes('\u2694'))?.desc || 'Unique weapon effect';
-            html += `<div class="weapon-effect-box">
-                <div style="font-weight:700;color:var(--gold);margin-bottom:2px">${u.weaponEffectName}</div>
-                <div style="color:var(--text2)">${effectDesc}</div>
-            </div>`;
-        } else if(u.weaponEffect) {
-            const we = typeof WEAPON_EFFECTS !== 'undefined' ? WEAPON_EFFECTS.find(w => w.id === u.weaponEffect) : null;
-            if(we) {
-                html += `<div class="weapon-effect-box">
-                    <div style="font-weight:700;color:var(--gold);margin-bottom:2px">${we.name}</div>
-                    <div style="color:var(--text2)">${we.desc}</div>
-                </div>`;
-            }
-        } else {
-            html += `<div style="font-size:.55rem;color:var(--text3);margin-top:4px">Standard ${u.weapon} — No special effect</div>`;
-        }
-
-        // All weapon types reference
-        html += `<details style="margin-top:8px"><summary style="font-size:.55rem;color:var(--text3);cursor:pointer">All Weapon Types</summary>
-        <div style="display:flex;flex-wrap:wrap;gap:3px;margin-top:4px">`;
-        WEAPON_TYPES.forEach(w => {
-            const c = WEAPON_COLORS[w] || '#fff';
-            const active = w === u.weapon;
-            html += `<span class="weapon-tag" style="border-color:${c};color:${active?'#fff':c};${active?'background:'+c:''}font-size:.45rem">${w}</span>`;
-        });
-        html += '</div></details>';
-
-        wv.innerHTML = html;
-
-        // Insert after the stats section
-        const statsSection = hdContent.querySelector('#hdStats');
-        if(statsSection && statsSection.parentElement) {
-            statsSection.parentElement.after(wv);
-        } else {
-            hdContent.appendChild(wv);
-        }
-    };
-
-    // ─── 7. VICTORY MUSIC FLOURISH ───────────────────────────
-    const _origCheckBattleOver = checkBattleOver;
-    window.checkBattleOver = function() {
-        const result = _origCheckBattleOver.apply(this, arguments);
-        if(B.phase === 'over' && bgm && bgm.setIntensity) {
-            const pe = B.pUnits.filter(u => u.hp > 0).length;
-            bgm.setIntensity(pe > 0 ? 'victory' : 'menu');
-        }
-        return result;
-    };
+    // [CONSOLIDATED] Victory music — merged into main checkBattleOver
 
     // ─── 8. ADDITIONAL NULL GUARDS ───────────────────────────
     // Guard special access in combat resolution
@@ -10768,24 +10786,7 @@ updateHomeScreen = function () {
         });
     };
 
-    // Hook achievement check into battle end
-    const _origCBO_v35 = window.checkBattleOver;
-    window.checkBattleOver = function() {
-        const _prevPhase = B.phase;
-        const res = _origCBO_v35.apply(this, arguments);
-        if(B.phase === 'over' && _prevPhase !== 'over') {
-            checkAchievements();
-            // Only award meter on VICTORY (enemies dead, player alive)
-            const pe = B.pUnits.filter(u => u.hp > 0).length;
-            const ee = B.eUnits.filter(u => u.hp > 0).length;
-            if(ee === 0 && pe > 0) {
-                const meterByDiff = {normal:25, hard:50, lunatic:80, max:120, apex:200};
-                const amount = meterByDiff[currentDifficulty] || 25;
-                addApexMeter(amount);
-            }
-        }
-        return res;
-    };
+    // [CONSOLIDATED] Achievement/meter check — merged into main checkBattleOver
 
     // [CONSOLIDATED] rollUnit Layer 2 removed — compendium/meter/achievements merged into MEGA PATCH rollUnit
 
@@ -10930,26 +10931,7 @@ updateHomeScreen = function () {
 
     // [CONSOLIDATED] rollUnit Layer 3 removed — banner rate boost merged into MEGA PATCH rollUnit
 
-    // ─── 10. EXPORT/IMPORT (kept from v3.0) ───
-    const _origOpenHD_v35 = window.openHeroDetail;
-    window.openHeroDetail = function(idx) {
-        _origOpenHD_v35.apply(this, arguments);
-        const hdNav = document.querySelector('#heroDetail .hdr-nav');
-        if(hdNav && !hdNav.querySelector('.export-btn')) {
-            const btn = document.createElement('button');
-            btn.className = 'btn2 btn-sm export-btn';
-            btn.textContent = 'Export';
-            btn.onclick = () => window.exportUnit(idx);
-            hdNav.insertBefore(btn, hdNav.firstChild);
-        }
-        if(hdNav && !hdNav.querySelector('.merc-btn')) {
-            const btn2 = document.createElement('button');
-            btn2.className = 'btn2 btn-sm merc-btn';
-            btn2.textContent = 'Merc';
-            btn2.onclick = () => window.exportMercenary(idx);
-            hdNav.insertBefore(btn2, hdNav.firstChild);
-        }
-    };
+    // [CONSOLIDATED] Export/import buttons — merged into main openHeroDetail
 
     window.exportUnit = function(idx) {
         const u = S.roster[idx]; if(!u || !u.src) return;
@@ -11058,37 +11040,7 @@ updateHomeScreen = function () {
         return result;
     };
 
-    // ─── 13. MERC CLEANUP AFTER BATTLE ───
-    const _origCBO_v35merc = window.checkBattleOver;
-    window.checkBattleOver = function() {
-        const res = _origCBO_v35merc.apply(this, arguments);
-        if(B.phase === 'over') {
-            const mercs = S.roster.filter(u => u.isMercenary);
-            if(mercs.length > 0) {
-                // Save current team/preset IDs BEFORE filtering to survive the roster shift
-                const teamIds = S.team.map(idx => S.roster[idx]?.id).filter(Boolean);
-                const presetIds = S.teamPresets ? S.teamPresets.map(p => {
-                    if(!p || !p.team) return null;
-                    return {...p, _ids: p.team.map(idx => S.roster[idx]?.id).filter(Boolean)};
-                }) : null;
-                S.roster = S.roster.filter(u => !u.isMercenary);
-                // Remap team indices
-                S.team = teamIds.map(id => S.roster.findIndex(u => u.id === id)).filter(idx => idx >= 0);
-                // Remap preset indices
-                if(presetIds) {
-                    S.teamPresets = presetIds.map(p => {
-                        if(!p) return null;
-                        const team = p._ids.map(id => S.roster.findIndex(u => u.id === id)).filter(idx => idx >= 0);
-                        const {_ids, ...rest} = p;
-                        return {...rest, team};
-                    });
-                }
-                save(true);
-                toast(mercs.length === 1 ? 'Mercenary ' + mercs[0].name + ' departed.' : mercs.length + ' mercs departed.', '');
-            }
-        }
-        return res;
-    };
+    // [CONSOLIDATED] Merc cleanup — merged into main checkBattleOver
 
     // ─── 14. ADD V3.5 FIELDS TO SAVE DATA ───
     // The save function already serializes everything on S.
@@ -12118,39 +12070,7 @@ function getDifficultyStars(clearsObj, id) {
     }).join('');
 }
 
-// Patch checkBattleOver to record difficulty clears
-const _origCheckBattleOver2 = checkBattleOver;
-window.checkBattleOver = checkBattleOver = function() {
-    const pe = B.pUnits.filter(u => u.hp > 0).length;
-    const ee = B.eUnits.filter(u => u.hp > 0).length;
-
-    // Before calling original, prepare to track
-    const wasOver = B.phase === 'over';
-
-    const result = _origCheckBattleOver2();
-
-    // If battle just ended in victory
-    if(!wasOver && B.phase === 'over' && ee === 0 && pe > 0) {
-        const diff = currentDifficulty || 'normal';
-        // Track campaign clears
-        if(B.isCampaign && B.campaignId) {
-            if(!S.campaignClears[B.campaignId]) S.campaignClears[B.campaignId] = [];
-            if(!S.campaignClears[B.campaignId].includes(diff)) {
-                S.campaignClears[B.campaignId].push(diff);
-            }
-        }
-        // Track mode clears
-        const mode = currentBattleMode || 'ladder';
-        const modeKey = mode + '_' + (currentBattleConfig?.floor || currentBattleConfig?.ghb?.id || currentBattleConfig?.stage || 'default');
-        if(!S.modeClears[modeKey]) S.modeClears[modeKey] = [];
-        if(!S.modeClears[modeKey].includes(diff)) {
-            S.modeClears[modeKey].push(diff);
-        }
-        save(true);
-    }
-
-    return result;
-};
+// [CONSOLIDATED] Difficulty tracking — merged into main checkBattleOver
 
 // Override refreshCampaign to show difficulty clear stars
 const _origRefreshCampaign2 = refreshCampaign;
@@ -12287,61 +12207,7 @@ console.log('%c  ✓ Difficulty clear tracking & display', 'color:#22c55e');
 // 7. APEX VICTORY: Bonus rewards for APEX difficulty wins
 // ─────────────────────────────────────────────────────────────
 
-// Patch for APEX difficulty victory — similar to MAX but harder
-const _origCheckBattleOverApex = checkBattleOver;
-window.checkBattleOver = checkBattleOver = function() {
-    const pe = B.pUnits.filter(u => u.hp > 0).length;
-    const ee = B.eUnits.filter(u => u.hp > 0).length;
-
-    if(ee === 0 && pe > 0 && currentDifficulty === 'apex' && B.phase !== 'over') {
-        B.phase = 'over';
-        S.wins++;
-        const eloGain = 75;
-        S.elo += eloGain;
-        S.ap += 50;
-        save(true);
-
-        setTimeout(() => {
-            const pool = getPool();
-            if(pool.length) {
-                const choices = [];
-                const used = new Set();
-                for(let i = 0; i < Math.min(3, pool.length); i++) {
-                    let img;
-                    do { img = pool[~~(Math.random()*pool.length)]; } while(used.has(img.name) && used.size < pool.length);
-                    used.add(img.name);
-                    choices.push(img);
-                }
-
-                let html = '<div style="font-family:var(--display);color:#ff0040;font-size:1.4rem;letter-spacing:4px;margin-bottom:16px;text-shadow:0 0 40px rgba(255,0,64,.6);animation:t0shift 2s ease infinite;background:linear-gradient(90deg,#ff0040,#ff6b35,#ffd700);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-size:200% 200%">APEX VICTORY!</div>';
-                html += '<div style="font-size:.75rem;color:var(--text2);margin-bottom:12px">You conquered the impossible. Choose your TIER 0 reward:</div>';
-                html += '<div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap">';
-                choices.forEach((img, i) => {
-                    html += `<div onclick="claimApexReward(${i})" style="cursor:pointer;text-align:center;padding:12px;background:var(--panel2);border:2px solid #ff0040;border-radius:10px;width:100px;transition:all .15s;box-shadow:0 0 20px rgba(255,0,64,.2)" onmouseover="this.style.transform='scale(1.05)'" onmouseout="this.style.transform='scale(1)'">
-                        <img src="${img.src}" style="width:60px;height:60px;border-radius:50%;border:2px solid var(--gold);object-fit:cover"><br>
-                        <div style="font-size:.65rem;margin-top:4px;color:var(--text)">${typeof esc === 'function' ? esc(img.name) : img.name}</div>
-                        <div style="font-family:var(--display);font-size:.6rem;color:var(--t0)">TIER 0</div>
-                    </div>`;
-                });
-                html += '</div>';
-                html += '<div style="font-size:.6rem;color:var(--text3);margin-top:12px">+50 Flux | +75 ELO</div>';
-
-                window._apexRewardChoices = choices;
-                const resultBg = document.getElementById('resultBg');
-                if(resultBg) {
-                    const card = resultBg.querySelector('.result-card');
-                    if(card) card.innerHTML = html;
-                    resultBg.classList.add('show');
-                }
-            }
-            if(typeof sfx === 'function') sfx('victory');
-            if(typeof spawnParticles === 'function') spawnParticles();
-        }, 800);
-        return true;
-    }
-
-    return _origCheckBattleOverApex();
-};
+// [CONSOLIDATED] APEX victory — merged into main checkBattleOver
 
 window.claimApexReward = function(idx) {
     const choices = window._apexRewardChoices;
@@ -13265,54 +13131,7 @@ window.launchCampaignBattle_v2 = function(battleNum) {
 // BATTLE COMPLETION TRACKING
 // ═══════════════════════════════════════════════════════════════
 
-// Patch checkBattleOver to track campaign_v2 victories
-const _origCBO_campaign = window.checkBattleOver;
-window.checkBattleOver = function() {
-    const prevPhase = B.phase;
-    const result = _origCBO_campaign.apply(this, arguments);
-
-    // Track campaign_v2 victories
-    if(prevPhase !== 'over' && B.phase === 'over' && currentBattleMode === 'campaign_v2') {
-        const pe = B.pUnits.filter(u => u.hp > 0).length;
-        const ee = B.eUnits.filter(u => u.hp > 0).length;
-        const battleNum = B._currentCampaignBattle || currentBattleConfig?.battleNum;
-
-        if(ee === 0 && pe > 0 && battleNum) {
-            // Mark as cleared
-            if(!S.campaignDone.includes(battleNum)) {
-                S.campaignDone.push(battleNum);
-            }
-            // Track difficulty
-            if(!S.campaignClears) S.campaignClears = {};
-            if(!S.campaignClears[battleNum]) S.campaignClears[battleNum] = [];
-            const diff = currentDifficulty || 'normal';
-            if(!S.campaignClears[battleNum].includes(diff)) {
-                S.campaignClears[battleNum].push(diff);
-            }
-
-            // Bonus Flux for first clear
-            const config = generateBattleConfig(battleNum);
-            const isFirstClear = S.campaignClears[battleNum].length === 1;
-            if(isFirstClear) {
-                S.ap += config.fluxReward;
-                // Book completion bonus
-                if(battleNum % 100 === 0) {
-                    S.ap += 50;
-                    toast(`BOOK ${Math.ceil(battleNum / 100)} COMPLETE! +50 Bonus Flux!`, 'gold');
-                }
-            }
-
-            // Give AP meter progress for story battles
-            if(typeof addApexMeter === 'function') {
-                addApexMeter(15 + Math.floor(config.enemyMult * 5));
-            }
-
-            save(true);
-        }
-    }
-
-    return result;
-};
+// [CONSOLIDATED] checkBattleOver campaign_v2 tracking — merged into main checkBattleOver
 
 // Override result screen to show "Continue" button for campaign
 const _origShowWin_camp = window.showWin;
