@@ -7580,20 +7580,21 @@ function openInspect(unit) {
     bc.addEventListener('touchmove', function() { clearTimeout(_inspectTimer); _inspectFired = false; }, {passive:true});
 })();
 
-// Override the difficulty modal to include MAX
-const diffModal = document.getElementById('diffModal');
-if(!diffModal) return;
-
-// Find the cancel button and insert MAX before it
-const cancelBtn = diffModal.querySelector('[onclick*="closeDiffModal"]') || diffModal.querySelector('[onclick*="currentDifficulty"]');
-if(cancelBtn) {
-    const maxBtn = document.createElement('button');
-    maxBtn.className = 'btn2';
-    maxBtn.style.cssText = 'min-width:200px;font-size:.8rem;border-color:#ff2d55;color:#ff2d55;background:rgba(255,45,85,.08)';
-    maxBtn.innerHTML = 'MAX <span style="font-size:.6rem;opacity:.7">Lv40+10 ×2.0 Full Skills+Items T0 REWARD</span>';
-    maxBtn.setAttribute('data-tip', 'Fully upgraded, fully prestiged enemies with best items and abilities. Win to choose a free Tier-0 unit!');
-    maxBtn.onclick = () => setDifficulty('max');
-    diffModal.insertBefore(maxBtn, cancelBtn);
+// Add MAX difficulty button to the difficulty modal
+{
+    const diffModal = document.getElementById('diffModal');
+    if(diffModal) {
+        const cancelBtn = diffModal.querySelector('[onclick*="closeDiffModal"]') || diffModal.querySelector('[onclick*="currentDifficulty"]');
+        if(cancelBtn) {
+            const maxBtn = document.createElement('button');
+            maxBtn.className = 'btn2';
+            maxBtn.style.cssText = 'min-width:200px;font-size:.8rem;border-color:#ff2d55;color:#ff2d55;background:rgba(255,45,85,.08)';
+            maxBtn.innerHTML = 'MAX <span style="font-size:.6rem;opacity:.7">Lv40+10 ×2.0 Full Skills+Items T0 REWARD</span>';
+            maxBtn.setAttribute('data-tip', 'Fully upgraded, fully prestiged enemies with best items and abilities. Win to choose a free Tier-0 unit!');
+            maxBtn.onclick = () => setDifficulty('max');
+            diffModal.insertBefore(maxBtn, cancelBtn);
+        }
+    }
 }
 
 function claimMaxReward(idx) {
@@ -7705,23 +7706,24 @@ toast('Content Expansion loaded!', 'gold');
 
 // MEGA PATCH v2.0 — Merged inline
 // MEGA PATCH — Runtime overrides applied after original code
-// FIX #0: CREDIT — "Game made by Sincere Smith, ShadenXa"
-  const homeScreen = document.getElementById('home');
-  if (!homeScreen) return;
-  // Add credit below the existing info text
-  let creditEl = document.querySelector('.home-credit');
-  if (!creditEl) {
-creditEl = document.createElement('div');
-creditEl.className = 'home-credit';
-creditEl.textContent = 'Game made by Sincere Smith, ShadenXa';
-homeScreen.appendChild(creditEl);
-  }
-  // Also update the home-sub or add after it
-  const homeSub = homeScreen.querySelector('.home-sub');
-  if (homeSub) {
-homeSub.insertAdjacentHTML('afterend',
-  '<div class="home-credit" style="margin-top:4px">Game made by Sincere Smith, ShadenXa</div>');
-  }
+// Add credit line — "Game made by Sincere Smith, ShadenXa"
+{
+    const homeScreen = document.getElementById('home');
+    if (homeScreen) {
+        let creditEl = document.querySelector('.home-credit');
+        if (!creditEl) {
+            creditEl = document.createElement('div');
+            creditEl.className = 'home-credit';
+            creditEl.textContent = 'Game made by Sincere Smith, ShadenXa';
+            homeScreen.appendChild(creditEl);
+        }
+        const homeSub = homeScreen.querySelector('.home-sub');
+        if (homeSub) {
+            homeSub.insertAdjacentHTML('afterend',
+                '<div class="home-credit" style="margin-top:4px">Game made by Sincere Smith, ShadenXa</div>');
+        }
+    }
+}
 
 // FIX #1: IMAGE PAGINATION — Render 100 images per page
 let _imgPage = 0;
@@ -10653,27 +10655,22 @@ TUTORIAL_STEPS.splice(14, 0, {
     action: () => { nav('home'); },
 });
 
-// 4. NEW "APEX" DIFFICULTY — Insane T0 teams, no auto-battle
 // Add APEX difficulty button to the difficulty modal
-const diffModal = document.getElementById('diffModal');
-if(!diffModal) return;
-
-// Find cancel button to insert before it
-const cancelBtn = diffModal.querySelector('[onclick*="closeDiffModal"]') || diffModal.querySelector('[onclick*="currentDifficulty"]') || diffModal.querySelector('.btn-sm:last-child');
-if(!cancelBtn) return;
-
-// Check if max button exists (from previous patch), add apex after it
-const existingMax = diffModal.querySelector('[onclick*="setDifficulty(\'max\')"]');
-
-const apexBtn = document.createElement('button');
-apexBtn.className = 'btn2';
-apexBtn.style.cssText = 'min-width:200px;font-size:.8rem;border-color:#ff0040;color:#ff0040;text-shadow:0 0 10px rgba(255,0,64,.3)';
-apexBtn.innerHTML = 'APEX <span style="font-size:.55rem;opacity:.7">T0 Only · +10 · Full Synergy · No Auto</span>';
-apexBtn.setAttribute('data-tip', 'ALL enemies are fully merged +10 Tier 0 units with perfect synergies, best items, and full skill loadouts. Auto-battle is DISABLED. Only for the truly insane.');
-apexBtn.onclick = () => setDifficulty('apex');
-
-// Insert before cancel
-diffModal.insertBefore(apexBtn, cancelBtn);
+{
+    const diffModal = document.getElementById('diffModal');
+    if(diffModal) {
+        const cancelBtn = diffModal.querySelector('[onclick*="closeDiffModal"]') || diffModal.querySelector('[onclick*="currentDifficulty"]') || diffModal.querySelector('.btn-sm:last-child');
+        if(cancelBtn) {
+            const apexBtn = document.createElement('button');
+            apexBtn.className = 'btn2';
+            apexBtn.style.cssText = 'min-width:200px;font-size:.8rem;border-color:#ff0040;color:#ff0040;text-shadow:0 0 10px rgba(255,0,64,.3)';
+            apexBtn.innerHTML = 'APEX <span style="font-size:.55rem;opacity:.7">T0 Only · +10 · Full Synergy · No Auto</span>';
+            apexBtn.setAttribute('data-tip', 'ALL enemies are fully merged +10 Tier 0 units with perfect synergies, best items, and full skill loadouts. Auto-battle is DISABLED. Only for the truly insane.');
+            apexBtn.onclick = () => setDifficulty('apex');
+            diffModal.insertBefore(apexBtn, cancelBtn);
+        }
+    }
+}
 
 // 5. DIFFICULTY SELECTION ON ALL MODES (including Campaign)
 // 6. CLEAR STATUS WITH DIFFICULTY TRACKING
@@ -12046,57 +12043,49 @@ for (var gi = 0; gi < _gameObjs.length; gi++) {
 // APEX TIER 0 — MEMORY LEAK FIX PACK
 // Visibility-based pause/resume is handled by the listener after MaestroV4 initialization.
 
-if (typeof _animElPool === 'undefined') return;
-
-var POOL_CAP = 50;
-
-// Periodic cleanup: remove pool entries whose src no longer
-// matches any image in S.images
-function cleanPool() {
-    if (!_animElPool || _animElPool.size <= POOL_CAP) return;
-    var validSrcs = new Set();
-    if (typeof S !== 'undefined' && S.images) {
-        S.images.forEach(function(img) { validSrcs.add(img.src); });
-    }
-    var toDelete = [];
-    _animElPool.forEach(function(el, src) {
-        if (!validSrcs.has(src)) toDelete.push(src);
-    });
-    toDelete.forEach(function(src) {
-        var el = _animElPool.get(src);
-        if (el && el.parentNode) el.parentNode.removeChild(el);
-        _animElPool.delete(src);
-    });
-    // If still over cap, evict oldest entries
-    while (_animElPool.size > POOL_CAP) {
-        var first = _animElPool.keys().next().value;
-        var el = _animElPool.get(first);
-        if (el && el.parentNode) el.parentNode.removeChild(el);
-        _animElPool.delete(first);
-    }
-}
-
-// Expose cleanPool for the consolidated wrapper to call
-window._cleanAnimPool = cleanPool;
-
-// Also run periodically
-setInterval(cleanPool, 30000);
-
-// now properly stop when leaving home screen and restart on nav('home') via source-level fix.
-
-var layer = document.getElementById('transLayer');
-if (!layer) return;
-
-// Observe for accumulated children
-var observer = new MutationObserver(function() {
-    if (layer.children.length > 5) {
-        // Something is piling up — force clear
-        while (layer.children.length > 2) {
-            layer.removeChild(layer.firstChild);
+// Animated image pool cleanup
+if (typeof _animElPool !== 'undefined') {
+    var POOL_CAP = 50;
+    function cleanPool() {
+        if (!_animElPool || _animElPool.size <= POOL_CAP) return;
+        var validSrcs = new Set();
+        if (typeof S !== 'undefined' && S.images) {
+            S.images.forEach(function(img) { validSrcs.add(img.src); });
+        }
+        var toDelete = [];
+        _animElPool.forEach(function(el, src) {
+            if (!validSrcs.has(src)) toDelete.push(src);
+        });
+        toDelete.forEach(function(src) {
+            var el = _animElPool.get(src);
+            if (el && el.parentNode) el.parentNode.removeChild(el);
+            _animElPool.delete(src);
+        });
+        while (_animElPool.size > POOL_CAP) {
+            var first = _animElPool.keys().next().value;
+            var el = _animElPool.get(first);
+            if (el && el.parentNode) el.parentNode.removeChild(el);
+            _animElPool.delete(first);
         }
     }
-});
-observer.observe(layer, { childList: true });
+    window._cleanAnimPool = cleanPool;
+    setInterval(cleanPool, 30000);
+}
+
+// Transition layer DOM cleanup
+{
+    var layer = document.getElementById('transLayer');
+    if (layer) {
+        var observer = new MutationObserver(function() {
+            if (layer.children.length > 5) {
+                while (layer.children.length > 2) {
+                    layer.removeChild(layer.firstChild);
+                }
+            }
+        });
+        observer.observe(layer, { childList: true });
+    }
+}
 
 setInterval(function() {
     // Clear any lingering forecast tooltip
