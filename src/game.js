@@ -1,0 +1,9892 @@
+// Apex Tier 0 — Consolidated Game Logic
+// Extracted from monolithic HTML, all script blocks concatenated
+
+/* ============================================================
+   APEX TIER 0 — Esports Tactical RPG Engine
+   All HTML/CSS/JS in one file. No external assets.
+   ============================================================ */
+
+// ═══ ZZFX MINI SYNTH ═══════════════════════════════════════
+const zzfx=(...p)=>{if(!S.soundOn)return;try{const a=zzfxCtx||(zzfxCtx=new(window.AudioContext||window.webkitAudioContext)),b=a.createBufferSource(),c=a.createBuffer(1,~~(a.sampleRate*.5),a.sampleRate),d=c.getChannelData(0);zzfxG(...p).forEach((v,i)=>d[i]=v);b.buffer=c;b.connect(a.destination);b.start();}catch(e){}};
+let zzfxCtx;
+const zzfxG=(vol=1,freq=220,attack=0,sustain=0,release=.1,shape=0,shapeCurve=1,slide=0,noise=0)=>{
+const sR=44100,len=~~(sR*(attack+sustain+release)),out=new Float32Array(len);
+let f=freq,t=0;
+for(let i=0;i<len;i++){
+const p=i/sR;let env;
+if(p<attack)env=p/attack;else if(p<attack+sustain)env=1;else env=1-(p-attack-sustain)/release;
+env=Math.max(0,env)*vol;f+=slide;t+=f/sR;
+let v;
+if(shape===0)v=Math.sin(t*Math.PI*2);
+else if(shape===1)v=(t%1<.5?1:-1);
+else if(shape===2)v=(t%1)*2-1;
+else v=Math.random()*2-1;
+v=Math.pow(Math.abs(v),shapeCurve)*Math.sign(v);
+if(noise)v+=Math.random()*noise*2-noise;
+out[i]=v*env*.3;
+}return out;};
+
+function sfx(type){
+if(!S.soundOn)return;
+try{if(zzfxCtx&&zzfxCtx.state==='suspended')zzfxCtx.resume();}catch(e){}
+const s={
+attack:()=>zzfx(.3,440,.01,.02,.08,1,1,10,.1),
+crit:()=>zzfx(.4,660,.01,.03,.1,2,1,20,.1),
+special:()=>{zzfx(.3,523,.02,.05,.15,0);setTimeout(()=>zzfx(.3,784,.02,.05,.2,0),80)},
+summon:()=>{zzfx(.2,220,.05,.1,.2,0);setTimeout(()=>zzfx(.2,440,.05,.1,.3,0),100)},
+victory:()=>{zzfx(.3,523,.03,.08,.2,0);setTimeout(()=>zzfx(.3,659,.03,.08,.2,0),120);setTimeout(()=>zzfx(.3,784,.03,.08,.3,0),240);if(bgm&&bgm.isPlaying){bgm.tempo=110;setTimeout(()=>{if(bgm)bgm.tempo=90;},3000);}},
+defeat:()=>zzfx(.3,180,.05,.2,.3,2,2,0,.05),
+heal:()=>{zzfx(.2,660,.02,.06,.12,0);setTimeout(()=>zzfx(.2,880,.02,.06,.15,0),60)},
+click:()=>zzfx(.1,800,.005,.01,.05,1),
+};
+(s[type]||s.click)();
+}
+
+
+// ═══ INFINITE PROCEDURAL MUSIC ENGINE (KH STYLE) ═══
+
+// ═══ CONFIG ═════════════════════════════════════════════════
+// Bug #51: HTML escape helper to prevent XSS via user-controlled names
+function esc(s){if(!s)return'';return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+
+const CFG={
+TEAM_SIZE:4,BASE_AP:50,PULL1:5,PULL10:40,PITY:50,MAX_PLUS:10,PLUS_PER_DUP:1,
+AI_DELAY:600,CELL:68,
+};
+
+const GRADES=['D','C','B','A','S','T0'];
+const GRADE_WEIGHTS={D:25,C:30,B:22,A:14,S:7,T0:2};
+const GRADE_MULT={D:0.8,C:1.0,B:1.2,A:1.45,S:1.75,T0:2.2};
+const GRADE_LABEL={D:'GRADE D',C:'GRADE C',B:'GRADE B',A:'GRADE A',S:'GRADE S',T0:'TIER 0'};
+const GRADE_COLOR={D:'#8e99a4',C:'#00e5ff',B:'#7c4dff',A:'#ff6b35',S:'#ffd700',T0:null};
+
+const WEAPON_TYPES=['Sword','Lance','Axe','LightMag','DarkMag','AnimaMag','Bow','Dagger'];
+const WEAPON_TRIANGLE={Sword:'Axe',Axe:'Lance',Lance:'Sword',LightMag:'DarkMag',DarkMag:'AnimaMag',AnimaMag:'LightMag'};
+
+// Weapon effects — randomly assigned to a unit's weapon (~25% chance each)
+const WEAPON_EFFECTS=[
+{id:'killing_edge',name:'Killing Edge',desc:'Boosts crit chance +7%; reduces Special CD by 1 per hit',weapons:['Sword','Axe','Lance']},
+{id:'brave_sword',name:'Brave Sword',desc:'Attacks twice in a row before enemy counterattack',weapons:['Sword','Axe']},
+{id:'wo_dao',name:'Wo Dao',desc:'+10 extra damage when Special activates',weapons:['Sword']},
+{id:'silver_bow',name:'Silver Bow',desc:'Bow attacks deal bonus damage vs armored units',weapons:['Bow']},
+{id:'rauðrblað',name:'Rauðrblað',desc:'Magic hits both DEF and RES (average)',weapons:['LightMag','DarkMag','AnimaMag']},
+];
+const WEAPON_COLORS={Sword:'#ef4444',Lance:'#3b82f6',Axe:'#22c55e',LightMag:'#fbbf24',DarkMag:'#8b5cf6',AnimaMag:'#06b6d4',Bow:'#f97316',Dagger:'#a1a1aa'};
+const MOVE_TYPES=['Infantry','Armored','Cavalry','Flying'];
+const MOVE_STATS={Infantry:{mov:2,label:'INF'},Armored:{mov:1,label:'ARM'},Cavalry:{mov:3,label:'CAV'},Flying:{mov:2,label:'FLY'}};
+
+// ═══ FACTION & CLASS SYNERGY SYSTEM ═════════════════════════
+const FACTIONS=['Infernal','Cyber','Mystic','Abyssal','Verdant','Celestial','Ironclad','Phantom'];
+const CLASSES=['Warden','Striker','Support','Duelist','Ravager','Sentinel','Trickster','Oracle'];
+// Synergy bonuses: triggered when N+ units share the same faction or class
+const FACTION_SYNERGIES={
+Infernal:{2:{desc:'+8 Burn Dmg',apply:(u)=>u._burnBonus=8},4:{desc:'All attacks inflict Burn',apply:(u)=>u._alwaysBurn=true}},
+Cyber:   {2:{desc:'+5 SPD',apply:(u)=>u.factionSpdBuff=(u.factionSpdBuff||0)+5},4:{desc:'+10 SPD, immune to freeze',apply:(u)=>{u.factionSpdBuff=(u.factionSpdBuff||0)+10;u._immuneFreeze=true;}}}, // Bug #39: use factionSpdBuff
+Mystic:  {2:{desc:'+6 RES',apply:(u)=>{u.res+=6;}},4:{desc:'Specials charge 1 faster',apply:(u)=>u.specialCharges=Math.max(0,(u.specialCharges||0)-1)}},
+Abyssal: {2:{desc:'+8 ATK',apply:(u)=>{u.atk+=8;}},4:{desc:'Crits deal 2× instead of 1.5×',apply:(u)=>u._megaCrit=true}},
+Verdant: {2:{desc:'Heals 8 HP/turn',apply:(u)=>{u._verdantHeal=8;}},4:{desc:'Forest gives +4 DEF/+4 ATK',apply:(u)=>{u._verdantForestAtk=4;u._verdantForestDef=4;}}},
+Celestial:{2:{desc:'+5 DEF/RES',apply:(u)=>{u.def+=5;u.res+=5;}},4:{desc:'Start turn with Shield active',apply:(u)=>u.shielded=true}},
+Ironclad:{2:{desc:'+10 DEF',apply:(u)=>{u.def+=10;}},4:{desc:'All attacks reduce incoming damage 20%',apply:(u)=>u._shieldPct=0.2}},
+Phantom: {2:{desc:'Ignore terrain penalties',apply:(u)=>{u._ignoreTerrainPenalty=true;}},4:{desc:'Can always counter regardless of range',apply:(u)=>u._distantCounter=true}},
+};
+const CLASS_SYNERGIES={
+Warden:  {2:{desc:'+6 DEF, fortify bonus ×2',apply:(u)=>{u.def+=6;}},3:{desc:'+6 DEF, allies in range get DEF+4',apply:(u)=>{u.def+=6;u._wardenAura=4;}}},
+Striker: {2:{desc:'+6 ATK when initiating',apply:(u)=>{u.atk+=6;}},3:{desc:'+6 ATK, always guaranteed follow-up',apply:(u)=>{u.atk+=6;u._guaranteedFollow=true;}}},
+Support: {2:{desc:'Assist range +1',apply:(u)=>{u._assistRange=(u._assistRange||1)+1;}},3:{desc:'Assist range +1, assists refresh unit',apply:(u)=>{u._assistRange=(u._assistRange||1)+1;u._assistRefresh=true;}}},
+Duelist: {2:{desc:'+5 SPD, +5 ATK when Solo',apply:(u)=>{u.spd+=5;u.atk+=5;}},3:{desc:'+5 SPD/ATK, double attacks deal +8',apply:(u)=>{u.spd+=5;u.atk+=5;u._doubleBonus=8;}}},
+Ravager: {2:{desc:'+10% crit rate',apply:(u)=>{u._bonusCrit=(u._bonusCrit||0)+0.1;}},3:{desc:'+10% crit, crits prevent overkill (1 HP min)',apply:(u)=>{u._bonusCrit=(u._bonusCrit||0)+0.1;u._critOverkill=true;}}},
+Sentinel:{2:{desc:'+8 DEF when defending',apply:(u)=>{u.def+=8;}},3:{desc:'+8 DEF, 50% chance to negate a hit',apply:(u)=>{u.def+=8;u._negateChance=0.5;}}},
+Trickster:{2:{desc:'50% chance to steal buffs after hit',apply:(u)=>{u._stealBuffs=0.5;}},3:{desc:'Steal buffs + gravity effect on all hits',apply:(u)=>{u._stealBuffs=0.5;u._gravityHit=true;}}},
+Oracle:  {2:{desc:'+4 to all stats',apply:(u)=>{u.atk+=4;u.def+=4;u.spd+=4;u.res+=4;u.mag+=4;}},3:{desc:'+4 all stats, units cannot be Panicked',apply:(u)=>{u.atk+=4;u.def+=4;u.spd+=4;u.res+=4;u.mag+=4;u._antiPanic=true;}}},
+};
+
+function assignFactionClass(u){
+// Deterministic from unit id and name hash
+const hash=(str)=>{let h=0;for(const c of str)h=(h*31+c.charCodeAt(0))&0xffffffff;return Math.abs(h);};
+const h=hash(u.id+u.name);
+u.faction=FACTIONS[h%FACTIONS.length];
+u.unitClass=CLASSES[(h>>4)%CLASSES.length];
+}
+
+// Apply active synergies to a team of live battle units
+function applyTeamSynergies(units){
+if(!units||!units.length)return;
+// Count factions and classes
+const fCount={},cCount={};
+units.forEach(u=>{
+if(u.faction)fCount[u.faction]=(fCount[u.faction]||0)+1;
+if(u.unitClass)cCount[u.unitClass]=(cCount[u.unitClass]||0)+1;
+});
+// Apply faction synergies
+units.forEach(u=>{
+if(!u.faction)return;
+const syn=FACTION_SYNERGIES[u.faction];if(!syn)return;
+const n=fCount[u.faction];
+if(n>=4&&syn[4])syn[4].apply(u);
+else if(n>=2&&syn[2])syn[2].apply(u);
+});
+// Bug #23: Apply class synergies
+units.forEach(u=>{
+if(!u.unitClass)return;
+const syn=CLASS_SYNERGIES[u.unitClass];if(!syn)return;
+const n=cCount[u.unitClass];
+if(n>=3&&syn[3]&&syn[3].apply)syn[3].apply(u);
+else if(n>=2&&syn[2]&&syn[2].apply)syn[2].apply(u);
+});
+// Warden aura: apply DEF bonus to all allied units from wardens with _wardenAura
+units.forEach(w=>{
+if(w._wardenAura)units.forEach(u=>{if(u!==w)u.def+=w._wardenAura;});
+});
+}
+
+// Get synergy summary string for display
+function getSynergySummary(teamIndices){
+const units=teamIndices.map(i=>S.roster[i]).filter(Boolean);
+if(!units.length)return'';
+const fCount={},cCount={};
+units.forEach(u=>{
+if(u.faction)fCount[u.faction]=(fCount[u.faction]||0)+1;
+if(u.unitClass)cCount[u.unitClass]=(cCount[u.unitClass]||0)+1;
+});
+const parts=[];
+Object.entries(fCount).forEach(([f,n])=>{
+const syn=FACTION_SYNERGIES[f];if(syn&&n>=2)parts.push(`${f}×${n}${n>=4?'★':''}${syn[n>=4?4:2]?': '+syn[n>=4?4:2].desc:''}`);
+});
+Object.entries(cCount).forEach(([c,n])=>{
+const syn=CLASS_SYNERGIES[c];if(syn&&n>=2)parts.push(`${c}×${n}${n>=3?'★':''}`);
+});
+return parts.join(' | ');
+}
+
+// ROLES map weapon affinities
+const ROLES=[
+{name:'Swordmaster',weapon:'Sword',move:'Infantry',bias:{atk:15,spd:20,def:-5}},
+{name:'Knight',weapon:'Lance',move:'Armored',bias:{def:25,hp:20,spd:-15,atk:5}},
+{name:'Berserker',weapon:'Axe',move:'Infantry',bias:{atk:25,hp:10,def:-8,spd:5}},
+{name:'Paladin',weapon:'Lance',move:'Cavalry',bias:{def:12,atk:10,hp:8}},
+{name:'Sage',weapon:'AnimaMag',move:'Infantry',bias:{mag:28,res:12,spd:5,hp:-8}},
+{name:'Bishop',weapon:'LightMag',move:'Infantry',bias:{mag:18,res:20,hp:10}},
+{name:'Druid',weapon:'DarkMag',move:'Infantry',bias:{mag:24,res:15,spd:-5}},
+{name:'Sniper',weapon:'Bow',move:'Infantry',bias:{atk:22,spd:12,def:-8}},
+{name:'Assassin',weapon:'Dagger',move:'Infantry',bias:{spd:28,atk:10,def:-12}},
+{name:'Wyvern',weapon:'Axe',move:'Flying',bias:{atk:18,def:15,spd:5}},
+{name:'Pegasus',weapon:'Lance',move:'Flying',bias:{spd:22,res:15,def:-5}},
+{name:'Cavalier',weapon:'Sword',move:'Cavalry',bias:{atk:12,spd:10,hp:5}},
+];
+
+// ═══ MODULAR ABILITY GENERATOR ═════════════════════════════
+const AB_TRIGGERS=['TurnStart','OnAttack','OnDefend','OnKill','OnMove'];
+const AB_CONDITIONS=['Always','HP<50%','HP>75%','IsArmored','InForest','Speed>Target','IsSolo','EnemyCount>=3','AdjacentAlly'];
+const AB_EFFECTS=[
+{name:'Brave',desc:'Attacks twice',tag:'brave',val:2},
+{name:'Vantage',desc:'Counters first when HP<75%',tag:'vantage',val:0},
+{name:'Push',desc:'Pushes target 1 tile after combat',tag:'push',val:1},
+{name:'Poison',desc:'Inflicts 5 damage after combat',tag:'poison',val:5},
+{name:'Burn',desc:'Inflicts 7 damage after combat',tag:'burn',val:7},
+{name:'Freeze',desc:'Target cannot move next turn',tag:'freeze',val:0},
+{name:'Panic',desc:'Reverses target buffs',tag:'panic',val:0},
+{name:'ATK+6',desc:'Grants ATK+6 during combat',tag:'buff_atk',val:6},
+{name:'DEF+6',desc:'Grants DEF+6 during combat',tag:'buff_def',val:6},
+{name:'SPD+6',desc:'Grants SPD+6 during combat',tag:'buff_spd',val:6},
+{name:'Heal 7',desc:'Restores 7 HP',tag:'heal',val:7},
+{name:'Guard',desc:'Reduces damage by 30%',tag:'guard',val:.3},
+{name:'Wrath',desc:'+10 damage when HP<50%',tag:'wrath',val:10},
+{name:'Desperation',desc:'Follow-up attacks before counter if HP<75%',tag:'desperation',val:0},
+];
+
+const ACTIVE_SPECIALS=[
+{name:'Dragon Fang',desc:'+50% damage',effect:'dmg_boost',val:.5,cd:4},
+{name:'Moonbow',desc:'Pierces 30% of DEF',effect:'def_pierce',val:.3,cd:2},
+{name:'Blazing Wind',desc:'AoE 50% damage to adjacent',effect:'aoe',val:.5,cd:4},
+{name:'Daylight',desc:'Heals 30% max HP',effect:'heal_self',val:.3,cd:3},
+{name:'Bonfire',desc:'+50% own DEF as damage',effect:'def_to_dmg',val:.5,cd:3},
+{name:'Iceberg',desc:'+50% own RES as damage',effect:'res_to_dmg',val:.5,cd:3},
+{name:'Aether',desc:'+30% dmg, heals 50% dealt',effect:'lifesteal',val:.5,cd:5},
+{name:'Glimmer',desc:'+50% damage burst',effect:'dmg_boost',val:.5,cd:2},
+{name:'Galeforce',desc:'Extra action after combat',effect:'extra_action',val:0,cd:5},
+{name:'Luna',desc:'Ignores 50% DEF',effect:'def_ignore',val:.5,cd:3},
+{name:'Reprisal',desc:'+dmg per HP missing',effect:'lowHp_boost',val:.3,cd:2},
+{name:'Sacred Cowl',desc:'Halves next damage taken',effect:'shield',val:.5,cd:3},
+{name:'Sol',desc:'+50% dmg, heal 50% dealt',effect:'lifesteal',val:.5,cd:3},
+{name:'Radiant Aura',desc:'Heals nearby allies 12 HP',effect:'aura_heal',val:12,cd:4},
+];
+
+function generatePassive(){
+const trigger=AB_TRIGGERS[~~(Math.random()*AB_TRIGGERS.length)];
+const cond=AB_CONDITIONS[~~(Math.random()*AB_CONDITIONS.length)];
+const eff=AB_EFFECTS[~~(Math.random()*AB_EFFECTS.length)];
+const name=`${eff.name} (${trigger})`;
+const desc=`${trigger}: ${cond==='Always'?'':cond+' → '}${eff.desc}`;
+return{name,desc,trigger,condition:cond,effect:eff};
+}
+
+// ═══ C-SKILLS ═══════════════════════════════════════════════
+const C_SKILLS=[
+{id:'hone_atk',name:'Hone ATK 3',slot:'skillC',desc:'Grants adjacent allies ATK+4 at start of turn',trigger:'TurnStart',condition:'Always',effect:{tag:'buff_atk',val:4}},
+{id:'fortify_def',name:'Fortify DEF 3',slot:'skillC',desc:'Grants adjacent allies DEF+4 at start of turn',trigger:'TurnStart',condition:'Always',effect:{tag:'buff_def',val:4}},
+{id:'spur_spd',name:'Spur SPD 3',slot:'skillC',desc:'Grants adjacent ally SPD+3 during combat',trigger:'Aura',condition:'Always',effect:{tag:'buff_spd',val:3}},
+{id:'drive_atk',name:'Drive ATK 2',slot:'skillC',desc:'Grants nearby allies ATK+2 during combat',trigger:'Aura',condition:'Always',effect:{tag:'buff_atk',val:2}},
+{id:'threaten_spd',name:'Threaten SPD 3',slot:'skillC',desc:'Inflicts SPD-4 on foes within 2 spaces at start of turn',trigger:'TurnStart',condition:'Always',effect:{tag:'threat_spd',val:4}},
+{id:'hone_spd',name:'Hone SPD 3',slot:'skillC',desc:'Grants adjacent allies SPD+4 at start of turn',trigger:'TurnStart',condition:'Always',effect:{tag:'buff_spd',val:4}},
+{id:'fortify_res',name:'Fortify RES 3',slot:'skillC',desc:'Grants adjacent allies RES+4 at start of turn',trigger:'TurnStart',condition:'Always',effect:{tag:'buff_res',val:4}},
+{id:'goad_cav',name:'Goad Cavalry',slot:'skillC',desc:'Grants Cavalry allies ATK/SPD+4 during combat',trigger:'Aura',condition:'IsCavalry',effect:{tag:'spectrum',val:4}},
+{id:'ward_cav',name:'Ward Cavalry',slot:'skillC',desc:'Grants Cavalry allies DEF/RES+4 during combat',trigger:'Aura',condition:'IsCavalry',effect:{tag:'buff_def',val:4}},
+];
+
+// ═══ SACRED SEALS ═══════════════════════════════════════════
+const SEAL_POOL=[
+{id:'atk1',name:'ATK+1 Seal',desc:'Grants ATK+1',stat:'atk',val:1},
+{id:'def1',name:'DEF+1 Seal',desc:'Grants DEF+1',stat:'def',val:1},
+{id:'spd1',name:'SPD+1 Seal',desc:'Grants SPD+1',stat:'spd',val:1},
+{id:'hp3',name:'HP+3 Seal',desc:'Grants HP+3',stat:'maxHp',val:3},
+{id:'res1',name:'RES+1 Seal',desc:'Grants RES+1',stat:'res',val:1},
+{id:'atk3',name:'ATK+3 Seal',desc:'Grants ATK+3',stat:'atk',val:3},
+{id:'spd3',name:'SPD+3 Seal',desc:'Grants SPD+3',stat:'spd',val:3},
+];
+
+// ═══ ORB COLORS ═════════════════════════════════════════════
+const ORB_COLORS={
+Red:{weapons:['Sword','LightMag','Bow'],css:'#ef4444'},
+Blue:{weapons:['Lance','AnimaMag'],css:'#3b82f6'},
+Green:{weapons:['Axe','DarkMag'],css:'#22c55e'},
+Colorless:{weapons:['Dagger'],css:'#a1a1aa'},
+};
+
+function getOrbColor(weapon){
+for(const[col,data]of Object.entries(ORB_COLORS))if(data.weapons.includes(weapon))return col;
+return'Colorless';
+}
+
+// ═══ TERRAIN ════════════════════════════════════════════════
+const TERRAINS={
+plain:  {c1:'#1a2a1a',c2:'#223322',label:'',movCost:1,def:0,atk:0,name:'Plain',passable:1},
+forest: {c1:'#0f1f0f',c2:'#1a301a',label:'F',movCost:2,def:2,atk:0,name:'Forest',passable:1},
+water:  {c1:'#081428',c2:'#0f1e3a',label:'~',movCost:99,def:-1,atk:0,name:'Water',passable:0},
+fort:   {c1:'#1e1e1e',c2:'#2a2a2a',label:'+',movCost:1,def:3,atk:0,name:'Fort',healPct:.2,passable:1},
+lava:   {c1:'#2a0800',c2:'#3a1000',label:'!',movCost:2,def:-2,atk:0,name:'Lava',dmg:5,passable:1},
+wall:   {c1:'#2a2220',c2:'#3a3230',label:'#',movCost:99,def:0,atk:0,name:'Wall',hp:20,passable:0},
+peak:   {c1:'#221a12',c2:'#342a1a',label:'^',movCost:2,def:1,atk:2,name:'Peak',passable:1},
+rough:  {c1:'#1a1a10',c2:'#2a2a18',label:'.',movCost:2,def:0,atk:0,name:'Rough',passable:1},
+trench: {c1:'#1a1510',c2:'#2a2018',label:'T',movCost:2,def:4,atk:-1,name:'Trench',passable:1},
+castle: {c1:'#1a1a22',c2:'#2a2a30',label:'C',movCost:1,def:5,atk:1,name:'Castle',healPct:.1,passable:1},
+void:   {c1:'#000000',c2:'#000000',label:' ',movCost:99,def:0,atk:0,name:'Void',passable:0},
+lightning_trap:{c1:'#2a2208',c2:'#3a3210',label:'⚡',movCost:1,def:0,atk:0,name:'Lightning Trap',passable:1},
+gravity_trap:  {c1:'#180a28',c2:'#281438',label:'↓',movCost:1,def:0,atk:0,name:'Gravity Trap',passable:1},
+};
+
+// ═══ GRAND HERO BATTLE DATA ══════════════════════════════════
+// Each entry is a hand-crafted encounter. enemyMult scales all stats.
+// terrain: optional override tile type for a spot
+const GHB_DATA=[
+{
+id:'ghb_0',name:'The Immovable Wall',day:0,
+desc:'A fortress knight with 50 DEF and two healers behind him. Siege the choke point.',
+apReward:35,enemyCount:3,enemyMult:2.2,
+boss:{role:'Knight',weapon:'Lance',moveType:'Armored',statBoost:{def:25,maxHp:30},
+skillB:{id:'wary_fighter',name:'Wary Fighter 3',slot:'skillB',desc:'Cannot double when HP>50%',trigger:'OnDefend',condition:'HP>75%',effect:{tag:'guard',val:0.1}},
+special:{name:'Pavise',desc:'Reduces damage by 30%',cd:3,effect:'shield',val:0.3}},
+},
+{
+id:'ghb_1',name:'The Phantom Archer',day:1,
+desc:'A ranged assassin that silences any unit that gets close. Keep your distance.',
+apReward:35,enemyCount:3,enemyMult:2.0,
+boss:{role:'Ranger',weapon:'Bow',moveType:'Infantry',statBoost:{spd:20,atk:15},
+skillA:{id:'life_death',name:'Life and Death 3',slot:'skillA',desc:'ATK/SPD+6, DEF/RES-5',trigger:'OnAttack',condition:'Always',effect:{tag:'buff_atk',val:6}},
+skillB:{id:'desperation3',name:'Desperation 3',slot:'skillB',desc:'Follow-up before counter when HP<75%',trigger:'OnAttack',condition:'HP<75%',effect:{tag:'desperation',val:0}}},
+},
+{
+id:'ghb_2',name:'The Dancing Flame',day:2,
+desc:'A sword dancer that buffs the entire team before striking. Kill the dancer first.',
+apReward:40,enemyCount:4,enemyMult:1.8,
+boss:{role:'Dancer',weapon:'Sword',moveType:'Infantry',statBoost:{spd:15,atk:10},
+assist:{name:'Dance',desc:'Refresh target ally',range:1,effect:'refresh'},
+skillA:{id:'fury4',name:'Fury 4',slot:'skillA',desc:'All stats +4',trigger:'OnAttack',condition:'Always',effect:{tag:'spectrum',val:4}}},
+},
+{
+id:'ghb_3',name:'The Gravity Mage',day:3,
+desc:'A mage who renders any unit caught in her range immobile. Stay spread out.',
+apReward:40,enemyCount:3,enemyMult:2.0,
+boss:{role:'Mage',weapon:'AnimaMag',moveType:'Infantry',statBoost:{mag:20,res:10},
+skillC:{id:'gravity3',name:'Gravity 3',slot:'skillC',desc:'After combat: foe cannot move',trigger:'OnAttack',condition:'Always',effect:{tag:'gravity',val:0}},
+special:{name:'Glacies',desc:'Deals RES-based bonus damage',cd:4,effect:'res_to_dmg',val:0.8}},
+},
+{
+id:'ghb_4',name:'The Panic Tyrant',day:4,
+desc:'Converts all your hard-earned buffs into penalties. Never let him attack first.',
+apReward:45,enemyCount:3,enemyMult:2.1,
+boss:{role:'Cavalier',weapon:'Axe',moveType:'Cavalry',statBoost:{atk:18,def:10},
+skillC:{id:'panic3',name:'Panic 3',slot:'skillC',desc:'After combat: foe buffs become penalties',trigger:'OnAttack',condition:'Always',effect:{tag:'panic',val:0}},
+skillA:{id:'triangle_adept3',name:'Triangle Adept 3',slot:'skillA',desc:'Weapon advantage ±40%',trigger:'OnAttack',condition:'Always',effect:{tag:'triangle_adept',val:0}}},
+},
+{
+id:'ghb_5',name:'The Vantage Duelist',day:5,
+desc:'When wounded, strikes first before you can even blink. Finish him in one hit.',
+apReward:45,enemyCount:3,enemyMult:2.3,
+boss:{role:'Hero',weapon:'Sword',moveType:'Infantry',statBoost:{atk:22,spd:18},
+skillB:{id:'vantage3',name:'Vantage 3',slot:'skillB',desc:'Counterattack first when HP<75%',trigger:'OnDefend',condition:'HP<75%',effect:{tag:'vantage',val:0}},
+skillA:{id:'swift_sparrow3',name:'Swift Sparrow 3',slot:'skillA',desc:'ATK+6/SPD+7 when initiating',trigger:'OnAttack',condition:'Always',effect:{tag:'buff_atk',val:6}}},
+},
+{
+id:'ghb_6',name:'The Brazen Armored Boss',day:6,
+desc:'Full-HP defense is impenetrable. Whittle her down, then strike with magic.',
+apReward:50,enemyCount:4,enemyMult:2.4,
+boss:{role:'Baron',weapon:'Lance',moveType:'Armored',statBoost:{def:30,maxHp:40,res:15},
+skillB:{id:'bold_fighter3',name:'Bold Fighter 3',slot:'skillB',desc:'Guaranteed follow-up when armored',trigger:'OnAttack',condition:'IsArmored',effect:{tag:'brave',val:0}},
+skillA:{id:'steady_breath',name:'Steady Breath',slot:'skillA',desc:'DEF+4 when foe initiates',trigger:'OnDefend',condition:'Always',effect:{tag:'buff_def',val:4}},
+special:{name:'Aether',desc:'Heals half damage dealt',cd:5,effect:'lifesteal',val:0.5}},
+},
+];
+
+// ═══ ELO / LADDER ═══════════════════════════════════════════
+const ELO_RANKS=[
+{name:'IRON',min:0,color:'#8e99a4'},
+{name:'BRONZE',min:300,color:'#cd7f32'},
+{name:'SILVER',min:600,color:'#c0c0c0'},
+{name:'GOLD',min:1000,color:'#ffd700'},
+{name:'PLATINUM',min:1500,color:'#00e5ff'},
+{name:'DIAMOND',min:2000,color:'#7c4dff'},
+{name:'TIER 0',min:2500,color:'#ff2d55'},
+];
+
+function getEloRank(elo){
+let r=ELO_RANKS[0];
+for(const rank of ELO_RANKS)if(elo>=rank.min)r=rank;
+return r;
+}
+
+// ═══ CAMPAIGN ═══════════════════════════════════════════════
+const CAMPAIGN=[
+{id:1,name:'First Steps',desc:'Learn the basics of combat.',enemyCount:2,enemyMult:.6,
+dialog:[{name:'Commander',text:'Welcome, recruit. Today we test your mettle on the training grounds. Select your units and engage the dummies.'},{name:'Commander',text:'Remember: move first, then attack. Use terrain to your advantage.'}]},
+{id:2,name:'The Forest Ambush',desc:'Enemy scouts lurk in the woods.',enemyCount:3,enemyMult:.8,terrain:'forest',
+dialog:[{name:'Scout',text:'Enemy movement detected in the forest ahead. They have the terrain advantage.'},{name:'Commander',text:'Use the weapon triangle. Swords beat Axes, Axes beat Lances, Lances beat Swords.'}]},
+{id:3,name:'Bridge Defense',desc:'Hold the bridge against cavalry.',enemyCount:4,enemyMult:1.0,terrain:'bridge',
+dialog:[{name:'Commander',text:'Cavalry incoming! Remember, they cannot cross rough terrain. Use choke points!'},{name:'Scout',text:'Flying units bypass terrain. Watch the skies.'}]},
+{id:4,name:'The Dark Tower',desc:'Face the dark mages.',enemyCount:4,enemyMult:1.2,terrain:'tower',
+dialog:[{name:'Sage',text:'Dark magic ahead. Light magic has the advantage here.'},{name:'Commander',text:'Zone of Control! Enemies slow your movement when adjacent. Plan your approach.'}]},
+{id:5,name:'APEX Challenge',desc:'The ultimate test. Prove you are Tier 0.',enemyCount:5,enemyMult:1.6,terrain:'apex',
+dialog:[{name:'???',text:'So you\'ve come. Let us see if you deserve the title... TIER 0.'},{name:'???',text:'No mercy. No retreating. Only the apex survives.'}]},
+];
+
+// ═══ GAME STATE ═════════════════════════════════════════════
+let S={
+ap:CFG.BASE_AP,pullCount:0,
+roster:[],team:[],images:[],
+teamPresets:[null,null,null,null,null], // 5 named team loadouts
+activePreset:0,
+elo:0,wins:0,totalBattles:0,
+soundOn:false,forecastOn:true,
+campaignDone:[],
+shards:0,
+banners:[],activeBannerId:null,seals:[],
+trainingFloor:1,arenaScore:0,arenaWeek:0,
+loginStreak:0,lastLoginDate:'',
+quests:{daily:[],story:[],lastDailyDate:''},questProgress:{},
+ghbCleared:[],
+gachaSession:null,
+currentBattleMode:'ladder',currentBattleConfig:null,currentDifficulty:'normal',
+achievements:[],compendium:[],
+apexTokens:0,apexMeter:0,profileTitle:'Rookie',unlockedTitles:['Rookie'],
+};
+let uid=0;
+let sortMode='grade';
+let batchMode=false;
+let batchSelected=new Set();
+let modalIdx=-1;
+
+// ═══ PROCEDURAL PLACEHOLDERS ════════════════════════════════
+const PLACEHOLDERS=[
+{name:'Crimson Blade',hue:0},{name:'Azure Lance',hue:210},{name:'Verdant Axe',hue:120},
+{name:'Solar Sage',hue:45},{name:'Shadow Druid',hue:270},{name:'Storm Sniper',hue:190},
+{name:'Iron Knight',hue:30},{name:'Wind Pegasus',hue:160},
+];
+
+function drawPlaceholder(canvas,hue,sz){
+const c=canvas,ctx=c.getContext('2d');
+c.width=c.height=sz;
+const g=ctx.createRadialGradient(sz*.35,sz*.3,sz*.1,sz/2,sz/2,sz/2);
+g.addColorStop(0,`hsl(${hue},70%,60%)`);g.addColorStop(.6,`hsl(${hue},60%,35%)`);g.addColorStop(1,`hsl(${hue},50%,15%)`);
+ctx.fillStyle=g;ctx.beginPath();ctx.arc(sz/2,sz/2,sz/2-1,0,Math.PI*2);ctx.fill();
+// Inner pattern
+ctx.strokeStyle=`hsla(${hue},80%,70%,.3)`;ctx.lineWidth=2;
+for(let i=0;i<3;i++){ctx.beginPath();ctx.arc(sz/2,sz/2,sz*.15+i*sz*.1,0,Math.PI*2);ctx.stroke();}
+// Center diamond
+ctx.fillStyle=`hsl(${hue},80%,75%)`;ctx.save();ctx.translate(sz/2,sz/2);ctx.rotate(Math.PI/4);ctx.fillRect(-sz*.08,-sz*.08,sz*.16,sz*.16);ctx.restore();
+}
+
+function makePlaceholderSrc(hue){
+const c=document.createElement('canvas');drawPlaceholder(c,hue,128);return c.toDataURL('image/png');
+}
+
+function initPlaceholders(){
+PLACEHOLDERS.forEach(p=>{
+if(!S.images.find(i=>i.name===p.name))
+S.images.push({src:makePlaceholderSrc(p.hue),name:p.name,isDefault:true,hue:p.hue});
+});
+}
+
+// ═══ FORWARD DECLARATIONS (Bug #5: prevent ReferenceError from hoisting) ═══
+// ASSIST_SKILLS, LEARNABLE_SKILLS, EXTRA_SKILLS defined later but referenced early
+const ASSIST_SKILLS=[
+{id:'reposition',name:'Reposition',desc:'Moves target ally to opposite side of unit',type:'movement'},
+{id:'drawback',name:'Draw Back',desc:'Unit moves 1 space away from target ally, pulling ally along',type:'movement'},
+{id:'smite',name:'Smite',desc:'Pushes target ally 2 spaces away from unit',type:'movement'},
+{id:'dance',name:'Dance',desc:'Grants another action to target ally (user cannot act again)',type:'refresh'},
+{id:'sing',name:'Sing',desc:'Grants another action to target ally (user cannot act again)',type:'refresh'},
+{id:'rally_atk',name:'Rally ATK',desc:'Grants ATK+4 to target ally for this turn',type:'buff'},
+{id:'rally_spd',name:'Rally SPD',desc:'Grants SPD+4 to target ally for this turn',type:'buff'},
+{id:'heal',name:'Heal',desc:'Restores 10 HP to target ally',type:'heal'},
+{id:'physic',name:'Physic',desc:'Restores 8 HP to target ally at range 2',type:'heal'},
+{id:'shove',name:'Shove',desc:'Pushes target ally 1 space away',type:'movement'},
+];
+
+// ═══ UNIT CREATION ══════════════════════════════════════════
+function rollGrade(guaranteeHigh=false){
+if(S.pullCount>=CFG.PITY){S.pullCount=0;return Math.random()<.15?'T0':Math.random()<.4?'S':'A';}
+if(guaranteeHigh){S.pullCount=0;return Math.random()<.2?'T0':Math.random()<.5?'S':'A';} // 10-pull guarantee resets pity
+const r=Math.random()*100;let acc=0;
+for(const g of GRADES){acc+=GRADE_WEIGHTS[g];if(r<acc)return g;}
+return'D';
+}
+
+    function createUnit(src, name, overrideGrade) {
+
+        // INJECT VARIETY: Pick skills from the massive expansion ABILITY_DB (200 skills)
+        // Give A/S/T0 units a 40% chance to start with a Rare ability
+        if(typeof ABILITY_DB !== 'undefined' && ['A','S','T0'].includes(u.grade) && Math.random() < 0.4) {
+            const rareAbilities = ABILITY_DB.filter(a => ['A','S','T0'].includes(a.rarity));
+            if(rareAbilities.length) {
+                const randAb = rareAbilities[~~(Math.random() * rareAbilities.length)];
+                const slot = ['skillA','skillB','skillC'][~~(Math.random()*3)];
+                u[slot] = {
+                    name: randAb.name,
+                    desc: randAb.desc,
+                    trigger: randAb.trigger,
+                    condition: randAb.condition,
+                    effect: randAb.effect
+                };
+            }
+        }
+
+        // GENERATE PROCEDURAL WEAPON (The "Prf" System)
+        // 30% chance for regular units, 100% for T0 units
+        if(u.grade === 'T0' || Math.random() < 0.3) {
+            const prefix = W_PREFIXES[~~(Math.random() * W_PREFIXES.length)];
+            const suffix = W_SUFFIXES[~~(Math.random() * W_SUFFIXES.length)];
+            const weaponBase = u.weapon.replace('Mag', ' Tome');
+            const weaponName = `${prefix} ${weaponBase} ${suffix}`;
+
+            // Apply random stat bump from the weapon
+            const statBump = ['atk','spd','def','res'][~~(Math.random()*4)];
+            u.baseStat[statBump] += 3;
+            u[statBump] += 3;
+
+            // Set the weapon name
+            u.weaponEffectName = weaponName;
+
+            // Attach a random ability from ABILITY_DB as the weapon's inherent effect
+            if(typeof ABILITY_DB !== 'undefined' && ABILITY_DB.length) {
+                const effectSource = ABILITY_DB[~~(Math.random() * ABILITY_DB.length)];
+                u.weaponEffect = effectSource.id || 'prf_weapon';
+                u.passives.push({
+                    name: '\u2694 ' + weaponName,
+                    desc: `Signature weapon. ${effectSource.desc}`,
+                    trigger: effectSource.trigger,
+                    condition: effectSource.condition,
+                    effect: effectSource.effect
+                });
+            }
+        }
+
+        // Rebuild passives list to include weapon passive and updated skill slots
+        u.passives = [u.skillA, u.skillB, u.skillC, u.skillS, ...u.passives.filter(p => p && p.name && p.name.startsWith('\u2694'))].filter(Boolean);
+
+        return u;
+    };
+
+function applyLevel(unit){
+const bs=unit.baseStat||{hp:unit.maxHp,atk:unit.atk,def:unit.def,mag:unit.mag,res:unit.res,spd:unit.spd};
+const bn=unit.bonusStats||{hp:0,atk:0,def:0,mag:0,res:0,spd:0}; // Bug #8: shard bonuses
+unit.maxHp=bs.hp+Math.floor((unit.level-1)*unit.growthRates.hp/100)+(bn.hp||0);
+unit.atk=bs.atk+Math.floor((unit.level-1)*unit.growthRates.atk/100)+(bn.atk||0);
+unit.def=bs.def+Math.floor((unit.level-1)*unit.growthRates.def/100)+(bn.def||0);
+unit.mag=bs.mag+Math.floor((unit.level-1)*unit.growthRates.mag/100)+(bn.mag||0);
+unit.res=bs.res+Math.floor((unit.level-1)*unit.growthRates.res/100)+(bn.res||0);
+unit.spd=bs.spd+Math.floor((unit.level-1)*unit.growthRates.spd/100)+(bn.spd||0);
+}
+
+function gainExp(u,amt){
+if(!u||u.level>=40)return;
+u.exp=(u.exp||0)+amt;
+// Bug #25: while loop to allow multi-level gains from large EXP
+let threshold=Math.floor(100*Math.pow(u.level,1.5));
+while(u.exp>=threshold&&u.level<40){
+u.exp-=threshold;u.level++;
+applyLevel(u);
+u.sp=(u.sp||0)+50;
+bLog(`${u.name} reached Level ${u.level}!`,'spec');
+sfx('victory');
+trackQuest('levelups');
+threshold=Math.floor(100*Math.pow(u.level,1.5));
+}
+}
+
+function awardSP(u,amt){if(u)u.sp=(u.sp||0)+amt;}
+
+// ═══ PROCEDURAL CANVAS DRAWING ══════════════════════════════
+function drawUnitPortrait(canvas,unit,sz){
+const c=canvas,ctx=c.getContext('2d');
+c.width=c.height=sz;
+// Try drawing user image
+if(unit.img&&unit.img.complete&&unit.img.naturalWidth>0){
+ctx.save();ctx.beginPath();ctx.arc(sz/2,sz/2,sz/2-2,0,Math.PI*2);ctx.clip();
+ctx.drawImage(unit.img,0,0,sz,sz);ctx.restore();
+}else{
+// Procedural portrait
+const hue=unit.hue||((unit.id*47)%360);
+drawPlaceholder(canvas,hue,sz);
+}
+// Grade border
+if(unit.grade==='T0'){
+const time=Date.now()*.002;
+for(let i=0;i<6;i++){
+const a=i/6*Math.PI*2+time;
+const hue2=i*60;
+ctx.strokeStyle=`hsl(${hue2},100%,60%)`;ctx.lineWidth=2;ctx.globalAlpha=.6;
+ctx.beginPath();ctx.arc(sz/2,sz/2,sz/2-1,a,a+Math.PI/3);ctx.stroke();
+}ctx.globalAlpha=1;
+}else{
+ctx.strokeStyle=GRADE_COLOR[unit.grade]||'#8e99a4';ctx.lineWidth=2;
+ctx.beginPath();ctx.arc(sz/2,sz/2,sz/2-1,0,Math.PI*2);ctx.stroke();
+}
+}
+
+// ═══ BACKGROUND EFFECT ══════════════════════════════════════
+(function initBG(){
+const c=document.getElementById('bgCanvas');
+const ctx=c.getContext('2d');
+c.width=window.innerWidth;c.height=window.innerHeight;
+const stars=Array.from({length:80},()=>({x:Math.random()*c.width,y:Math.random()*c.height,r:.3+Math.random()*1.5,s:.5+Math.random()*2,a:Math.random()}));
+function draw(){
+requestAnimationFrame(draw);
+if(document.hidden||!document.getElementById('home').classList.contains('active'))return;
+ctx.fillStyle='rgba(6,8,14,.15)';ctx.fillRect(0,0,c.width,c.height);
+stars.forEach(s=>{s.a+=s.s*.008;ctx.fillStyle=`rgba(200,210,240,${.1+Math.sin(s.a)*.35})`;ctx.beginPath();ctx.arc(s.x,s.y,s.r,0,Math.PI*2);ctx.fill();});
+}draw();
+window.addEventListener('resize',()=>{c.width=window.innerWidth;c.height=window.innerHeight;});
+})();
+
+// Draw home emblem
+(function drawHomeEmblem(){
+const c=document.getElementById('homeEmblem'),ctx=c.getContext('2d');
+let t=0;
+function draw(){
+requestAnimationFrame(draw);
+if(document.hidden||!document.getElementById('home').classList.contains('active'))return;
+ctx.clearRect(0,0,240,240);
+t+=.015;
+// Outer ring
+ctx.strokeStyle=`rgba(255,45,85,${.3+Math.sin(t)*.2})`;ctx.lineWidth=2;
+ctx.beginPath();ctx.arc(120,120,110,0,Math.PI*2);ctx.stroke();
+// Inner ring
+ctx.save();ctx.translate(120,120);ctx.rotate(t*.5);
+ctx.strokeStyle='rgba(255,215,0,.2)';ctx.lineWidth=1.5;
+ctx.beginPath();ctx.arc(0,0,85,0,Math.PI*2);ctx.stroke();
+// Diamond
+ctx.rotate(t);ctx.fillStyle='rgba(255,45,85,.6)';
+ctx.beginPath();ctx.moveTo(0,-40);ctx.lineTo(25,0);ctx.lineTo(0,40);ctx.lineTo(-25,0);ctx.closePath();ctx.fill();
+ctx.strokeStyle='rgba(255,215,0,.8)';ctx.lineWidth=1;ctx.stroke();
+ctx.restore();
+// Center glow
+const grd=ctx.createRadialGradient(120,120,5,120,120,50);
+grd.addColorStop(0,`rgba(255,45,85,${.3+Math.sin(t*2)*.2})`);grd.addColorStop(1,'transparent');
+ctx.fillStyle=grd;ctx.fillRect(70,70,100,100);
+}draw();
+})();
+
+// Animated orb
+(function drawOrb(){
+const c=document.getElementById('orbCanvas'),ctx=c.getContext('2d');
+let t=0;
+function draw(){
+requestAnimationFrame(draw);
+if(document.hidden||!document.getElementById('home').classList.contains('active'))return;
+ctx.clearRect(0,0,200,200);t+=.02;
+const g=ctx.createRadialGradient(70,60,10,100,100,90);
+g.addColorStop(0,'#fff8e0');g.addColorStop(.3,'#ffd700');g.addColorStop(.7,'#8a6000');g.addColorStop(1,'#3a2500');
+ctx.fillStyle=g;ctx.beginPath();ctx.arc(100,100,88,0,Math.PI*2);ctx.fill();
+// Shimmer
+ctx.fillStyle=`rgba(255,255,255,${.1+Math.sin(t*3)*.08})`;
+ctx.beginPath();ctx.ellipse(75,65,30,15,-.4,0,Math.PI*2);ctx.fill();
+// Shadow
+ctx.fillStyle='rgba(0,0,0,.3)';ctx.beginPath();ctx.ellipse(100,185,50,8,0,0,Math.PI*2);ctx.fill();
+}draw();
+})();
+
+// ═══ NAVIGATION ═════════════════════════════════════════════
+function nav(id){
+    if(_transActive) return;
+    const currentScreen = document.querySelector('.screen.active');
+    if(currentScreen && currentScreen.id === id) return;
+    if(bgm && bgm.setIntensity) {
+        if(id === 'battle') bgm.setIntensity('player');
+        else if(id === 'home') bgm.setIntensity('menu');
+    }
+    if(id !== 'battle' && typeof _mapAnimRAF !== 'undefined' && _mapAnimRAF) {
+        cancelAnimationFrame(_mapAnimRAF); _mapAnimRAF = 0;
+    }
+    const transType = TRANS_MAP[id] || 'fade';
+    const layer = document.getElementById('transLayer');
+
+    _transActive = true;
+    layer.innerHTML = '';
+
+    // Build transition DOM
+    let inner = '';
+    if(transType === 'shutter') {
+        inner = '<div class="sbar-l"></div><div class="sbar-r"></div>';
+        layer.className = 'transition-layer active trans-shutter in';
+    } else if(transType === 'light') {
+        inner = '<div class="flash"></div>';
+        layer.className = 'transition-layer active trans-light in';
+    } else if(transType === 'fade') {
+        inner = '<div class="blur"></div>';
+        layer.className = 'transition-layer active trans-fade in';
+    } else if(transType.startsWith('slide')) {
+        inner = '<div class="panel"></div>';
+        layer.className = `transition-layer active trans-slide ${transType} in`;
+    }
+    layer.innerHTML = inner;
+
+    // At midpoint (450ms), do the actual screen switch
+    setTimeout(() => {
+        try {
+        // Core navigation logic
+        if(id!=='battle'&&typeof _mapAnimRAF!=='undefined'&&_mapAnimRAF){cancelAnimationFrame(_mapAnimRAF);_mapAnimRAF=0;}
+        if(id!=='battle'&&B.phase&&B.phase!=='over'){
+            B.phase='over';
+            B.battleId=(B.battleId||0)+1;
+            if(typeof hofState!=='undefined'&&hofState){const _ids=hofState.savedTeamIds||[];hofState=null;S.roster=S.roster.filter(u=>!u.isForma);S.team=_ids.map(id=>S.roster.findIndex(u=>u.id===id)).filter(i=>i>=0);}
+            save(true);
+        }
+        document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
+        const el=document.getElementById(id);if(el)el.classList.add('active');
+        if(id==='gacha')refreshGacha();
+        if(id==='barracks')refreshBarracks();
+        if(id==='campaign')refreshCampaign();
+        if(id==='settings'){activeSettingsTab='images';setSettingsTab('images');}
+        if(id==='modes')refreshModes();
+        if(id==='daycare'&&typeof refreshDaycare==='function')refreshDaycare();
+        if(id==='quests'){renderQuests();updateQuestBadge();}
+        if(id==='tavern'&&typeof refreshTavern==='function')refreshTavern();
+        if(id==='home')updateHomeScreen();
+        const hintBtn=document.getElementById('tutHintBtn');
+        if(hintBtn)hintBtn.style.display=(id==='battle'||tutActive)?'none':'flex';
+        updateEloDisplay();
+            if(id === 'battle' && typeof resizeCanvas === 'function') resizeCanvas();
+        } catch(e) {
+            console.warn('Nav transition error:', e);
+        }
+
+        // Reverse animation
+        layer.classList.remove('in');
+        layer.classList.add('out');
+
+        // Cleanup
+        setTimeout(() => {
+            layer.className = 'transition-layer';
+            layer.innerHTML = '';
+            _transActive = false;
+        }, 500);
+    }, 450);
+    setTimeout(renameTermsInUI, 50);
+    if(id === 'home') {
+        setTimeout(() => {
+            let strip = document.getElementById('homeCurrencyStrip');
+            if(!strip) {
+                strip = document.createElement('div');
+                strip.id = 'homeCurrencyStrip';
+                strip.style.cssText = 'font-family:var(--mono);font-size:.7rem;display:flex;align-items:center;gap:12px;justify-content:center;padding:6px 0';
+                const statStrip = document.getElementById('homeStatStrip');
+                if(statStrip) statStrip.after(strip);
+                else {
+                    const btns = document.querySelector('.home-btns');
+                    if(btns) btns.before(strip);
+                }
+            }
+            strip.innerHTML = `<span style="color:var(--gold)">\u2605 ${S.ap} Flux</span> \u00b7 <span style="color:#7c4dff">\u25c6 ${S.shards||0} Prisms</span> \u00b7 <span style="color:#ff6b35">\u25cf ${S.apexTokens||0} ZM</span>`;
+        }, 60);
+    }
+}
+
+
+function updateEloDisplay(){
+const r=getEloRank(S.elo);
+document.querySelectorAll('.hdr-elo').forEach(el=>{
+el.textContent=`ELO: ${S.elo} | ${r.name}`;el.style.color=r.color;el.style.borderColor=r.color;
+});
+}
+
+// ═══ GACHA SYSTEM ═══════════════════════════════════════════
+function getPool(){const u=S.images.filter(i=>!i.isDefault);return u.length?u:S.images;}
+
+function refreshGacha() {
+    document.getElementById('orbCount').textContent = S.ap;
+    const _shEl = document.getElementById('gachaShardsCount'); if(_shEl) _shEl.textContent = S.shards || 0;
+    const _atEl = document.getElementById('gachaTokenCount'); if(_atEl) _atEl.textContent = S.apexTokens || 0;
+    const _mfEl = document.getElementById('gachaMeterFill'); if(_mfEl) _mfEl.style.width = Math.min(100,((S.apexMeter||0)/APEX_METER_MAX)*100) + '%';
+    const _mtEl = document.getElementById('gachaMeterText'); if(_mtEl) _mtEl.textContent = (S.apexMeter||0) + '/' + APEX_METER_MAX;
+    const pct = Math.min(100,(S.pullCount/CFG.PITY)*100);
+    document.getElementById('pityFill').style.width = pct + '%';
+    document.getElementById('pityText').textContent = `${S.pullCount}/${CFG.PITY}`;
+    const pool = getPool();
+    const pi = document.getElementById('poolInfo'); if(pi) pi.textContent = `Pool: ${pool.length} image${pool.length!==1?'s':''}`;
+    const listEl = document.getElementById('fehBannerList');
+    if(!listEl) return;
+    listEl.innerHTML = '';
+    const banners = getAvailableBanners();
+    if(!banners.length) {
+        listEl.innerHTML = '<div style="text-align:center;color:var(--text2);padding:40px;">No banners available. Upload images in Settings!</div>';
+        return;
+    }
+
+    banners.forEach((banner) => {
+        // Dynamic rates based on pity
+        let t0Rate = 2.0, sRate = 7.0, aRate = 14.0;
+        if(S.pullCount > 30) { sRate += (S.pullCount-30)*0.5; t0Rate += (S.pullCount-30)*0.1; }
+
+        // Hero thumbnails
+        let focusImages = [];
+        if(banner.isStandard) {
+            focusImages = pool.slice(0, 6);
+        } else if(banner.isFeatured) {
+            focusImages = (banner.heroNames || []).map(name => S.images.find(i => i.name === name)).filter(Boolean).slice(0, 8);
+        } else {
+            focusImages = (banner.heroNames || []).map(name => S.images.find(i => i.name === name)).filter(Boolean).slice(0, 5);
+        }
+
+        const t0Names = banner.t0Names || [];
+        const thumbsHTML = focusImages.map(img => {
+            const isT0Focus = t0Names.includes(img.name);
+            return `<img src="${img.src}" draggable="false" style="width:44px;height:44px;border-radius:50%;object-fit:cover;border:2px solid ${isT0Focus ? 'var(--t0)' : 'var(--gold)'};pointer-events:none;${isT0Focus ? 'box-shadow:0 0 10px rgba(0,229,255,.4);' : ''}" title="${typeof esc === 'function' ? esc(img.name) : img.name}${isT0Focus ? ' (T0 FOCUS)' : ''}">`;
+        }).join('');
+
+        const isActive = banner.id === S.activeBannerId || (banner.isStandard && !S.activeBannerId);
+        const label = banner.name || 'Banner';
+
+        // Rate info for featured banners
+        let rateInfo = '';
+        if(banner.isFeatured) {
+            const t0FocusRate = (t0Rate * 0.6).toFixed(1);
+            const t0OffRate = (t0Rate * 0.4).toFixed(1);
+            rateInfo = `<div style="font-size:.55rem;color:var(--text3);font-family:var(--mono);margin-top:4px;line-height:1.6;border-top:1px solid var(--border);padding-top:6px">
+                <div style="color:var(--t0)">★ T0 Focus (${t0Names.length} units): <strong>${t0FocusRate}%</strong> each</div>
+                <div>T0 Off-Focus: ${t0OffRate}% · S: ${sRate.toFixed(1)}% · A: ${aRate.toFixed(1)}%</div>
+                <div style="color:var(--gold)">BANNER EXCLUSIVE — only ${banner.heroNames?.length || 0} heroes in pool</div>
+            </div>`;
+        } else if(banner.isStandard) {
+            rateInfo = `<div style="font-size:.55rem;color:var(--text3);font-family:var(--mono);margin-top:4px">
+                <div>T0: ${t0Rate.toFixed(1)}% · S: ${sRate.toFixed(1)}% · A: ${aRate.toFixed(1)}%</div>
+                <div>Full pool: ${pool.length} heroes available</div>
+            </div>`;
+        }
+
+        const card = document.createElement('div');
+        card.style.cssText = `background:var(--panel);border:${isActive?'2px solid var(--gold)':'1px solid var(--border)'};border-radius:12px;padding:16px;position:relative;overflow:hidden;${isActive?'box-shadow:0 0 20px rgba(251,191,36,.15);':''}`;
+        card.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;">
+        <div>
+        <div style="font-family:var(--display);font-size:.8rem;color:${isActive?'var(--gold)':'var(--text)'};letter-spacing:1px;font-weight:700">${isActive?'★ ':''}${typeof esc === 'function' ? esc(label) : label}</div>
+        <div style="font-size:.6rem;color:var(--text2);font-family:var(--mono);margin-top:2px">${banner.desc || (banner.isStandard ? 'All images equally weighted' : (banner.heroNames?.length||0) + ' heroes')}</div>
+        </div>
+        <div style="text-align:right;font-family:var(--mono);font-size:.55rem;line-height:1.6;">
+        <div style="color:var(--t0)">T0: ${t0Rate.toFixed(1)}%</div>
+        <div style="color:var(--s)">S: ${sRate.toFixed(1)}%</div>
+        <div style="color:var(--a)">A: ${aRate.toFixed(1)}%</div>
+        </div>
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">${thumbsHTML || '<span style="font-size:.6rem;color:var(--text3)">Upload images to populate</span>'}</div>
+        ${focusImages.length > 8 ? `<div style="font-size:.5rem;color:var(--text3);margin-bottom:4px">+${(banner.heroNames?.length||0) - 8} more heroes in pool</div>` : ''}
+        ${rateInfo}
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(100px,1fr));gap:8px;margin-top:8px;width:100%">
+        ${!banner.isStandard && !banner.isAuto ? `<button class="btn-t0" style="font-size:.68rem;padding:8px 14px;min-height:40px" onclick="setActiveBanner('${banner.id}');refreshGacha()">SET ACTIVE</button>` : ''}
+        <button class="btn2 btn-sm" style="min-height:40px;padding:8px" onclick="setActiveBanner('${banner.id}');startSession()">SESSION (5 FX)</button>
+        <button class="btn2 btn-sm" style="min-height:40px;padding:8px" onclick="setActiveBanner('${banner.id}');pull1()">1 PULL (5 FX)</button>
+        <button class="btn2 btn-sm" style="min-height:40px;padding:8px" onclick="setActiveBanner('${banner.id}');pull10()">10 PULL (40 FX)</button>
+        </div>
+        ${isActive ? '<div style="position:absolute;top:0;left:0;right:0;height:2px;background:var(--t0g);background-size:200% 200%;animation:t0shift 3s ease infinite"></div>' : ''}`;
+        listEl.appendChild(card);
+    });
+
+    // Pool note
+    const poolNote = document.createElement('div');
+    poolNote.style.cssText = 'font-size:.6rem;color:var(--text3);text-align:center;padding:8px;font-family:var(--mono);line-height:1.6';
+    poolNote.textContent = `Pool: ${pool.length} images | Grades: D < C < B < A < S < TIER 0 | Pity every ${CFG.PITY} pulls | Featured banners are EXCLUSIVE pools`;
+    listEl.appendChild(poolNote);
+};
+
+function rollUnit(guaranteeHigh = false) {
+    const fullPool = getPool();
+    if(!fullPool.length) { toast('Add images first!','err'); return null; }
+    S.pullCount++;
+
+    let img;
+    const allBanners = getAvailableBanners();
+    const activeBanner = allBanners.find(b => b.id === S.activeBannerId);
+
+    if(activeBanner && activeBanner.isFeatured && activeBanner.heroNames?.length) {
+        // BANNER-EXCLUSIVE: only pull from heroes on this banner
+        const bannerPool = fullPool.filter(p => activeBanner.heroNames.includes(p.name));
+        if(bannerPool.length) {
+            // T0 focus units get 6x weight
+            const t0Names = activeBanner.t0Names || [];
+            const weighted = [];
+            bannerPool.forEach(p => {
+                const times = t0Names.includes(p.name) ? 6 : 1;
+                for(let i = 0; i < times; i++) weighted.push(p);
+            });
+            img = weighted[~~(Math.random() * weighted.length)];
+        } else {
+            img = fullPool[~~(Math.random() * fullPool.length)];
+        }
+    } else if(S.activeBannerId && !activeBanner?.isStandard) {
+        // Old-style user banner with focus weighting
+        const banner = S.banners.find(b => b.id === S.activeBannerId);
+        if(banner && (banner.heroIds?.length || banner.heroNames?.length)) {
+            const weighted = [];
+            const focusNames = banner.heroIds ? banner.heroIds.map(id => {
+                const u = S.roster.find(r => r.id === id);
+                if(!u) return null;
+                const im = S.images.find(im => im.src === u.src);
+                return im ? im.name : u.name;
+            }).filter(Boolean) : banner.heroNames;
+            fullPool.forEach(p => {
+                const times = focusNames.includes(p.name) ? 4 : 1;
+                for(let i = 0; i < times; i++) weighted.push(p);
+            });
+            img = weighted[~~(Math.random() * weighted.length)];
+        } else {
+            img = fullPool[~~(Math.random() * fullPool.length)];
+        }
+    } else {
+        // Standard pool — full random
+        img = fullPool[~~(Math.random() * fullPool.length)];
+    }
+
+    const grade = rollGrade(guaranteeHigh || S.pullCount >= CFG.PITY);
+    if(typeof trackQuest === 'function') trackQuest('summons');
+    if(['A','S','T0'].includes(grade) && typeof trackQuest === 'function') trackQuest('highPull');
+
+    // Check duplicate
+    const existing = S.roster.find(u => u.name === img.name);
+    if(existing) {
+        existing.totalPulls = (existing.totalPulls || 1) + 1;
+        if(existing.plus >= CFG.MAX_PLUS) {
+            existing.shards = (existing.shards || 0) + 3;
+            existing.sp = (existing.sp || 0) + 100;
+            return {dup:true, unit:existing, gained:0, overMax:true};
+        }
+        const gain = CFG.PLUS_PER_DUP;
+        const before = existing.plus;
+        existing.plus = Math.min(CFG.MAX_PLUS, existing.plus + gain);
+        const gained = existing.plus - before;
+        if(gained > 0) {
+            const stats = ['maxHp','atk','def','mag','res','spd'];
+            for(let g = 0; g < gained; g++) {
+                const s = stats[~~(Math.random()*stats.length)];
+                existing[s] = (existing[s]||0) + 1;
+                const bsKey = s === 'maxHp' ? 'hp' : s;
+                if(existing.baseStat) existing.baseStat[bsKey] = (existing.baseStat[bsKey]||0) + 1;
+            }
+        }
+        return {dup:true, unit:existing, gained};
+    }
+    const unit = createUnit(img.src, img.name, grade);
+    unit.hue = img.hue || 0;
+    unit.isAnimated = img.isAnimated || false;
+    unit.format = img.format || 'jpeg';
+    S.roster.push(unit);
+    return {dup:false, unit};
+};
+
+let _pullLock=false;
+function pull1(){
+if(_pullLock)return;
+if(S.ap<CFG.PULL1){toast('Not enough Flux!','err');return;}
+_pullLock=true;
+S.ap-=CFG.PULL1;
+const r=rollUnit();if(!r){_pullLock=false;return;}
+showGachaResult([r]);sfx('summon');save(true);refreshGacha();
+setTimeout(()=>{_pullLock=false;},600);
+}
+
+function pull10() {
+    if(_pullLock) return;
+    if(!getPool().length) { toast('Add images first!','err'); return; }
+    if(S.ap < CFG.PULL10) { toast('Not enough Flux!','err'); return; }
+    _pullLock = true;
+    S.ap -= CFG.PULL10;
+    const results = [];
+    for(let i = 0; i < 10; i++) { const r = rollUnit(i === 9); if(r) results.push(r); }
+    if(results.length) {
+        showMultiPullSequence(results);
+        sfx('summon');
+        save(true);
+        refreshGacha();
+    } else { _pullLock = false; }
+};
+
+function showGachaResult(results){
+const best=results.slice().sort((a,b)=>{
+if(!a.dup&&b.dup)return-1;if(a.dup&&!b.dup)return 1;
+return GRADES.indexOf(b.unit.grade)-GRADES.indexOf(a.unit.grade);
+})[0];
+const u=best.unit;
+// Draw portrait
+const rc=document.getElementById('resPortrait');
+const tempImg=new Image();
+tempImg.onload=()=>{u.img=tempImg;drawUnitPortrait(rc,u,160);};
+tempImg.onerror=()=>drawUnitPortrait(rc,u,160);
+tempImg.src=u.src;
+drawUnitPortrait(rc,u,160);
+
+const gEl=document.getElementById('resGrade');
+gEl.textContent=GRADE_LABEL[u.grade];
+gEl.className='res-grade grade-'+u.grade;
+document.getElementById('resName').textContent=u.name;
+const pd=document.getElementById('resPlusDisp');
+pd.innerHTML=best.dup?`<div style="font-family:var(--display);font-size:.7rem;color:var(--gold)">+${u.plus} POWERED UP! +${best.gained}</div>`:
+results.length>1?`<div style="font-size:.7rem;color:var(--text2)">${results.length} units acquired</div>`:'';
+document.getElementById('resStats').textContent=`HP:${u.maxHp} ATK:${u.atk} DEF:${u.def} SPD:${u.spd} | ${u.role}`;
+document.getElementById('gachaResult').classList.add('show');
+}
+
+function closeGResult(){document.getElementById('gachaResult').classList.remove('show');}
+
+// ═══ BARRACKS ═══════════════════════════════════════════════
+const gradeOrder={T0:0,S:1,A:2,B:3,C:4,D:5};
+
+function setSort(by){
+sortMode=by;
+document.querySelectorAll('.brk-toolbar .fbtn').forEach(b=>b.classList.remove('active'));
+const el=document.getElementById('s'+by.charAt(0).toUpperCase()+by.slice(1));
+if(el)el.classList.add('active');
+else document.getElementById('sGrade')?.classList.add('active');
+refreshBarracks();
+}
+
+function getSorted(){
+const search=document.getElementById('brkSearch')?.value?.toLowerCase()||'';
+let list=S.roster.map((u,i)=>({u,i}));
+if(search)list=list.filter(({u})=>u.name.toLowerCase().includes(search)||u.role.toLowerCase().includes(search)||u.weapon.toLowerCase().includes(search));
+list.sort((a,b)=>{
+if(sortMode==='grade')return(gradeOrder[a.u.grade]-gradeOrder[b.u.grade])||(b.u.plus-a.u.plus);
+if(sortMode==='atk')return(b.u.atk+b.u.mag)-(a.u.atk+a.u.mag);
+if(sortMode==='spd')return b.u.spd-a.u.spd;
+if(sortMode==='plus')return b.u.plus-a.u.plus;
+return 0;
+});
+return list;
+}
+
+function refreshBarracks(){
+const grid=document.getElementById('brkGrid');grid.innerHTML='';
+document.getElementById('rosterCount').textContent=`${S.roster.length} units | ${S.team.length}/${CFG.TEAM_SIZE} team`;
+if(!S.roster.length){grid.innerHTML='<div style="text-align:center;padding:40px;color:var(--text2);font-family:var(--display)">No units. Summon some!</div>';refreshTeamSlots();return;}
+getSorted().forEach(({u,i})=>{
+const inTeam=S.team.includes(i);
+let cardClass=`ucard${inTeam?' in-team':''}${u.grade==='T0'?' ucard-t0':''}`;
+if(u.isAnimated)cardClass+=' ucard-animated';
+const card=document.createElement('div');
+card.className=cardClass;
+if(u.grade!=='T0'&&!u.isAnimated)card.style.borderColor=GRADE_COLOR[u.grade]||'';
+// Portrait: animated units get <img>, static get canvas
+let portraitEl;
+if(u.isAnimated){
+portraitEl=document.createElement('img');
+portraitEl.src=u.src;
+portraitEl.style.cssText='width:56px;height:56px;border-radius:50%;object-fit:cover';
+}else{
+portraitEl=document.createElement('canvas');
+portraitEl.width=portraitEl.height=112;portraitEl.style.cssText='width:56px;height:56px;border-radius:50%';
+const cachedImg=IMG_CACHE.get(u.src);
+if(cachedImg){u.img=cachedImg;drawUnitPortrait(portraitEl,u,112);}
+else{const tempImg=new Image();tempImg.onload=()=>{imgCacheSet(u.src,tempImg);u.img=tempImg;drawUnitPortrait(portraitEl,u,112);};tempImg.onerror=()=>drawUnitPortrait(portraitEl,u,112);tempImg.src=u.src;drawUnitPortrait(portraitEl,u,112);}
+}
+card.appendChild(portraitEl);
+const lvl=u.level||1;
+const extra=document.createElement('div');
+extra.innerHTML=`
+${u.plus>0?`<div class="ucard-plus">+${u.plus}</div>`:''}
+<div class="ucard-wtype" style="background:${WEAPON_COLORS[u.weapon]||'#888'}" title="${u.weapon}"></div>
+<div class="ucard-name" title="Click to rename" style="cursor:pointer" onclick="event.stopPropagation();renameUnit(${i})">${esc(u.name)}</div>
+<div class="ucard-grade grade-${u.grade}">${GRADE_LABEL[u.grade]}</div>
+<div class="ucard-role">${u.role} | ${MOVE_STATS[u.moveType]?.label||'INF'}${u.faction?` | <span style="color:#fbbf24;font-size:.55rem">${u.faction}</span>`:''}</div>
+<div class="ucard-lvl">Lv.${lvl}</div>
+<div class="ucard-xp"><div class="ucard-xp-fill" style="width:${lvl>=40?100:Math.min(100,Math.round(((u.exp||0)/Math.floor(100*Math.pow(lvl,1.5)))*100))}%"></div></div>
+`;
+while(extra.firstChild)card.appendChild(extra.firstChild);
+if(batchMode){
+card.onclick=()=>{
+if(batchSelected.has(i))batchSelected.delete(i);else batchSelected.add(i);
+document.getElementById('batchBtn').textContent=`Dismiss (${batchSelected.size})`;
+refreshBarracks();
+};
+if(batchSelected.has(i))card.style.outline='2px solid var(--red)';
+}else{
+card.onclick=()=>openHeroDetail(i);
+}
+grid.appendChild(card);
+});
+refreshTeamSlots();
+if(typeof refreshPresets==='function')refreshPresets();
+}
+
+function toggleBatchMode(){
+if(batchMode){
+if(batchSelected.size>0){
+// Sort descending so splicing doesn't shift earlier indices
+const sorted=[...batchSelected].sort((a,b)=>b-a);
+sorted.forEach(i=>{
+S.team=S.team.filter(t=>t!==i).map(t=>t>i?t-1:t);
+S.teamPresets=S.teamPresets.map(p=>{
+if(!p)return null;
+return{...p,team:p.team.filter(t=>t!==i).map(t=>t>i?t-1:t)};
+});
+S.roster.splice(i,1);
+});
+toast(`Dismissed ${sorted.length} unit(s)`,'ok');
+save(true);
+}
+batchMode=false;batchSelected.clear();
+document.getElementById('batchBtn').textContent='Batch';
+document.getElementById('batchBtn').classList.remove('active');
+}else{
+batchMode=true;
+document.getElementById('batchBtn').textContent='Dismiss (0)';
+document.getElementById('batchBtn').classList.add('active');
+}
+refreshBarracks();
+}
+
+function refreshTeamSlots(){
+const el=document.getElementById('teamSlots');el.innerHTML='';
+for(let i=0;i<CFG.TEAM_SIZE;i++){
+const slot=document.createElement('div');slot.className='tslot';
+if(S.team[i]!==undefined&&S.roster[S.team[i]]){
+const u=S.roster[S.team[i]];
+const pc=document.createElement('canvas');pc.width=pc.height=80;pc.style.cssText='width:100%;height:100%;border-radius:50%';
+const ti=new Image();ti.onload=()=>{u.img=ti;drawUnitPortrait(pc,u,80);};ti.src=u.src;
+drawUnitPortrait(pc,u,80);
+slot.appendChild(pc);
+// Faction/class badge
+if(u.faction){const b=document.createElement('div');b.textContent=u.faction[0];b.title=`${u.faction} / ${u.unitClass}`;b.style.cssText='position:absolute;bottom:0;right:0;font-size:8px;background:rgba(0,0,0,.7);color:#fbbf24;border-radius:50%;width:14px;height:14px;display:flex;align-items:center;justify-content:center;font-family:var(--mono)';slot.style.position='relative';slot.appendChild(b);}
+const idx=i;
+slot.onclick=(e)=>{e.stopPropagation();S.team.splice(idx,1);refreshBarracks();};
+}else{slot.textContent='+';slot.style.color='var(--text3)';slot.style.fontSize='.9rem';}
+el.appendChild(slot);
+}
+// Synergy bar
+const synEl=document.getElementById('synBar');
+if(synEl){const s=getSynergySummary(S.team);synEl.textContent=s;synEl.style.display=s?'block':'none';}
+}
+
+function clearTeam(){S.team=[];refreshBarracks();}
+
+function renameUnit(idx){
+const u=S.roster[idx];if(!u)return;
+// Preserve original image name so portraits survive rename+save round-trips
+if(!u.originalImageName){const matchedImg=S.images.find(i=>i.src===u.src);if(matchedImg)u.originalImageName=matchedImg.name;}
+const newName=prompt('Rename unit:',u.name);
+if(newName&&newName.trim()){u.name=newName.trim();refreshBarracks();save(true);}
+}
+
+// ═══ TEAM PRESETS ═══════════════════════════════════════════
+function savePreset(slot){
+if(slot<0||slot>4)return;
+if(!S.teamPresets)S.teamPresets=[null,null,null,null,null];
+const name=prompt(`Name for Team ${slot+1}:`,S.teamPresets[slot]?.name||`Team ${slot+1}`);
+if(name===null)return;
+S.teamPresets[slot]={name,team:[...S.team]};
+S.activePreset=slot;
+toast(`Saved as "${name}"!`,'ok');save(true);refreshPresets();
+}
+function loadPreset(slot){
+if(!S.teamPresets||!S.teamPresets[slot])return;
+S.team=[...S.teamPresets[slot].team];
+S.activePreset=slot;
+refreshBarracks();
+toast(`Loaded "${S.teamPresets[slot].name}"!`,'ok');
+}
+function refreshPresets(){
+const el=document.getElementById('presetBar');if(!el)return;
+el.innerHTML='';
+for(let i=0;i<5;i++){
+const p=S.teamPresets?.[i];
+const btn=document.createElement('button');
+btn.className='btn2 btn-sm'+(S.activePreset===i?' active':'');
+btn.style.cssText=`font-size:.55rem;padding:4px 8px;min-width:48px;position:relative;${S.activePreset===i?'border-color:var(--gold);color:var(--gold)':''}`;
+btn.innerHTML=p?`${p.name.substring(0,7)}`:`Slot ${i+1}`;
+// Mobile-friendly save/load mechanics
+let pressTimer;
+const startPress=(e)=>{e.preventDefault();pressTimer=setTimeout(()=>savePreset(i),600);};
+const cancelPress=(e)=>{e.preventDefault();clearTimeout(pressTimer);loadPreset(i);};
+btn.addEventListener('touchstart',startPress,{passive:false});
+btn.addEventListener('touchend',cancelPress,{passive:false});
+// Desktop fallback
+btn.onmousedown=(e)=>{if(e.button===2)savePreset(i);};
+btn.onclick=()=>loadPreset(i);
+btn.oncontextmenu=(e)=>e.preventDefault();
+el.appendChild(btn);
+}
+// Add an instructional text for mobile
+const instr=document.createElement('div');
+instr.style.cssText="font-size:0.5rem;color:var(--text3);width:100%;text-align:center;margin-top:4px;";
+instr.textContent="Tap to Load | Hold to Save current team";
+el.appendChild(instr);
+}
+
+// ═══ UNIT MODAL ═════════════════════════════════════════════
+function openModal(idx){
+modalIdx=idx;const u=S.roster[idx];
+const mc=document.getElementById('modalPortrait');
+if(u.isAnimated){
+// Replace canvas with img tag to preserve GIF animation
+const container=mc.parentNode;
+let imgEl=container.querySelector('.animated-portrait');
+if(!imgEl){imgEl=document.createElement('img');imgEl.className='animated-portrait';imgEl.style.cssText='width:140px;height:140px;object-fit:cover;border-radius:50%;display:block;margin:0 auto';}
+imgEl.src=u.src;mc.style.display='none';container.insertBefore(imgEl,mc);
+}else{
+mc.style.display='';
+const container=mc.parentNode;const old=container.querySelector('.animated-portrait');if(old)old.remove();
+const ti=new Image();ti.onload=()=>{u.img=ti;drawUnitPortrait(mc,u,140);};ti.src=u.src;
+drawUnitPortrait(mc,u,140);
+}
+document.getElementById('mName').textContent=u.name+(u.plus>0?' (+'+u.plus+')':'');
+const gEl=document.getElementById('mGrade');gEl.textContent=GRADE_LABEL[u.grade];gEl.className='ucard-grade grade-'+u.grade;
+document.getElementById('mRole').textContent=u.role;
+document.getElementById('mWeapon').textContent=u.weapon;
+document.getElementById('mMoveType').textContent=MOVE_STATS[u.moveType]?.label||'INF';
+// Stats
+const sm={HP:u.maxHp,ATK:u.atk,DEF:u.def,MAG:u.mag,RES:u.res,SPD:u.spd};
+const colors={HP:'#22c55e',ATK:'#ef4444',DEF:'#3b82f6',MAG:'#8b5cf6',RES:'#06b6d4',SPD:'#f97316'};
+document.getElementById('mStats').innerHTML=Object.entries(sm).map(([k,v],si)=>`
+<div class="stat-row stat-row-anim" style="animation-delay:${si*0.06}s">
+<div class="stat-lbl">${k}</div>
+<div class="stat-bg"><div class="stat-fill" style="width:${Math.min(100,v/65*100)}%;background:${colors[k]}"></div></div>
+<div class="stat-val">${v}</div>
+</div>`).join('');
+// EXP section
+const mExpSec=document.getElementById('mExpSection');
+if(u.level>=40){mExpSec.innerHTML='<div class="modal-exp"><div class="modal-exp-max">Lv.40 — MAX LEVEL</div></div>';}
+else{const expReq=Math.floor(100*Math.pow(u.level||1,1.5));const expPct=Math.min(100,Math.round(((u.exp||0)/expReq)*100));
+mExpSec.innerHTML=`<div class="modal-exp"><div class="modal-exp-label"><span class="exp-lvl">Lv.${u.level||1} / 40</span><span>${u.exp||0} / ${expReq} XP</span></div><div class="modal-exp-bar"><div class="modal-exp-fill" style="width:${expPct}%"></div></div></div>`;}
+// Abilities
+let abHTML=u.special?`<div class="ability-box"><h3>SPECIAL: ${u.special.name} (CD:${u.special.cd})</h3><div class="ability-desc">${u.special.desc}</div></div>`:'';
+u.passives.forEach((p,i)=>{
+abHTML+=`<div class="ability-box"><h3>PASSIVE ${i+1}: ${p.name}</h3><div class="ability-desc">${p.desc}</div></div>`;
+});
+document.getElementById('mAbilities').innerHTML=abHTML;
+// Plus
+const ps=document.getElementById('mPlusSection');
+if(u.plus>0||u.totalPulls>1){
+const pips=Array.from({length:20},(_,i)=>{
+const th=(i+1)*(CFG.MAX_PLUS/20);
+return`<div class="shard-pip${u.plus>=th?' filled':''}"></div>`;
+}).join('');
+const shardsNeeded=Math.max(1,u.plus+1);
+ps.innerHTML=`<div class="plus-section">
+<h4>POWER +${u.plus}/${CFG.MAX_PLUS} (Pulled ${u.totalPulls}x) | Shards: ${u.shards||0}</h4>
+<div class="shard-bar">${pips}<span class="shard-count">${Math.ceil((CFG.MAX_PLUS-u.plus)/CFG.PLUS_PER_DUP)} dupes to max</span></div>
+${u.shards>=shardsNeeded?`<button class="btn2 btn-sm" style="margin-top:6px" onclick="useShard(${idx})">USE ${shardsNeeded} SHARDS (+1)</button>`:`<div style="font-size:.6rem;color:var(--text3);margin-top:4px">Need ${shardsNeeded} shards to +1 (earn from battles)</div>`}
+</div>`;
+}else ps.innerHTML='';
+const inTeam=S.team.includes(idx);
+document.getElementById('mTeamBtn').textContent=inTeam?'Remove from Team':'Add to Team';
+document.getElementById('unitModal').classList.add('show');
+}
+
+function closeModal(){const m=document.getElementById('unitModal');if(!m.classList.contains('show'))return;m.classList.add('closing');setTimeout(()=>{m.classList.remove('show','closing');modalIdx=-1;},200);}
+
+function toggleTeamModal(){
+if(modalIdx<0)return;
+const idx=S.team.indexOf(modalIdx);
+if(idx>=0){S.team.splice(idx,1);toast('Removed');}
+else{if(S.team.length>=CFG.TEAM_SIZE){toast('Team full!','err');return;}S.team.push(modalIdx);toast('Added!','ok');}
+document.getElementById('mTeamBtn').textContent=S.team.includes(modalIdx)?'Remove from Team':'Add to Team';
+refreshBarracks();
+}
+
+function dismissUnit(){
+if(modalIdx<0)return;
+if(!confirm(`Dismiss ${S.roster[modalIdx].name}?`))return;
+const ti=S.team.indexOf(modalIdx);if(ti>=0)S.team.splice(ti,1);
+S.team=S.team.map(t=>t>modalIdx?t-1:t);
+if(S.teamPresets)S.teamPresets=S.teamPresets.map(p=>{if(!p||!p.team)return p;return{...p,team:p.team.filter(t=>t!==modalIdx).map(t=>t>modalIdx?t-1:t)};});
+S.roster.splice(modalIdx,1);
+closeModal();save(true);refreshBarracks();toast('Dismissed.');
+}
+
+function useShard(idx){
+const u=S.roster[idx];
+if(u.plus>=CFG.MAX_PLUS){toast('Unit is at max power!','err');return;} // Bug #32: prevent overflow
+const cost=Math.max(1,u.plus+1);
+if((u.shards||0)<cost){toast('Not enough shards','err');return;}
+u.shards-=cost;u.plus=Math.min(CFG.MAX_PLUS,u.plus+1);
+const stats=['maxHp','atk','def','mag','res','spd'];
+const boostedStat=stats[~~(Math.random()*stats.length)];
+// Bug #8: Use bonusStats to track shard bonuses separately
+if(!u.bonusStats)u.bonusStats={hp:0,atk:0,def:0,mag:0,res:0,spd:0};
+const bsKey=boostedStat==='maxHp'?'hp':boostedStat;
+u.bonusStats[bsKey]=(u.bonusStats[bsKey]||0)+1;
+u[boostedStat]=(u[boostedStat]||0)+1;
+toast(`+${u.plus}!`,'gold');save(true);openModal(idx);
+}
+
+// ═══ CAMPAIGN ═══════════════════════════════════════════════
+function refreshCampaign() {
+    const list = document.getElementById('campList');
+    if(!list) return;
+    list.innerHTML = '';
+
+    // Check if CAMPAIGN_EXPANDED exists
+    const campaigns = typeof CAMPAIGN_EXPANDED !== 'undefined' ? CAMPAIGN_EXPANDED : CAMPAIGN;
+
+    let currentArc = '';
+    campaigns.forEach(c => {
+        // Arc headers for expanded campaign
+        if(c.arc && c.arc !== currentArc) {
+            currentArc = c.arc;
+            const arcHeader = document.createElement('div');
+            arcHeader.style.cssText = 'font-family:var(--display);color:var(--t0);font-size:.8rem;letter-spacing:2px;padding:12px 0 6px;border-bottom:1px solid var(--border);margin-bottom:8px';
+            arcHeader.textContent = '═══ ' + currentArc.toUpperCase() + ' ═══';
+            list.appendChild(arcHeader);
+        }
+
+        const done = S.campaignDone.includes(c.id);
+        const clears = S.campaignClears[c.id] || [];
+        const starsHtml = getDifficultyStars(S.campaignClears, c.id);
+        const highestBadge = getDifficultyBadge(S.campaignClears, c.id);
+
+        const card = document.createElement('div');
+        card.className = 'camp-card';
+        card.innerHTML = `<div class="camp-num">${c.id % 100}</div><div class="camp-info"><h3>${c.name}</h3><p>${c.desc}</p>
+        ${done ? `<div style="display:flex;align-items:center;gap:8px">${highestBadge}<div style="font-size:.5rem">${starsHtml}</div></div>` : ''}
+        ${c.boss ? '<div style="color:var(--gold);font-family:var(--display);font-size:.55rem">★ BOSS BATTLE</div>' : ''}
+        </div>`;
+        card.onclick = () => {
+            if(typeof startExpandedCampaign === 'function' && typeof CAMPAIGN_EXPANDED !== 'undefined') {
+                startExpandedCampaign(c.id);
+            } else {
+                startCampaign(c.id);
+            }
+        };
+        list.appendChild(card);
+    });
+};
+
+let currentCampaign=null;
+let dialogQueue=[];
+let isDialogAnimating=false; // Bug #28
+
+function startCampaign(id){
+const c=CAMPAIGN.find(x=>x.id===id);if(!c)return;
+currentCampaign=c;
+dialogQueue=[...c.dialog]; // Bug #64: fresh copy each time
+isDialogAnimating=false;
+showDialog();
+}
+
+function showDialog(){
+if(!dialogQueue.length){isDialogAnimating=false;launchCampaignBattle();return;}
+const d=dialogQueue.shift();
+document.getElementById('diagName').textContent=d.name;
+document.getElementById('diagText').textContent=d.text;
+document.getElementById('dialogBg').classList.add('show');
+isDialogAnimating=false;
+}
+
+function advanceDialog(){
+// Bug #28: Prevent double-click race during dialog transitions
+if(isDialogAnimating)return;
+isDialogAnimating=true;
+document.getElementById('dialogBg').classList.remove('show');
+if(dialogQueue.length)setTimeout(showDialog,200);
+else setTimeout(launchCampaignBattle,200);
+}
+
+function launchCampaignBattle(){
+if(!currentCampaign)return;
+startBattle(currentCampaign);
+}
+
+// ═══ BATTLE ENGINE ══════════════════════════════════════════
+let B={
+mapW:8,mapH:8,grid:[],
+pUnits:[],eUnits:[],allUnits:[],
+sel:null,phase:'player',mode:'select',
+highlights:[],dangerZone:false,dangerCells:[],
+canvas:null,ctx:null,unitImgs:{},
+hover:{x:-1,y:-1},shaking:false,
+isCampaign:false,campaignId:0,
+battleId:0,
+};
+let CS=CFG.CELL;
+
+function generateMap(w, h, theme) {
+    // Helper: Check if (0,0) can reach (w-1, h-1)
+    const isConnected = (grid) => {
+        const q = [{x: 0, y: 0}];
+        const visited = new Set(['0,0']);
+        let reachedEnd = false;
+        
+        while (q.length) {
+            const {x, y} = q.shift();
+            // Check if we reached the enemy spawn area (right side)
+            if (x === w - 1) reachedEnd = true;
+            
+            [[0, 1], [0, -1], [1, 0], [-1, 0]].forEach(([dx, dy]) => {
+                const nx = x + dx, ny = y + dy;
+                if (nx >= 0 && ny >= 0 && nx < w && ny < h) {
+                    const t = grid[ny][nx];
+                    // Only traverse passable terrain
+                    if (TERRAINS[t] && TERRAINS[t].passable && !visited.has(`${nx},${ny}`)) {
+                        visited.add(`${nx},${ny}`);
+                        q.push({x: nx, y: ny});
+                    }
+                }
+            });
+        }
+        return reachedEnd;
+    };
+
+    let grid = [];
+    let attempts = 0;
+    let valid = false;
+
+    // Retry loop: Keep generating until we get a playable map
+    while (!valid && attempts < 50) {
+        attempts++;
+        grid = [];
+        for (let y = 0; y < h; y++) {
+            grid.push([]);
+            for (let x = 0; x < w; x++) grid[y].push('plain');
+        }
+
+        // Pick biome
+        currentBiome = typeof pickBiome === 'function' ? pickBiome() : null;
+        const biome = currentBiome;
+
+        const addCluster = (type, count) => {
+            if (biome?.terrainSwap?.[type]) type = biome.terrainSwap[type];
+            for (let i = 0; i < count; i++) {
+                const x = 2 + ~~(Math.random() * (w - 4)), y = ~~(Math.random() * h);
+                grid[y][x] = type;
+                for (let j = 0; j < 2; j++) {
+                    const nx = x + ~~(Math.random() * 3) - 1, ny = y + ~~(Math.random() * 3) - 1;
+                    if (nx >= 2 && nx < w - 2 && ny >= 0 && ny < h) grid[ny][nx] = type;
+                }
+            }
+        };
+
+        // --- ADJUSTED DENSITY (Fixes clutter/blocking) ---
+        addCluster('forest', ~~(w * h * .08)); // Reduced from .12
+        addCluster('peak', ~~(w * h * .03));   // Reduced from .04
+        addCluster('water', ~~(w * h * .04));  // Reduced from .06
+        addCluster('fort', ~~(w * h * .03));
+        addCluster('rough', ~~(w * h * .03));  // Reduced from .05
+        if (Math.random() < .3) addCluster('lava', ~~(w * h * .03));
+        
+        // Extra terrain from biome
+        if (biome?.extraTerrain) biome.extraTerrain.forEach(t => addCluster(t, ~~(w * h * .03)));
+
+        // Walls (Breakable)
+        if (Math.random() < .4) {
+            for (let i = 0; i < 3; i++) {
+                const wx = 3 + ~~(Math.random() * (w - 6)), wy = ~~(Math.random() * h);
+                grid[wy][wx] = 'wall';
+            }
+        }
+        
+        // Void pits (Rare)
+        if (Math.random() < .15) {
+            for (let i = 0; i < 2; i++) {
+                const vx = 3 + ~~(Math.random() * (w - 6)), vy = ~~(Math.random() * h);
+                grid[vy][vx] = 'void';
+            }
+        }
+
+        // Ensure spawn areas are clear
+        for (let y = 0; y < h; y++) {
+            for (let x = 0; x < 2; x++) grid[y][x] = 'plain'; // Player spawn
+            for (let x = w - 2; x < w; x++) grid[y][x] = 'plain'; // Enemy spawn
+        }
+
+        // Check if map is playable
+        valid = isConnected(grid);
+    }
+
+    // Failsafe: If RNG creates 50 bad maps, drill a tunnel through the middle
+    if (!valid) {
+        const midY = ~~(h / 2);
+        for (let x = 0; x < w; x++) {
+            if (!TERRAINS[grid[midY][x]].passable) grid[midY][x] = 'plain';
+        }
+    }
+
+    return grid;
+}
+
+    function prepUnit(unit, side) {
+        const hadTempestHp = unit.tempestHp !== undefined;
+        if(u && side === 'player') {
+            const bonusMult = 1 + getCompendiumBonus();
+            if(bonusMult > 1) {
+                ['atk','def','mag','res','spd'].forEach(s => { u[s] = Math.floor(u[s] * bonusMult); });
+                u.maxHp = Math.floor(u.maxHp * bonusMult);
+                // Only scale current HP if NOT carrying over from Tempest (already multiplied)
+                if(!hadTempestHp) {
+                    u.hp = u.maxHp;
+                }
+                // Clamp carryover HP to new maxHp
+                u.hp = Math.min(u.hp, u.maxHp);
+            }
+        }
+        return u;
+    };
+
+    function createEnemyTeam(count, mult) {
+        // On Lunatic+, melee enemies get a chance at Distant Counter
+        if(['lunatic','max','apex'].includes(currentDifficulty)) {
+            const dcChance = {lunatic: 0.25, max: 0.5, apex: 0.8}[currentDifficulty] || 0;
+            team.forEach(u => {
+                const range = getWeaponRange(u.weapon);
+                // Only give DC to melee units (range 1)
+                if(range === 1 && Math.random() < dcChance) {
+                    u._distantCounter = true;
+                }
+            });
+        }
+        return team;
+    };
+
+// Difficulty selection before battle
+function chooseDifficulty(callback){
+const modal=document.getElementById('diffModal');
+if(!modal){callback();return;}
+modal._cb=callback;
+modal.style.display='flex';
+}
+function setDifficulty(d){
+
+
+currentDifficulty=d;
+const modal=document.getElementById('diffModal');
+if(modal){modal.style.display='none';if(typeof modal._cb==='function'){const cb=modal._cb;modal._cb=null;cb();}}
+}
+function closeDiffModal(){
+const modal=document.getElementById('diffModal');
+if(modal){modal.style.display='none';modal._cb=null;}
+}
+
+async function startBattle(campaignData=null){
+let pRoster=[];
+if(S.team.length>0)pRoster=S.team.map(i=>S.roster[i]).filter(Boolean);
+else if(S.roster.length>0){pRoster=S.roster.slice(0,CFG.TEAM_SIZE);toast('Auto-selected first units');}
+else{if(!S.images.length)initPlaceholders();pRoster=S.images.slice(0,4).map(img=>createUnit(img.src,img.name));toast('Using defaults');}
+
+nav('battle');
+const ms=parseInt(document.getElementById('mapSizeSlider')?.value||8);
+B.mapW=ms;B.mapH=ms;
+B.grid=generateMap(ms,ms,campaignData?.terrain);
+B.phase='player';B.mode='select';B.sel=null;B.highlights=[];B.dangerZone=false;B.dangerCells=[];
+B.hover={x:-1,y:-1};B.shaking=false;
+B.isCampaign=!!campaignData;B.campaignId=campaignData?.id||0;
+
+B.pUnits=pRoster.slice(0,CFG.TEAM_SIZE).map((u,i)=>{
+const bu=prepUnit(u,'player');
+bu.x=Math.min(Math.floor(i/ms),ms-1);bu.y=i%ms;
+return bu;
+}).filter(u=>u.hp>0); // Bug #19: filter out zombie units (0 HP from Tempest carry-over)
+// Bug #33: resolve any stacking after initial placement
+{const occ=new Set();B.pUnits.forEach(u=>{const key=u.x+','+u.y;if(occ.has(key)){for(let x=0;x<ms;x++)for(let y=0;y<ms;y++){const k2=x+','+y;if(!occ.has(k2)&&B.grid[y]?.[x]?.passable!==0){u.x=x;u.y=y;occ.add(k2);x=ms;break;}}}else{occ.add(key);}});}
+const eCnt=campaignData?campaignData.enemyCount:Math.max(1,B.pUnits.length);
+const eMult=campaignData?campaignData.enemyMult:1.0;
+if(currentBattleConfig?.isBoss&&currentBattleConfig.ghb){
+// Grand Hero Battle: spawn generic enemies + the named boss unit
+B.eUnits=createEnemyTeam(Math.max(0,eCnt-1),eMult);
+const bossImg=S.images.length?S.images[~~(Math.random()*S.images.length)]:PLACEHOLDERS[0];
+const bossUnit=createUnit(bossImg.src,currentBattleConfig.ghb.name+'★');
+const b=currentBattleConfig.ghb.boss||{};
+if(b.statBoost)Object.entries(b.statBoost).forEach(([k,v])=>{
+if(bossUnit[k]!=null){bossUnit[k]+=v;}
+const bsKey=k==='maxHp'?'hp':k;
+if(bossUnit.baseStat&&bossUnit.baseStat[bsKey]!=null)bossUnit.baseStat[bsKey]+=v;
+});
+if(b.role)bossUnit.role=b.role;
+if(b.weapon)bossUnit.weapon=b.weapon;
+if(b.moveType)bossUnit.moveType=b.moveType;
+if(b.skillA)bossUnit.skillA=b.skillA;
+if(b.skillB)bossUnit.skillB=b.skillB;
+if(b.skillC)bossUnit.skillC=b.skillC;
+if(b.special)bossUnit.special=b.special;
+bossUnit.passives=[bossUnit.skillA,bossUnit.skillB,bossUnit.skillC,bossUnit.skillS].filter(Boolean);
+bossUnit.hp=bossUnit.maxHp;
+B.eUnits.push(prepUnit(bossUnit,'enemy'));
+}else if(currentBattleConfig?.isBoss&&currentBattleConfig.bhbBosses){
+// Bound Hero Battle: use pre-built boss units, pad with generic enemies if needed
+B.eUnits=[...currentBattleConfig.bhbBosses];
+if(eCnt>2)B.eUnits.push(...createEnemyTeam(eCnt-2,eMult));
+}else{
+B.eUnits=createEnemyTeam(eCnt,eMult);
+}
+B.eUnits.forEach((u,i)=>{u.x=ms-1-Math.floor(i/ms);u.y=i%ms;});
+B.allUnits=[...B.pUnits,...B.eUnits];
+if(typeof initWallHp==='function')initWallHp();
+// Apply faction/class synergy bonuses to player units
+if(typeof applyTeamSynergies==='function'){applyTeamSynergies(B.pUnits);applyTeamSynergies(B.eUnits);} // Bug #13: apply synergies to enemies too
+
+B.canvas=document.getElementById('battleCanvas');B.ctx=B.canvas.getContext('2d');
+resizeCanvas();window.onresize=resizeCanvas;
+await preloadImgs();
+B.canvas.onclick=battleClick;B.canvas.onmousemove=battleHover;
+B.canvas.onmouseleave=()=>{B.hover={x:-1,y:-1};hideFC();drawMap();};
+document.getElementById('bLog').innerHTML='';
+S.totalBattles++;
+B.battleId=(B.battleId||0)+1;
+if(currentBiome)bLog(`Biome: ${currentBiome.name}`,'sys');
+bLog('Battle begins!','sys');
+drawMap();updateBUI();updateEList();
+
+// APEX difficulty handling (from APEX patch)
+if(currentDifficulty === 'apex') {
+    B.autoPlay = false;
+    const autoBtn = document.getElementById('autoBtn');
+    if(autoBtn) {
+        autoBtn.classList.remove('auto-active');
+        autoBtn.textContent = 'AUTO';
+        autoBtn.disabled = true;
+        autoBtn.style.opacity = '0.3';
+        autoBtn.title = 'Auto-battle disabled on APEX difficulty';
+    }
+    toast('APEX DIFFICULTY — Auto-battle DISABLED. All enemies are T0 +10 with full synergies!', 'err');
+} else {
+    const autoBtn = document.getElementById('autoBtn');
+    if(autoBtn) {
+        autoBtn.disabled = false;
+        autoBtn.style.opacity = '';
+        autoBtn.title = '';
+    }
+}
+// Campaign v2 boss battle enhancements
+if(currentBattleMode === 'campaign_v2' && currentBattleConfig?.boss) {
+    const config = currentBattleConfig;
+    const bookIdx = config.bookIdx || 0;
+    if(B.eUnits.length > 0) {
+        const boss = B.eUnits[B.eUnits.length - 1];
+        boss.maxHp = Math.round(boss.maxHp * (1.5 + bookIdx * 0.15));
+        boss.hp = boss.maxHp;
+        boss.atk = Math.round(boss.atk * (1.2 + bookIdx * 0.1));
+        boss.def = Math.round(boss.def * (1.2 + bookIdx * 0.1));
+        if(bookIdx >= 8) boss.grade = 'T0';
+        else if(bookIdx >= 5) boss.grade = 'S';
+        else if(bookIdx >= 3) boss.grade = 'A';
+        if(bookIdx >= 4) boss._distantCounter = true;
+        boss.personality = 'aggressive';
+    }
+}
+}
+
+function resizeCanvas(){
+const con=document.getElementById('mapWrap');if(!con||!B.canvas)return;
+const mW=con.clientWidth,mH=con.clientHeight;
+// Calculate cell size so the square fits perfectly inside the screen
+CS=Math.max(32,Math.floor(Math.min(mW/B.mapW,mH/B.mapH)));
+// Set internal resolution
+B.canvas.width=B.mapW*CS;
+B.canvas.height=B.mapH*CS;
+// Force CSS to match internal resolution (stops stretching)
+B.canvas.style.width=B.canvas.width+'px';
+B.canvas.style.height=B.canvas.height+'px';
+// Visually center the square map inside the rectangular container
+B.canvas.style.position='absolute';
+B.canvas.style.left=((mW-B.canvas.width)/2)+'px';
+B.canvas.style.top=((mH-B.canvas.height)/2)+'px';
+drawMap();
+}
+
+async function preloadImgs(){
+// Bug #63: Add timeout race to prevent infinite hang on broken images
+await Promise.all(B.allUnits.map(u=>new Promise(r=>{
+if(!u.src){r();return;}
+if(B.unitImgs[u.src]){u.img=B.unitImgs[u.src];r();return;}
+const img=new Image();
+const timeout=setTimeout(r,5000); // 5 second timeout
+img.onload=()=>{clearTimeout(timeout);B.unitImgs[u.src]=img;u.img=img;r();};
+img.onerror=()=>{clearTimeout(timeout);r();};
+img.src=u.src;
+})));
+}
+
+// ═══ MAP DRAWING ════════════════════════════════════════════
+function drawMap(){
+if(!B.ctx)return;
+const ctx=B.ctx,w=B.mapW,h=B.mapH;
+ctx.clearRect(0,0,B.canvas.width,B.canvas.height);
+
+// Terrain tiles with auto-tiling borders
+for(let y=0;y<h;y++)for(let x=0;x<w;x++){
+const t=B.grid[y][x],td=TERRAINS[t];
+const px=x*CS,py=y*CS;
+// Base color
+const g=ctx.createLinearGradient(px,py,px+CS,py+CS);
+g.addColorStop(0,td.c1);g.addColorStop(1,td.c2);
+ctx.fillStyle=g;ctx.fillRect(px,py,CS,CS);
+// Auto-tile borders - draw accent lines where terrain changes
+const dirs=[[0,-1,'top'],[0,1,'bot'],[-1,0,'left'],[1,0,'right']];
+dirs.forEach(([dx,dy,side])=>{
+const nx=x+dx,ny=y+dy;
+if(nx<0||ny<0||nx>=w||ny>=h)return;
+if(B.grid[ny][nx]!==t){
+ctx.strokeStyle='rgba(255,255,255,.06)';ctx.lineWidth=1;
+ctx.beginPath();
+if(side==='top'){ctx.moveTo(px,py);ctx.lineTo(px+CS,py);}
+if(side==='bot'){ctx.moveTo(px,py+CS);ctx.lineTo(px+CS,py+CS);}
+if(side==='left'){ctx.moveTo(px,py);ctx.lineTo(px,py+CS);}
+if(side==='right'){ctx.moveTo(px+CS,py);ctx.lineTo(px+CS,py+CS);}
+ctx.stroke();
+}
+});
+// Terrain icon
+if(t!=='plain'){
+ctx.save();ctx.globalAlpha=.35;
+ctx.font=`bold ${CS*.22}px ${t==='wall'?'monospace':'sans-serif'}`;
+ctx.fillStyle='#fff';ctx.textAlign='center';ctx.textBaseline='middle';
+ctx.fillText(td.label,px+CS/2,py+CS/2);
+ctx.restore();
+}
+// Lava glow
+if(t==='lava'){
+const lg=ctx.createRadialGradient(px+CS/2,py+CS/2,CS*.1,px+CS/2,py+CS/2,CS*.5);
+lg.addColorStop(0,'rgba(255,80,0,.15)');lg.addColorStop(1,'transparent');
+ctx.fillStyle=lg;ctx.fillRect(px,py,CS,CS);
+}
+// Fort heal indicator
+if(t==='fort'){
+ctx.fillStyle='rgba(34,197,94,.08)';ctx.fillRect(px,py,CS,CS);
+}
+}
+
+// Grid lines
+ctx.strokeStyle='rgba(255,255,255,.03)';ctx.lineWidth=.5;
+for(let x=0;x<=w;x++){ctx.beginPath();ctx.moveTo(x*CS,0);ctx.lineTo(x*CS,h*CS);ctx.stroke();}
+for(let y=0;y<=h;y++){ctx.beginPath();ctx.moveTo(0,y*CS);ctx.lineTo(w*CS,y*CS);ctx.stroke();}
+
+// Danger zone
+if(B.dangerZone){
+B.dangerCells.forEach(({x,y})=>{
+ctx.fillStyle='rgba(239,68,68,.15)';ctx.fillRect(x*CS,y*CS,CS,CS);
+ctx.strokeStyle='rgba(239,68,68,.3)';ctx.lineWidth=1;ctx.strokeRect(x*CS+1,y*CS+1,CS-2,CS-2);
+});
+}
+
+// Highlights
+B.highlights.forEach(c=>{
+const cols={move:'rgba(59,130,246,.2)',attack:'rgba(239,68,68,.25)',special:'rgba(251,191,36,.22)'};
+const strk={move:'#3b82f6',attack:'#ef4444',special:'#fbbf24'};
+ctx.fillStyle=cols[c.type]||cols.move;ctx.fillRect(c.x*CS+1,c.y*CS+1,CS-2,CS-2);
+ctx.strokeStyle=strk[c.type]||strk.move;ctx.lineWidth=1.5;ctx.strokeRect(c.x*CS+1.5,c.y*CS+1.5,CS-3,CS-3);
+});
+
+// Units
+B.allUnits.filter(u=>u.hp>0).forEach(u=>drawBUnit(ctx,u));
+// Auto-start animation loop while battle is active so water/lava keep animating
+if(B.phase&&B.phase!=='over'&&!_mapAnimRAF){
+_mapAnimRAF=requestAnimationFrame(function _animLoop(){
+if(B.ctx&&B.phase&&B.phase!=='over'){
+try{drawMapEnhanced();}catch(e){}
+_mapAnimRAF=requestAnimationFrame(_animLoop);
+}else{_mapAnimRAF=0;}
+});
+}
+        // After map draws, if auto is on and it's player phase, start auto
+        if(B.autoPlay && B.phase === 'player' && !_autoCheckPending) {
+            const hasUnacted = B.pUnits.some(u => u.hp > 0 && !u.acted);
+            if(hasUnacted) {
+                _autoCheckPending = true;
+                setTimeout(() => {
+                    _autoCheckPending = false;
+                    if(B.autoPlay && B.phase === 'player') runAutoPlayer();
+                }, CFG.AI_DELAY * 0.5);
+            }
+        }
+        // After map draws, if auto is on and it's player phase, start auto
+        if(B.autoPlay && B.phase === 'player' && !_autoCheckPending) {
+            const hasUnacted = B.pUnits.some(u => u.hp > 0 && !u.acted);
+            if(hasUnacted) {
+                _autoCheckPending = true;
+                setTimeout(() => {
+                    _autoCheckPending = false;
+                    if(B.autoPlay && B.phase === 'player') runAutoPlayer();
+                }, CFG.AI_DELAY * 0.5);
+            }
+        }
+}
+
+function drawBUnit(ctx,u){
+const px=u.x*CS,py=u.y*CS,pad=3,sz=CS-pad*2;
+const isP=u.side==='player',isSel=B.sel===u;
+
+if(isSel){
+ctx.shadowColor='rgba(251,191,36,.7)';ctx.shadowBlur=10;
+ctx.fillStyle='rgba(251,191,36,.08)';ctx.fillRect(px,py,CS,CS);
+ctx.shadowBlur=0;
+}
+
+// Portrait
+ctx.save();
+ctx.beginPath();ctx.arc(px+CS/2,py+CS/2,sz/2,0,Math.PI*2);ctx.clip();
+if(u.img?.complete&&u.img.naturalWidth>0){
+ctx.globalAlpha=(u.acted&&isP)?.4:1;
+ctx.drawImage(u.img,px+pad,py+pad,sz,sz);
+ctx.globalAlpha=1;
+}else{
+const hue=u.hue||((u.id*47)%360);
+const g=ctx.createRadialGradient(px+CS*.35,py+CS*.3,sz*.08,px+CS/2,py+CS/2,sz/2);
+g.addColorStop(0,`hsl(${hue},60%,55%)`);g.addColorStop(1,`hsl(${hue},50%,20%)`);
+ctx.fillStyle=g;ctx.fill();
+}
+ctx.restore();
+
+// Ring
+if(u.grade==='T0'){
+const t=Date.now()*.003;
+for(let i=0;i<6;i++){
+ctx.strokeStyle=`hsl(${i*60+t*60%360},90%,60%)`;ctx.lineWidth=1.5;ctx.globalAlpha=.7;
+ctx.beginPath();ctx.arc(px+CS/2,py+CS/2,sz/2,i/6*Math.PI*2+t,i/6*Math.PI*2+t+Math.PI/3);ctx.stroke();
+}ctx.globalAlpha=1;
+}else{
+ctx.strokeStyle=isSel?'#fbbf24':isP?'#3b82f6':'#ef4444';ctx.lineWidth=isSel?2.5:1.5;
+ctx.beginPath();ctx.arc(px+CS/2,py+CS/2,sz/2,0,Math.PI*2);ctx.stroke();
+}
+
+// HP bar
+const hpR=u.hp/u.maxHp;
+const bw=sz,bh=Math.max(3,CS*.06),bx=px+pad,by=py+CS-pad-bh;
+ctx.fillStyle='rgba(0,0,0,.6)';roundRect(ctx,bx,by,bw,bh,1);ctx.fill();
+ctx.fillStyle=hpR>.5?'#22c55e':hpR>.25?'#f59e0b':'#ef4444';
+roundRect(ctx,bx,by,bw*hpR,bh,1);ctx.fill();
+
+// Weapon type indicator
+ctx.fillStyle=WEAPON_COLORS[u.weapon]||'#888';
+ctx.beginPath();ctx.arc(px+CS-pad-4,py+pad+4,3,0,Math.PI*2);ctx.fill();
+
+// Status icons
+let ix=px+pad;
+if(u.frozen){ctx.fillStyle='rgba(0,229,255,.7)';ctx.font=`${CS*.15}px sans-serif`;ctx.fillText('*',ix,py+pad+CS*.2);ix+=8;}
+if(u.shielded){ctx.fillStyle='rgba(251,191,36,.7)';ctx.font=`${CS*.15}px sans-serif`;ctx.fillText('O',ix,py+pad+CS*.2);}
+
+// Special charge dots
+for(let i=0;i<Math.min(u.special.cd,5);i++){
+ctx.beginPath();ctx.arc(px+pad+i*6+3,py+pad+3,2,0,Math.PI*2);
+ctx.fillStyle=i<(u.special.cd-u.specialCharges)?'#fbbf24':'rgba(255,255,255,.1)';ctx.fill();
+}
+}
+
+function roundRect(ctx,x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.lineTo(x+w-r,y);ctx.quadraticCurveTo(x+w,y,x+w,y+r);ctx.lineTo(x+w,y+h-r);ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);ctx.lineTo(x+r,y+h);ctx.quadraticCurveTo(x,y+h,x,y+h-r);ctx.lineTo(x,y+r);ctx.quadraticCurveTo(x,y,x+r,y);ctx.closePath();}
+
+// ═══ PATHFINDING ════════════════════════════════════════════
+function unitAt(x,y){return B.allUnits.find(u=>u.x===x&&u.y===y&&u.hp>0);}
+
+function canTraverse(unit,x,y){
+const t=B.grid[y]?.[x];if(!t)return false;
+const td=TERRAINS[t];
+if(!td.passable)return false;
+if(unit.moveType==='Cavalry'&&(t==='rough'||t==='forest'))return false;
+if(unit.moveType==='Flying')return true;
+return true;
+}
+
+function moveCost(unit,x,y){
+    if(unit.moveType==='Flying')return 1;
+    const t=B.grid[y]?.[x];if(!t)return 99;
+    const td=TERRAINS[t];
+    if(!td.passable)return 99;
+    // Cavalry gets stuck in forests and rough terrain
+    if(unit.moveType==='Cavalry'&&(t==='rough'||t==='forest'))return 99;
+    
+    // Return base terrain cost (Removed the +2 enemy penalty)
+    return td.movCost; 
+}
+
+function getReachable(unit){
+const visited=new Map();
+const queue=[{x:unit.x,y:unit.y,cost:0}];
+visited.set(`${unit.x},${unit.y}`,0);
+const result=[];
+while(queue.length){
+queue.sort((a,b)=>a.cost-b.cost);
+const{x,y,cost}=queue.shift();
+for(const[dx,dy]of[[0,-1],[0,1],[-1,0],[1,0]]){
+const nx=x+dx,ny=y+dy;
+if(nx<0||ny<0||nx>=B.mapW||ny>=B.mapH)continue;
+if(!canTraverse(unit,nx,ny))continue;
+const nc=cost+moveCost(unit,nx,ny);
+if(nc>unit.mov)continue;
+const k=`${nx},${ny}`;
+if(visited.has(k)&&visited.get(k)<=nc)continue;
+const blocker=unitAt(nx,ny);
+if(blocker&&blocker!==unit){
+// Enemies block completely; allies can be passed through but not landed on
+if(blocker.side!==unit.side)continue;
+// Can traverse through ally tile — continue pathfinding but don't add as landing spot
+if(!visited.has(k)||visited.get(k)>nc){visited.set(k,nc);queue.push({x:nx,y:ny,cost:nc});}
+continue;
+}
+visited.set(k,nc);result.push({x:nx,y:ny,type:'move'});
+queue.push({x:nx,y:ny,cost:nc});
+}
+}return result;
+}
+
+function astar(sx,sy,gx,gy,unit){
+const key=(x,y)=>`${x},${y}`;
+const h=(x,y)=>Math.abs(x-gx)+Math.abs(y-gy);
+const open=new Map(),closed=new Set();
+const start={x:sx,y:sy,g:0,h:h(sx,sy),p:null};start.f=start.h;
+open.set(key(sx,sy),start);
+while(open.size){
+let cur=null;for(const n of open.values())if(!cur||n.f<cur.f)cur=n;
+if(cur.x===gx&&cur.y===gy){
+const path=[];let n=cur;while(n){path.unshift({x:n.x,y:n.y});n=n.p;}return path.slice(1);
+}
+open.delete(key(cur.x,cur.y));closed.add(key(cur.x,cur.y));
+for(const[dx,dy]of[[0,-1],[0,1],[-1,0],[1,0]]){
+const nx=cur.x+dx,ny=cur.y+dy;
+if(nx<0||ny<0||nx>=B.mapW||ny>=B.mapH)continue;
+if(closed.has(key(nx,ny)))continue;
+if(!canTraverse(unit,nx,ny))continue;
+const ng=cur.g+moveCost(unit,nx,ny);
+if(ng>unit.mov)continue;
+if(nx!==gx||ny!==gy){const bl=unitAt(nx,ny);if(bl&&bl.side!==unit.side)continue;}// allies passable, enemies blocked
+const ek=key(nx,ny),ex=open.get(ek);
+if(!ex||ng<ex.g){const nh=h(nx,ny);open.set(ek,{x:nx,y:ny,g:ng,h:nh,f:ng+nh,p:cur});}
+}
+}return null;
+}
+
+function getAtkRange(unit){
+const range=(['Bow','Dagger','Sniper'].includes(unit.weapon)||unit.role==='Sniper')?2:1; // Bug #20: add Dagger
+const cells=[];
+for(let dy=-range;dy<=range;dy++)for(let dx=-range;dx<=range;dx++){
+const d=Math.abs(dx)+Math.abs(dy);if(d===0||d>range)continue;
+if(d<range&&unit.weapon==='Bow')continue; // Bows are 2-only, daggers/snipers hit at 1 and 2
+const nx=unit.x+dx,ny=unit.y+dy;
+if(nx<0||ny<0||nx>=B.mapW||ny>=B.mapH)continue;
+const t=unitAt(nx,ny);
+// Highlight enemies OR breakable walls within weapon range
+if((t&&t.side!==unit.side)||(B.grid[ny]?.[nx]==='wall'&&wallHpMap&&wallHpMap.has(`${nx},${ny}`)))
+cells.push({x:nx,y:ny,type:'attack'});
+}return cells;
+}
+
+function getWeaponRange(weapon){return(weapon==='Bow'||weapon==='Dagger')?2:1;}
+
+// ═══ DANGER ZONE ════════════════════════════════════════════
+function toggleDangerZone(){
+B.dangerZone=!B.dangerZone;
+document.getElementById('dzoneBtn').classList.toggle('active',B.dangerZone);
+if(B.dangerZone)calcDangerZone();else B.dangerCells=[];
+drawMap();
+}
+
+function calcDangerZone(){
+const cells=new Set();
+B.eUnits.filter(u=>u.hp>0).forEach(e=>{
+// Get all cells enemy could move to
+const reachable=getReachable(e);
+reachable.push({x:e.x,y:e.y});
+const wRange=getWeaponRange(e.weapon);
+reachable.forEach(c=>{
+for(let dy=-wRange;dy<=wRange;dy++)for(let dx=-wRange;dx<=wRange;dx++){
+const d=Math.abs(dx)+Math.abs(dy);if(d===0||d>wRange)continue;
+const nx=c.x+dx,ny=c.y+dy;
+if(nx>=0&&ny>=0&&nx<B.mapW&&ny<B.mapH)cells.add(`${nx},${ny}`);
+}
+});
+});
+B.dangerCells=[...cells].map(k=>{const[x,y]=k.split(',');return{x:+x,y:+y};});
+}
+
+// ═══ DAMAGE CALC ════════════════════════════════════════════
+    function calcDmg(atker, target, isSpecial){
+        let atkBonus=0, defBonus=0;
+        atker.passives?.forEach(p=>{
+            if(p.trigger==='OnAttack'&&p.effect?.tag==='initiate_atk'&&evalCondition(p.condition,atker,target)) atkBonus+=p.effect.val;
+        });
+        target.passives?.forEach(p=>{
+            if(p.trigger==='OnDefend'&&p.effect?.tag==='defend_def'&&evalCondition(p.condition,target,atker)) defBonus+=p.effect.val;
+        });
+        const sa=atker.atk, sd=target.def;
+        atker.atk+=atkBonus; target.def+=defBonus;
+        atker.atk=sa; target.def=sd;
+        return r;
+    };
+
+function evalCondition(cond,self,target){
+if(cond==='Always')return true;
+if(cond==='HP<50%')return self.hp<self.maxHp*.5;
+if(cond==='HP<75%')return self.hp<self.maxHp*.75;
+if(cond==='HP<80%')return self.hp<self.maxHp*.8;
+if(cond==='HP>50%')return self.hp>self.maxHp*.5;
+if(cond==='HP>75%')return self.hp>self.maxHp*.75;
+if(cond==='IsArmored')return self.moveType==='Armored';
+if(cond==='InForest')return B.grid[self.y]?.[self.x]==='forest';
+if(cond==='Speed>Target')return target&&(self.spd+(self._tempSpd||0))>(target.spd+(target._tempSpd||0));
+if(cond==='IsSolo')return!B.allUnits.some(u=>u!==self&&u.side===self.side&&u.hp>0&&Math.abs(u.x-self.x)+Math.abs(u.y-self.y)<=2);
+if(cond==='EnemyCount>=3')return B.allUnits.filter(u=>u.side!==self.side&&u.hp>0).length>=3;
+if(cond==='AdjacentAlly')return B.allUnits.some(u=>u!==self&&u.side===self.side&&u.hp>0&&Math.abs(u.x-self.x)+Math.abs(u.y-self.y)===1);
+if(cond==='NoAdjacentAlly')return!B.allUnits.some(u=>u!==self&&u.side===self.side&&u.hp>0&&Math.abs(u.x-self.x)+Math.abs(u.y-self.y)===1);
+return true;
+}
+
+function doubles(atker,target){
+if(target&&target._itemAntiDouble)return false;
+if(atker&&atker._itemAlwaysDouble)return true;
+if(atker&&atker._guaranteedFollow)return true;
+const spdBonus=(atker._tempSpd||0);
+return(atker.spd+spdBonus)>=target.spd+5;
+}
+
+// ═══ FORECAST ═══════════════════════════════════════════════
+function showFC(atker,target,isSpec,e){
+if(!S.forecastOn)return;
+// Save and restore _tempSpd to prevent stacking on repeated hover
+const savedAtkerSpd=atker._tempSpd;const savedTargetSpd=target._tempSpd;
+const savedGuard=target._guardReduction;const savedDodge=target._dodgeReduction;
+atker._tempSpd=0;target._tempSpd=0;
+const fc=document.getElementById('forecast');
+const d=calcDmg(atker,target,isSpec,true);
+const dbl=doubles(atker,target);
+const wAdv=WEAPON_TRIANGLE[atker.weapon]===target.weapon;
+const wDis=WEAPON_TRIANGLE[target.weapon]===atker.weapon;
+const wRange=getWeaponRange(target.weapon);
+const dist=Math.abs(atker.x-target.x)+Math.abs(atker.y-target.y);
+const canCounter=dist<=wRange||target._distantCounter;
+let html=`<div style="font-family:var(--display);font-size:.6rem;color:var(--t0);letter-spacing:1px;margin-bottom:4px">COMBAT FORECAST</div>`;
+html+=`<div class="fc-row"><span class="fc-lbl">${isSpec?atker.special.name:'Attack'}</span><span class="fc-val" style="color:var(--red)">${d.dmg}${d.crit?' CRIT':''}</span></div>`;
+if(wAdv)html+=`<div style="font-size:.55rem;color:var(--green)">Weapon advantage!</div>`;
+if(wDis)html+=`<div style="font-size:.55rem;color:var(--red)">Weapon disadvantage</div>`;
+if(dbl)html+=`<div style="font-size:.55rem;color:var(--gold)">Double attack!</div>`;
+html+=`<hr style="border:none;border-top:1px solid var(--border);margin:3px 0">`;
+html+=`<div style="font-size:.55rem;color:var(--text2)">${target.name} HP: ${target.hp}/${target.maxHp}</div>`;
+if(canCounter){
+const cd=calcDmg(target,atker,false,true);
+html+=`<div class="fc-row"><span class="fc-lbl" style="font-size:.55rem">Counter</span><span class="fc-val" style="color:#f97316">${cd.dmg}</span></div>`;
+}
+// Restore saved state — don't let the forecast mutate combat state
+atker._tempSpd=savedAtkerSpd;target._tempSpd=savedTargetSpd;
+target._guardReduction=savedGuard;target._dodgeReduction=savedDodge;
+fc.innerHTML=html;fc.classList.add('show');
+// Bug #4: Position forecast relative to viewport to prevent clipping
+let tx=e.clientX+10,ty=e.clientY-10;
+if(tx+170>window.innerWidth)tx=e.clientX-180;
+if(ty<0)ty=5;
+if(ty+150>window.innerHeight)ty=window.innerHeight-155;
+fc.style.position='fixed';fc.style.left=tx+'px';fc.style.top=ty+'px';fc.style.zIndex='9999';
+document.body.appendChild(fc);
+}
+
+function hideFC(){document.getElementById('forecast').classList.remove('show');}
+
+// ═══ BATTLE INTERACTION ═════════════════════════════════════
+function battleClick(e){
+if(B.phase!=='player'||B.phase==='over')return;
+const rect=B.canvas.getBoundingClientRect();
+const gx=Math.floor((e.clientX-rect.left)/CS),gy=Math.floor((e.clientY-rect.top)/CS);
+if(gx<0||gx>=B.mapW||gy<0||gy>=B.mapH)return;
+
+if(B.mode==='select'){
+const clicked=unitAt(gx,gy);
+if(clicked){
+B.sel=clicked;
+B.highlights=[];
+drawMap();
+updateBUI();
+} else {
+B.sel=null;
+B.highlights=[];
+drawMap();
+updateBUI();
+}
+return;
+}
+if(B.mode==='move'){
+const cell=B.highlights.find(c=>c.x===gx&&c.y===gy);
+if(cell&&B.sel){
+const u=B.sel;B.mode='select';B.highlights=[];
+B.canvas.onclick=null;
+const path=astar(u.x,u.y,gx,gy,u)||[{x:gx,y:gy}];
+u.moved=true; // Bug #21: set immediately to prevent double-move exploit
+animateMove(u,path,()=>{B.canvas.onclick=battleClick;drawMap();updateBUI();bLog(`${u.name} moves`,'sys');});
+}else{B.mode='select';B.highlights=[];drawMap();}
+return;
+}
+if(B.mode==='assist'){
+const target=unitAt(gx,gy);
+const inRange=B.highlights.find(c=>c.x===gx&&c.y===gy);
+if(target&&target.side==='player'&&inRange&&B.sel){
+executeAssist(B.sel,target);
+B.mode='select';B.highlights=[];
+}else{B.mode='select';B.highlights=[];drawMap();}
+return;
+}
+if(B.mode==='attack'||B.mode==='special'){
+const target=unitAt(gx,gy);
+const inRange=B.highlights.find(c=>c.x===gx&&c.y===gy);
+if(target&&target.side!=='player'&&inRange&&B.sel){
+// Bug #2: On touch devices, first tap shows forecast, second tap confirms attack
+const isTouchDevice='ontouchstart' in window;
+if(isTouchDevice&&B.lockedTarget!==target){
+B.lockedTarget=target;
+showFC(B.sel,target,B.mode==='special',e);
+drawMap();return;
+}
+hideFC();B.lockedTarget=null;
+performCombat(B.sel,target,B.mode==='special');
+B.mode='select';B.highlights=[];
+}else{
+// Check if clicking a wall to attack it (respects weapon range)
+const tile=B.grid[gy]?.[gx];
+if(tile==='wall'&&B.sel&&!B.sel.acted){
+const udist=Math.abs(B.sel.x-gx)+Math.abs(B.sel.y-gy);
+const atkRange=(['Bow','Dagger','Sniper'].includes(B.sel.weapon)||B.sel.role==='Sniper')?2:1; // Bug #43: add Dagger
+if(udist<=atkRange){attackWall(B.sel,gx,gy);B.mode='select';B.highlights=[];return;}
+}
+B.mode='select';B.highlights=[];drawMap();
+}
+return;
+}
+        // After click, check if a bow unit has no attack targets
+        if(B.sel && B.mode === 'attack' && B.highlights.length === 0) {
+            if(['Bow','Sniper'].includes(B.sel.weapon) || B.sel.role === 'Sniper') {
+                // Check if there are adjacent enemies
+                const adj = [[0,-1],[0,1],[-1,0],[1,0]];
+                const hasAdjacentEnemy = adj.some(([dx,dy]) => {
+                    const u = unitAt(B.sel.x+dx, B.sel.y+dy);
+                    return u && u.side !== B.sel.side;
+                });
+                if(hasAdjacentEnemy) {
+                    toast('Bows cannot attack adjacent enemies — they only hit at range 2+', 'err');
+                }
+            }
+        }
+}
+
+function battleHover(e){
+if(B.phase!=='player')return;
+const rect=B.canvas.getBoundingClientRect();
+const gx=Math.floor((e.clientX-rect.left)/CS),gy=Math.floor((e.clientY-rect.top)/CS);
+if(gx<0||gx>=B.mapW||gy<0||gy>=B.mapH){hideFC();return;}
+if(gx===B.hover.x&&gy===B.hover.y)return;
+B.hover={x:gx,y:gy};
+if((B.mode==='attack'||B.mode==='special')&&B.sel){
+const target=unitAt(gx,gy);
+const inRange=B.highlights.find(c=>c.x===gx&&c.y===gy);
+if(target&&target.side!=='player'&&inRange)showFC(B.sel,target,B.mode==='special',e);
+else hideFC();
+}else hideFC();
+drawMap();
+}
+
+function doMove(){
+const u=B.sel;if(!u||u.moved||u.acted)return;
+if(u.frozen){toast('Unit is frozen!','err');return;}
+B.mode='move';B.highlights=getReachable(u);drawMap();sfx('click');
+}
+
+function doAttack(){
+const u=B.sel;if(!u||u.acted)return;
+B.mode='attack';B.highlights=getAtkRange(u);
+if(!B.highlights.length){toast('No targets in range','err');B.mode='select';return;}
+drawMap();sfx('click');
+}
+
+function doSpecial(){
+const u=B.sel;if(!u||u.specialCharges>0||u.acted){toast('Special not ready','err');return;}
+// Map-wide effects (from mega patch)
+const mapEffects=[
+'heal_self','shield','aura_heal',
+'map_quake','map_blizzard','map_fire','map_heal','map_timestop',
+'heal_all','heal_all_full','buff_all_atk','buff_all_def',
+'buff_all_spd','buff_all_spectrum','buff_all_full',
+'debuff_all_aoe','panic_all','gravity_all'
+];
+if(mapEffects.includes(u.special.effect)){
+if(['heal_self','shield','aura_heal'].includes(u.special.effect)){
+gameConfirm(
+`Use ${u.special.name}? (${u.special.desc})`,
+()=>{ _hfExecuteMapSpecial(u); },
+()=>{ B.mode='select'; }
+);
+return;
+}
+_hfExecuteMapSpecial(u);return;
+}
+B.mode='special';B.highlights=getAtkRange(u);
+if(!B.highlights.length){toast('No targets','err');B.mode='select';return;}
+drawMap();sfx('click');
+}
+
+
+function doWait(){
+const u=B.sel;if(!u)return;
+markActed(u);B.sel=null;B.highlights=[];B.mode='select';
+if(B.dangerZone)calcDangerZone(); // Bug #36
+drawMap();updateBUI();checkTurnEnd();bLog(`${u.name} waits`,'sys');
+}
+
+function markActed(u){u.acted=u.moved=true;delete u._tempSpd;}
+
+// ═══ COMBAT EXECUTION ═══════════════════════════════════════
+function performCombat(atker,target,isSpecial=false,isInitiating=true){
+            if(atker && !atker.special) atker.special = {name:'None',desc:'',effect:'none',val:0,cd:99};
+            if(target && !target.special) target.special = {name:'None',desc:'',effect:'none',val:0,cd:99};
+if(!atker||!target)return;
+// Reset per-combat item flags
+if(atker){atker._firstHitTaken=false;atker._miracleUsed=false;}
+if(target&&target!==atker){target._firstHitTaken=false;target._miracleUsed=false;}
+const isSelf=atker===target;
+
+if(isSpecial&&isSelf){
+const sp=atker.special;
+if(sp.effect==='heal_self'){
+const h=Math.round(atker.maxHp*sp.val);atker.hp=Math.min(atker.maxHp,atker.hp+h);
+bLog(`${atker.name}: ${sp.name} +${h} HP`,'spec');floatTxt(atker.x,atker.y,'+'+h,'#22c55e');sfx('heal');
+}
+if(sp.effect==='shield'){atker.shielded=true;bLog(`${atker.name}: Shield active`,'spec');}
+if(sp.effect==='aura_heal'){
+B.allUnits.filter(u=>u.side===atker.side&&u.hp>0&&u!==atker&&Math.abs(u.x-atker.x)+Math.abs(u.y-atker.y)<=2).forEach(a=>{
+a.hp=Math.min(a.maxHp,a.hp+sp.val);floatTxt(a.x,a.y,'+'+sp.val,'#22c55e');
+});bLog(`${atker.name}: ${sp.name} heals allies`,'spec');sfx('heal');
+}
+atker.specialCharges=atker.special.cd;
+markActed(atker);drawMap();updateBUI();updateEList();checkTurnEnd();return;
+}
+
+if(!isSelf){
+// Check Vantage
+let vantage=false;
+target.passives?.forEach(p=>{
+if(p.effect.tag==='vantage'&&target.hp<target.maxHp*.75)vantage=true;
+});
+
+const executeHit=(a,d,spec,isDoubleHit=false)=>{
+bumpAnim(a,d);
+fireProjectile(a,d);
+// Sentinel synergy: 50% chance to negate the hit entirely
+if(d._negateChance&&Math.random()<d._negateChance){
+floatTxt(d.x,d.y,'NEGATED!','#60a5fa');bLog(`${d.name} negated the hit!`,'spec');return{dmg:0,crit:false};
+}
+const result=calcDmg(a,d,spec);
+// Duelist synergy: double attacks deal bonus damage
+if(isDoubleHit&&a._doubleBonus)result.dmg+=a._doubleBonus;
+// Ravager synergy: crits prevent overkill (target kept at 1 HP)
+if(result.crit&&a._critOverkill&&d.hp>1)result.dmg=Math.min(result.dmg,d.hp-1);
+d.hp=Math.max(0,d.hp-result.dmg);
+// Miracle item: survive one lethal hit per combat
+if(d.hp<=0&&d._itemMiracle&&!d._miracleUsed){d.hp=1;d._miracleUsed=true;if(typeof floatTxt==='function')floatTxt(d.x,d.y,'MIRACLE!','#00e5ff');bLog(`${d.name} survived by a miracle!`,'spec');}
+
+if(result.crit){
+screenShake();sfx('crit');
+hitStop(d.x,d.y); // Impact frame: white flash + freeze
+bLog(`CRIT! ${a.name} -> ${d.name}: ${result.dmg}`,'crit');
+}else{
+sfx('attack');
+bLog(`${a.name} -> ${d.name}: ${result.dmg}${spec?' ('+a.special.name+')':''}${d.hp<=0?' DEFEATED':''}`,'dmg');
+}
+floatTxt(d.x,d.y,'-'+result.dmg,result.crit?'#ff2d55':'#ef4444',result.crit);
+// Killing Edge: reduce special CD by 1
+if(a.weaponEffect==='killing_edge'&&a.specialCharges>0){a.specialCharges=Math.max(0,a.specialCharges-1);}
+// Gravity passive: target can't move next turn
+a.passives?.forEach(p=>{if(p.effect.tag==='gravity'&&evalCondition(p.condition,a,d))d.gravityApplied=true;});
+// Trickster synergy: gravity on all hits
+if(a._gravityHit)d.gravityApplied=true;
+// Panic passive: target's buffs become debuffs
+a.passives?.forEach(p=>{if(p.effect.tag==='panic'&&evalCondition(p.condition,a,d)&&!d._antiPanic){d._panicked=true;bLog(`${d.name} Panicked!`,'spec');}});
+// Trickster synergy: steal buffs after hit
+if(a._stealBuffs&&Math.random()<a._stealBuffs){
+const stealable=['_tempSpd'];if(d._tempSpd>0){a._tempSpd=(a._tempSpd||0)+d._tempSpd;d._tempSpd=0;bLog(`${a.name} stole buffs from ${d.name}!`,'spec');}
+}
+
+// Lifesteal
+if(spec&&(a.special.effect==='lifesteal')){
+const h=Math.round(result.dmg*a.special.val);a.hp=Math.min(a.maxHp,a.hp+h);
+floatTxt(a.x,a.y,'+'+h,'#22c55e');
+}
+// AoE
+if(spec&&a.special.effect==='aoe'){
+B.allUnits.filter(u=>u.side!==a.side&&u.hp>0&&u!==d&&Math.abs(u.x-d.x)+Math.abs(u.y-d.y)<=1).forEach(ae=>{
+const aoe=Math.round(result.dmg*a.special.val);ae.hp=Math.max(0,ae.hp-aoe);
+floatTxt(ae.x,ae.y,'-'+aoe,'#ef4444');bLog(`AoE: ${ae.name} -${aoe}`,'dmg');
+});
+}
+// Extra action (Galeforce) - once per turn only (Bug #67)
+if(spec&&a.special.effect==='extra_action'&&!a._galeforceUsed){a.extraAction=true;a._galeforceUsed=true;bLog(`${a.name} gains extra action!`,'spec');}
+
+// Post-combat effects from passives
+a.passives?.forEach(p=>{
+if(p.trigger==='OnAttack'&&evalCondition(p.condition,a,d)){
+if(p.effect.tag==='poison'){d.poisoned+=p.effect.val;bLog(`${d.name} poisoned!`,'dmg');}
+if(p.effect.tag==='burn'){d.burned+=p.effect.val;bLog(`${d.name} burned!`,'dmg');}
+if(p.effect.tag==='freeze'){d.frozen=true;bLog(`${d.name} frozen!`,'dmg');}
+if(p.effect.tag==='push'){
+const dx=d.x-a.x,dy=d.y-a.y;
+const nx=d.x+(dx?dx/Math.abs(dx):0),ny=d.y+(dy?dy/Math.abs(dy):0);
+if(nx>=0&&ny>=0&&nx<B.mapW&&ny<B.mapH&&!unitAt(nx,ny)&&TERRAINS[B.grid[ny]?.[nx]]?.passable){
+d.x=nx;d.y=ny;bLog(`${d.name} pushed!`,'sys');
+}
+}
+// Bug #40: Lunge swaps positions
+if(p.effect.tag==='lunge'&&d.hp>0){
+const tx=a.x,ty=a.y;a.x=d.x;a.y=d.y;d.x=tx;d.y=ty;
+bLog(`${a.name} and ${d.name} swap positions!`,'sys');
+}
+if(p.effect.tag==='heal'){a.hp=Math.min(a.maxHp,a.hp+p.effect.val);floatTxt(a.x,a.y,'+'+p.effect.val,'#22c55e');}
+}
+if(p.trigger==='OnKill'&&d.hp<=0&&evalCondition(p.condition,a,d)){
+if(p.effect.tag==='heal'){a.hp=Math.min(a.maxHp,a.hp+p.effect.val);}
+}
+});
+// OnDefend passives for the defender fire post-hit
+d.passives?.forEach(p=>{
+if(p.trigger==='OnDefend'&&evalCondition(p.condition,d,a)){
+if(p.effect.tag==='heal'){d.hp=Math.min(d.maxHp,d.hp+p.effect.val);floatTxt(d.x,d.y,'+'+p.effect.val,'#22c55e');}
+if(p.effect.tag==='poison'){a.poisoned=(a.poisoned||0)+p.effect.val;}
+if(p.effect.tag==='burn'){a.burned=(a.burned||0)+p.effect.val;}
+}
+});
+return result;
+};
+
+// Vantage: target attacks first
+if(vantage&&!isSpecial){
+const dist=Math.abs(atker.x-target.x)+Math.abs(atker.y-target.y);
+const defRange=getWeaponRange(target.weapon);
+if(target.hp>0&&(dist<=defRange||target._distantCounter)){
+bLog(`${target.name} Vantage!`,'spec');
+executeHit(target,atker,false);
+if(atker.hp<=0){markActed(atker);hitPause(()=>{drawMap();updateBUI();updateEList();checkBattleOver()||checkTurnEnd();});return;}
+}
+}
+
+// Main attack
+if(isSpecial)bLog(`${atker.name}: ${atker.special.name}!`,'spec');
+const r1=executeHit(atker,target,isSpecial);
+if(isSpecial)atker.specialCharges=atker.special.cd;
+else atker.specialCharges=Math.max(0,atker.specialCharges-1);
+
+// Brave: attack twice (from passive or weapon effect) — only when initiating
+let brave=false;
+if(isInitiating){
+atker.passives?.forEach(p=>{if(p.effect.tag==='brave'&&p.trigger==='OnAttack'&&evalCondition(p.condition,atker,target))brave=true;});
+if(atker.weaponEffect==='brave_sword')brave=true;
+}
+if(brave&&target.hp>0){
+// Bug #34: dynamically trigger special if charges hit 0
+const braveSpec=!isSpecial&&atker.special&&atker.specialCharges===0;
+bLog(`${atker.name} Brave!`,'spec');
+executeHit(atker,target,braveSpec);
+if(braveSpec)atker.specialCharges=atker.special.cd;
+else if(!braveSpec)atker.specialCharges=Math.max(0,atker.specialCharges-1);
+}
+// Gravity: applied via passive, carry over gravityApplied flag after combat
+// Pass passive: handled in getReachable
+
+// Compute follow-up and desperation once
+const canDouble=doubles(atker,target);
+let desperation=false;
+atker.passives?.forEach(p=>{if(p.effect.tag==='desperation'&&atker.hp<atker.maxHp*.75)desperation=true;});
+
+// Desperation follow-up: attacks before counter
+if(canDouble&&desperation&&target.hp>0){
+const despSpec=atker.special&&atker.specialCharges===0&&!['heal_self','shield','aura_heal','extra_action'].includes(atker.special.effect);
+executeHit(atker,target,despSpec,true);
+if(despSpec)atker.specialCharges=atker.special.cd;
+else atker.specialCharges=Math.max(0,atker.specialCharges-1);
+bLog(`${atker.name} Desperation follow-up!`,'spec');
+}
+
+// Counter
+const dist=Math.abs(atker.x-target.x)+Math.abs(atker.y-target.y);
+const defRange=getWeaponRange(target.weapon);
+if(target.hp>0&&(dist<=defRange||target._distantCounter)&&!vantage){
+const defSpec1=target.special&&target.specialCharges===0&&!['heal_self','shield','aura_heal','extra_action'].includes(target.special.effect);
+executeHit(target,atker,defSpec1);
+if(defSpec1)target.specialCharges=target.special.cd;
+else target.specialCharges=Math.max(0,target.specialCharges-1);
+// Defender follow-up: Quick Riposte (OnDefend brave) or natural speed advantage
+let defQuickRiposte=false;
+target.passives?.forEach(p=>{if(p.trigger==='OnDefend'&&p.effect.tag==='brave'&&evalCondition(p.condition,target,atker))defQuickRiposte=true;});
+if((defQuickRiposte||doubles(target,atker))&&atker.hp>0){
+bLog(`${target.name} counter follow-up!`,'spec');
+const defSpec2=target.special&&target.specialCharges===0&&!['heal_self','shield','aura_heal','extra_action'].includes(target.special.effect);
+executeHit(target,atker,defSpec2);
+if(defSpec2)target.specialCharges=target.special.cd;
+else target.specialCharges=Math.max(0,target.specialCharges-1);
+}
+}
+
+// Normal follow-up (only if desperation didn't already fire)
+if(canDouble&&!desperation&&target.hp>0){
+const dblSpec=atker.special&&atker.specialCharges===0&&!['heal_self','shield','aura_heal','extra_action'].includes(atker.special.effect);
+executeHit(atker,target,dblSpec,true);
+if(dblSpec)atker.specialCharges=atker.special.cd;
+}
+
+// Shard drop chance
+if(target.hp<=0&&atker.side==='player'){
+if(Math.random()<.15){
+const rosterUnit=S.roster.find(u=>u.name===atker.name);
+if(rosterUnit){rosterUnit.shards=(rosterUnit.shards||0)+1;bLog(`${atker.name} earned an Apex Shard!`,'spec');}
+}
+}
+}
+
+if(!atker.extraAction)markActed(atker);
+else{atker.extraAction=false;atker.acted=false;atker.moved=false;bLog(`${atker.name} acts again!`,'spec');}
+
+hitPause(()=>{
+if(B.dangerZone)calcDangerZone(); // Bug #36
+drawMap();updateBUI();updateEList();
+if(!checkBattleOver())checkTurnEnd();
+});
+        if(!target||!atker) return;
+        if(target.hp>0) atker.passives?.forEach(p=>{
+            if(p.effect?.tag==='post_combat_debuff_atk'&&evalCondition(p.condition||'Always',atker,target))
+                target._rallyAtk=Math.min(target._rallyAtk||0,-(p.effect.val||5));
+        });
+        if(target.hp>0&&atker.hp>0){
+            if(atker._itemOnHitBurn>0) target.burned=(target.burned||0)+atker._itemOnHitBurn;
+            if(atker._itemOnHitFreeze&&Math.random()<atker._itemOnHitFreeze) target.frozen=true;
+            if(atker._itemOnHitPoison>0) target.poisoned=(target.poisoned||0)+atker._itemOnHitPoison;
+            if(atker._itemOnHitPanic&&Math.random()<atker._itemOnHitPanic) target._panicked=true;
+        }
+        if(atker._itemLifesteal>0&&atker.hp>0&&target){
+            const est=Math.max(1,atker.atk-(target.def||0));
+            const h=Math.round(est*atker._itemLifesteal);
+            if(h>0){ atker.hp=Math.min(atker.maxHp,atker.hp+h); floatTxt(atker.x,atker.y,'+'+h,'#22c55e'); }
+        }
+        if(target._itemReflect>0&&atker.hp>0){
+            const est=Math.max(1,atker.atk-(target.def||0));
+            const ref=Math.round(est*target._itemReflect);
+            if(ref>0){ atker.hp=Math.max(0,atker.hp-ref); floatTxt(atker.x,atker.y,'-'+ref,'#a855f7'); }
+        }
+
+        // After combat, check for adjacent allies to bond with
+        if(atker && atker.side === 'player' && atker.hp > 0) {
+            const allies = B.pUnits.filter(u => u.hp > 0 && u !== atker &&
+                Math.abs(u.x - atker.x) + Math.abs(u.y - atker.y) <= 2);
+            allies.forEach(ally => {
+                addSupport(atker.id, ally.id, BOND_PER_BATTLE_ADJ);
+                // Spawn visual heart on the map
+                spawnBattleHeart(atker.x, atker.y);
+            });
+        }
+
+        // Check if an assist was used (heal/dance)
+        if(atker && target && atker.side === target.side && atker.side === 'player') {
+            addSupport(atker.id, target.id, BOND_PER_ASSIST);
+            spawnBattleHeart(target.x, target.y);
+        }
+}
+
+function screenShake(){
+B.shaking=true;const el=document.getElementById('mapWrap');el.classList.add('shake');
+setTimeout(()=>{el.classList.remove('shake');B.shaking=false;},150);
+}
+
+function hitPause(cb){setTimeout(cb,100);}
+
+if(!B.floatingTexts)B.floatingTexts=[];
+function floatTxt(x,y,text,color='#fbbf24',isCrit=false){
+const px=x*CS+CS/2,py=y*CS+CS/2;
+const sz=isCrit?CS*.38:CS*.22;
+const speed=isCrit?2.5:1.5;
+const critJitter=isCrit?(Math.random()-.5)*6:0;
+B.floatingTexts.push({px,py,text,color,sz,speed,alpha:1,yOff:0,isCrit,critJitter});
+}
+
+// Impact frame: white flash over canvas on crits
+function hitStop(x,y){
+if(!B.ctx)return;
+B.ctx.save();
+B.ctx.fillStyle='rgba(255,255,255,0.65)';
+B.ctx.fillRect(0,0,B.canvas.width,B.canvas.height);
+B.ctx.restore();
+setTimeout(()=>{try{drawMap();}catch(e){}},110);
+}
+
+// ─── Attack bump: portrait dashes toward target ───────────────
+function bumpAnim(attacker,defender){
+if(!attacker||!defender)return;
+const dx=defender.x-attacker.x,dy=defender.y-attacker.y;
+const dist=Math.max(1,Math.sqrt(dx*dx+dy*dy));
+const BUMP=Math.round(CS*.18);
+attacker._bx=Math.round(dx/dist*BUMP);attacker._by=Math.round(dy/dist*BUMP);
+attacker._bxEnd=Date.now()+130;
+setTimeout(()=>{attacker._bx=0;attacker._by=0;},130);
+}
+
+// ─── Projectile trail: particle arc for bow/magic ─────────────
+function fireProjectile(a,d){
+if(!B.ctx||!a||!d)return;
+const ranged=['Bow','LightMag','DarkMag','AnimaMag'];
+if(!ranged.includes(a.weapon))return;
+const colMap={Bow:'#fbbf24',LightMag:'#f0fdf4',DarkMag:'#a855f7',AnimaMag:'#3b82f6'};
+const col=colMap[a.weapon]||'#fbbf24';
+const x0=a.x*CS+CS/2,y0=a.y*CS+CS/2,x1=d.x*CS+CS/2,y1=d.y*CS+CS/2;
+const particles=Array.from({length:8},(_,i)=>({offX:(Math.random()-.5)*5,offY:(Math.random()-.5)*5}));
+if(!B.projectiles)B.projectiles=[];
+B.projectiles.push({x0,y0,x1,y1,startT:Date.now(),dur:220,col,particles});
+}
+
+function animateMove(unit,path,onDone){
+if(!path||!path.length){if(onDone)onDone();return;}
+B.animating=(B.animating||0)+1;
+let step=0,startT=null;
+const STEP_MS=90;
+let from={x:unit.x,y:unit.y};
+function tick(ts){
+if(B.phase==='over'){B.animating=Math.max(0,(B.animating||1)-1);return;}
+if(!startT)startT=ts;
+const t=Math.min((ts-startT)/STEP_MS,1);
+const to=path[step];
+const p=easeIO(t);
+// Use _bx/_by pixel offsets so drawBUnitEnhanced renders the unit mid-slide with full visual detail
+const interpX=(from.x+(to.x-from.x)*p)*CS;
+const interpY=(from.y+(to.y-from.y)*p)*CS;
+unit._bx=Math.round(interpX-unit.x*CS);
+unit._by=Math.round(interpY-unit.y*CS);
+unit._bxEnd=Date.now()+200;
+drawMap();
+if(t>=1){
+unit.x=to.x;unit.y=to.y;unit._bx=0;unit._by=0;from={x:to.x,y:to.y};step++;startT=null;
+if(step>=path.length){drawMap();
+// Evaluate OnMove passives
+unit.passives?.forEach(p=>{
+if(p.trigger==='OnMove'&&evalCondition(p.condition,unit,null)){
+if(p.effect.tag==='heal'){unit.hp=Math.min(unit.maxHp,unit.hp+p.effect.val);floatTxt(unit.x,unit.y,'+'+p.effect.val,'#22c55e');}
+}
+});
+B.animating=Math.max(0,(B.animating||1)-1);
+if(onDone)onDone();
+// If endPlayerPhase was deferred waiting for this animation, fire it now
+if(!B.animating&&B._pendingEnemyPhase){B._pendingEnemyPhase=false;endPlayerPhase();}
+return;}
+}
+requestAnimationFrame(tick);
+}requestAnimationFrame(tick);
+}
+
+function easeIO(t){return t<.5?2*t*t:1-Math.pow(-2*t+2,2)/2;}
+
+function drawBUnitAt(ctx,u,px,py){
+const pad=3,sz=CS-pad*2,isP=u.side==='player';
+ctx.save();ctx.beginPath();ctx.arc(px+CS/2,py+CS/2,sz/2,0,Math.PI*2);ctx.clip();
+if(u.img?.complete&&u.img.naturalWidth>0)ctx.drawImage(u.img,px+pad,py+pad,sz,sz);
+else{const hue=u.hue||0;const g=ctx.createRadialGradient(px+CS*.35,py+CS*.3,sz*.08,px+CS/2,py+CS/2,sz/2);g.addColorStop(0,`hsl(${hue},60%,55%)`);g.addColorStop(1,`hsl(${hue},50%,20%)`);ctx.fillStyle=g;ctx.fill();}
+ctx.restore();
+ctx.strokeStyle=isP?'#3b82f6':'#ef4444';ctx.lineWidth=1.5;
+ctx.beginPath();ctx.arc(px+CS/2,py+CS/2,sz/2,0,Math.PI*2);ctx.stroke();
+const hpR=u.hp/u.maxHp,bw=sz,bh=3;
+ctx.fillStyle='rgba(0,0,0,.6)';ctx.fillRect(px+pad,py+CS-pad-bh,bw,bh);
+ctx.fillStyle=hpR>.5?'#22c55e':'#ef4444';ctx.fillRect(px+pad,py+CS-pad-bh,bw*hpR,bh);
+}
+
+// ═══ TURN MANAGEMENT ════════════════════════════════════════
+function checkTurnEnd(){
+if(B.pUnits.filter(u=>u.hp>0).every(u=>u.acted))endPlayerPhase();
+}
+
+function endPlayerPhase(){
+        B.allUnits.filter(u=>u.hp>0&&u.side==='enemy').forEach(u=>{
+            if(u._itemRegen&&u._itemRegen>0&&u.hp<u.maxHp){
+                const h=Math.min(u._itemRegen,u.maxHp-u.hp); u.hp+=h; floatTxt(u.x,u.y,'+'+h,'#22c55e');
+            }
+        });
+        if(bgm && bgm.setIntensity) bgm.setIntensity('enemy');
+        B.turnCount = (B.turnCount || 0) + 1;
+if(B.phase!=='player')return;
+// Defer if a move animation is still in progress
+if(B.animating){B._pendingEnemyPhase=true;return;}
+// Apply terrain/status damage symmetrically for player units at phase end
+B.pUnits.filter(u=>u.hp>0).forEach(u=>{
+if(u.poisoned){u.hp=Math.max(0,u.hp-u.poisoned);floatTxt(u.x,u.y,'-'+u.poisoned,'#a855f7');u.poisoned=0;}
+if(u.burned){u.hp=Math.max(0,u.hp-u.burned);floatTxt(u.x,u.y,'-'+u.burned,'#f97316');u.burned=0;}
+const t=B.grid[u.y]?.[u.x];
+if(t==='lava'){const ld=TERRAINS.lava.dmg;u.hp=Math.max(0,u.hp-ld);floatTxt(u.x,u.y,'-'+ld,'#f97316');bLog(`${u.name} lava -${ld}`,'dmg');}
+if((t==='fort'||t==='castle')&&TERRAINS[t]?.healPct&&u.hp>0&&u.hp<u.maxHp){const h=Math.round(u.maxHp*TERRAINS[t].healPct);u.hp=Math.min(u.maxHp,u.hp+h);floatTxt(u.x,u.y,'+'+h,'#22c55e');bLog(`${u.name} ${t} +${h}`,'sys');}
+});
+if(checkBattleOver())return;
+// Bug #70: Unfreeze player units that were frozen — they skipped this turn
+B.pUnits.filter(u=>u.hp>0&&u.frozen).forEach(u=>{u.frozen=false;});
+B.phase='enemy';B.sel=null;B.highlights=[];B.mode='select';hideFC();
+document.getElementById('turnInd').textContent='ENEMY PHASE';
+document.getElementById('turnInd').className='turn-ind turn-e';
+updateBUI();bLog('-- ENEMY PHASE --','sys');if(bgm&&bgm.isPlaying)bgm.tempo=75;
+setTimeout(runAI,CFG.AI_DELAY*.4);
+}
+
+// ═══ AI ═════════════════════════════════════════════════════
+function runAI(){
+const alive=B.eUnits.filter(u=>u.hp>0);
+if(!alive.length){endEnemyPhase();return;}
+alive.forEach(u=>{
+u.acted=false;u.moved=false;
+// Keep frozen=true if set — frozen units skip their turn; cleared in endEnemyPhase
+if(u.gravityApplied){u.frozen=true;u.gravityApplied=false;}
+u._panicked=false;
+u._rallyAtk=0;u._rallySpd=0;u._rallyDef=0; // field buffs expire each enemy phase
+});
+const _aiBattleId=B.battleId;
+function next(){
+if(B.battleId!==_aiBattleId||B.phase==='over')return;
+const unacted=B.eUnits.filter(u=>u.hp>0&&!u.acted);
+if(!unacted.length){endEnemyPhase();return;}
+const e=unacted[0];
+aiAct(e,next);
+}next();
+}
+
+function aiAct(enemy,done){
+if(B.phase==='over'){if(done)done();return;}
+const players=B.pUnits.filter(u=>u.hp>0);
+if(!players.length){setTimeout(done,10);return;}
+
+// === HEALER AI: heal wounded allies instead of attacking ===
+if(enemy.assist&&(enemy.assist.id==='heal'||enemy.assist.id==='physic')&&!enemy.acted){
+const healRange=enemy.assist.id==='physic'?2:1;
+const wounded=B.eUnits.filter(u=>u.hp>0&&u!==enemy&&u.hp<u.maxHp*0.7);
+const healTarget=wounded.find(u=>Math.abs(u.x-enemy.x)+Math.abs(u.y-enemy.y)<=healRange);
+if(healTarget){
+setTimeout(()=>{
+const amt=enemy.assist.id==='physic'?8:10;
+healTarget.hp=Math.min(healTarget.maxHp,healTarget.hp+amt);
+floatTxt(healTarget.x,healTarget.y,'+'+amt,'#22c55e');
+bLog(enemy.name+' heals '+healTarget.name+' +'+amt,'spec');sfx('heal');
+markActed(enemy);drawMap();setTimeout(done,CFG.AI_DELAY*.3);
+},CFG.AI_DELAY*.2);return;
+}
+// Move toward wounded ally if not in range
+const nearWounded=wounded.filter(u=>Math.abs(u.x-enemy.x)+Math.abs(u.y-enemy.y)<=enemy.mov+healRange);
+if(nearWounded.length){
+const t=nearWounded[0];
+const reachable2=getReachable(enemy);
+const adjCell2=reachable2.find(c=>Math.abs(c.x-t.x)+Math.abs(c.y-t.y)<=healRange);
+if(adjCell2){
+const path2=astar(enemy.x,enemy.y,adjCell2.x,adjCell2.y,enemy)||[{x:adjCell2.x,y:adjCell2.y}];
+if(path2.length){
+enemy.moved=true;
+animateMove(enemy,path2,()=>{
+const nowInRange=B.eUnits.find(u=>u.hp>0&&u!==enemy&&u.hp<u.maxHp*0.7&&Math.abs(u.x-enemy.x)+Math.abs(u.y-enemy.y)<=healRange);
+if(nowInRange){const amt2=enemy.assist.id==='physic'?8:10;nowInRange.hp=Math.min(nowInRange.maxHp,nowInRange.hp+amt2);floatTxt(nowInRange.x,nowInRange.y,'+'+amt2,'#22c55e');bLog(enemy.name+' heals '+nowInRange.name,'spec');}
+markActed(enemy);drawMap();setTimeout(done,CFG.AI_DELAY*.3);
+});return;
+}
+}
+}
+}
+// === DANCER AI: refresh a teammate that already attacked ===
+if(enemy.assist&&(enemy.assist.name==='Dance'||enemy.assist.name==='Sing')&&!enemy.acted){
+const exhausted=B.eUnits.filter(u=>u.hp>0 && u!==enemy && u.acted && !u.extraAction && (!u.assist || u.assist.type !== 'refresh'));
+// Find exhausted ally within dance range (1 cell)
+const danceTarget=exhausted.find(u=>Math.abs(u.x-enemy.x)+Math.abs(u.y-enemy.y)<=1);
+if(danceTarget){
+setTimeout(()=>{
+// Refresh the target
+danceTarget.acted=false;danceTarget.moved=false;
+bLog(`${enemy.name} dances for ${danceTarget.name}!`,'spec');
+markActed(enemy);drawMap();setTimeout(done,CFG.AI_DELAY*.3);
+},CFG.AI_DELAY*.2);return;
+}
+// Move toward an exhausted ally if close enough
+const nearby=exhausted.filter(u=>Math.abs(u.x-enemy.x)+Math.abs(u.y-enemy.y)<=enemy.mov+1);
+if(nearby.length){
+const t=nearby[0];
+const reachable=getReachable(enemy);
+const adjCell=reachable.find(c=>Math.abs(c.x-t.x)+Math.abs(c.y-t.y)<=1);
+if(adjCell){
+const path=astar(enemy.x,enemy.y,adjCell.x,adjCell.y,enemy)||[{x:adjCell.x,y:adjCell.y}];
+if(path.length){
+enemy.moved=true;
+animateMove(enemy,path,()=>{
+const newTarget=B.eUnits.find(u=>u.hp>0&&u!==enemy&&u.acted&&Math.abs(u.x-enemy.x)+Math.abs(u.y-enemy.y)<=1);
+if(newTarget){newTarget.acted=false;newTarget.moved=false;bLog(`${enemy.name} dances for ${newTarget.name}!`,'spec');}
+markActed(enemy);drawMap();setTimeout(done,CFG.AI_DELAY*.3);
+});return;
+}
+}
+}
+}
+
+// === DRAW BACK AI TRAP: after hitting a player, pull the attacker to safety ===
+// This is checked AFTER an enemy has attacked (done by a different enemy in the same AI pass)
+// For non-dancer units: after they attack, check if a nearby ally can Draw Back them
+
+// Use support specials proactively before attacking
+if(enemy.specialCharges===0){
+const sp=enemy.special;
+if(sp.effect==='heal_self'&&enemy.hp<enemy.maxHp*.6){
+setTimeout(()=>{performCombat(enemy,enemy,true);setTimeout(done,CFG.AI_DELAY*.3);},CFG.AI_DELAY*.2);return;
+}
+if(sp.effect==='shield'&&enemy.hp<enemy.maxHp*.5){
+setTimeout(()=>{performCombat(enemy,enemy,true);setTimeout(done,CFG.AI_DELAY*.3);},CFG.AI_DELAY*.2);return;
+}
+if(sp.effect==='aura_heal'){
+const injuredAllies=B.eUnits.filter(u=>u.hp>0&&u!==enemy&&u.hp<u.maxHp*.75);
+if(injuredAllies.length>0){
+setTimeout(()=>{performCombat(enemy,enemy,true);setTimeout(done,CFG.AI_DELAY*.3);},CFG.AI_DELAY*.2);return;
+}
+}
+}
+const wRange=getWeaponRange(enemy.weapon);
+const pers=enemy.personality||'aggressive';
+
+// Smart targeting based on elo
+players.sort((a,b)=>{
+const ka=a.hp<=calcDmg(enemy,a).dmg,kb=b.hp<=calcDmg(enemy,b).dmg;
+if(ka&&!kb)return-1;if(kb&&!ka)return 1;
+const advA=WEAPON_TRIANGLE[enemy.weapon]===a.weapon?-10:0;
+const advB=WEAPON_TRIANGLE[enemy.weapon]===b.weapon?-10:0;
+return(a.hp+advA)-(b.hp+advB);
+});
+const target=players[0];
+const dist=Math.abs(target.x-enemy.x)+Math.abs(target.y-enemy.y);
+
+// Defensive/coward AI: don't rush unless player is in range
+if(pers==='defensive'||pers==='coward'){
+const engageDist=pers==='coward'?wRange+1:wRange+enemy.mov;
+if(dist>engageDist){
+// Stay near forts or hold position
+const fort=B.grid[enemy.y]?.[enemy.x];
+if(fort==='fort'||pers==='coward'){markActed(enemy);drawMap();setTimeout(done,CFG.AI_DELAY*.2);return;}
+}
+// Coward retreats when HP < 40%
+if(pers==='coward'&&enemy.hp<enemy.maxHp*.4){
+const reachable=getReachable(enemy);
+let safest=null,maxDist=0;
+for(const cell of reachable){
+const d2=Math.abs(cell.x-target.x)+Math.abs(cell.y-target.y);
+if(d2>maxDist){maxDist=d2;safest=cell;}
+}
+if(safest){
+const path=astar(enemy.x,enemy.y,safest.x,safest.y,enemy)||[{x:safest.x,y:safest.y}];
+if(path.length){enemy.moved=true;animateMove(enemy,path,()=>{markActed(enemy);drawMap();setTimeout(done,CFG.AI_DELAY*.2);});return;}
+}
+markActed(enemy);drawMap();setTimeout(done,CFG.AI_DELAY*.2);return;
+}
+}
+
+if(dist<=wRange){
+setTimeout(()=>{
+const useSpec=enemy.specialCharges===0&&!['heal_self','shield','aura_heal'].includes(enemy.special.effect);
+performCombat(enemy,target,useSpec,true);
+// Draw Back trap: after attacking, a nearby unacted ally pulls the attacker to safety
+setTimeout(()=>{
+if(enemy.hp>0){
+const drawer=B.eUnits.find(u=>u.hp>0&&u!==enemy&&!u.acted&&
+u.assist&&(u.assist.name==='Draw Back'||u.assist.name==='Reposition')&&
+Math.abs(u.x-enemy.x)+Math.abs(u.y-enemy.y)===1);
+if(drawer){
+// Draw Back: drawer moves 1 step away from the pulled unit; pulled unit moves to drawer's old position
+const dx=drawer.x-enemy.x,dy=drawer.y-enemy.y; // direction from enemy to drawer
+const drawerNx=drawer.x+dx,drawerNy=drawer.y+dy; // drawer moves 1 step further away
+const enemyNx=drawer.x,enemyNy=drawer.y; // pulled unit moves to where drawer was
+if(drawerNx>=0&&drawerNy>=0&&drawerNx<B.mapW&&drawerNy<B.mapH&&!unitAt(drawerNx,drawerNy)&&TERRAINS[B.grid[drawerNy]?.[drawerNx]]?.passable){
+drawer.x=drawerNx;drawer.y=drawerNy;
+enemy.x=enemyNx;enemy.y=enemyNy;
+bLog(`${drawer.name} Draw Back! Pulled ${enemy.name} to safety.`,'spec');
+markActed(drawer);drawMap();
+}
+}
+}
+markActed(enemy);drawMap();setTimeout(done,CFG.AI_DELAY*.3);
+},CFG.AI_DELAY*.2);
+},CFG.AI_DELAY*.3);return;
+}
+
+if(enemy.frozen){markActed(enemy);setTimeout(done,10);return;}
+
+const reachable=getReachable(enemy);
+let best=null,bestScore=Infinity;
+for(const cell of reachable){
+const d=Math.abs(cell.x-target.x)+Math.abs(cell.y-target.y);
+const score=d<=wRange?-500+d:d;
+if(score<bestScore){bestScore=score;best=cell;}
+}
+if(!best){markActed(enemy);setTimeout(done,10);return;}
+
+const path=astar(enemy.x,enemy.y,best.x,best.y,enemy)||[{x:best.x,y:best.y}];
+if(!path.length){markActed(enemy);setTimeout(done,10);return;}
+
+enemy.moved=true;
+animateMove(enemy,path,()=>{
+const nd=Math.abs(target.x-enemy.x)+Math.abs(target.y-enemy.y);
+if(nd<=wRange){
+setTimeout(()=>{
+const useSpec=enemy.specialCharges===0&&!['heal_self','shield','aura_heal'].includes(enemy.special.effect);
+performCombat(enemy,target,useSpec);
+setTimeout(done,CFG.AI_DELAY*.3);
+},CFG.AI_DELAY*.2);
+}else{markActed(enemy);drawMap();setTimeout(done,CFG.AI_DELAY*.2);}
+});
+}
+
+function endEnemyPhase(){
+        B.allUnits.filter(u=>u.hp>0).forEach(u=>{
+            u.passives?.forEach(p=>{
+                if(p.trigger==='TurnStart'&&p.effect?.tag==='stack_spd'&&evalCondition(p.condition,u,null)){
+                    u._stackedSpd=u._stackedSpd||0;
+                    if(u._stackedSpd<12){ const add=Math.min(p.effect.val,12-u._stackedSpd); u.spd+=add; u._stackedSpd+=add; }
+                }
+            });
+            if(u.side==='player'&&u._itemRegen&&u._itemRegen>0&&u.hp<u.maxHp){
+                const h=Math.min(u._itemRegen,u.maxHp-u.hp); u.hp+=h; floatTxt(u.x,u.y,'+'+h,'#22c55e');
+            }
+        });
+if(checkBattleOver())return;
+// Status damage
+B.allUnits.filter(u=>u.hp>0).forEach(u=>{
+if(u.poisoned){u.hp=Math.max(0,u.hp-u.poisoned);floatTxt(u.x,u.y,'-'+u.poisoned,'#a855f7');u.poisoned=0;}
+if(u.burned){u.hp=Math.max(0,u.hp-u.burned);floatTxt(u.x,u.y,'-'+u.burned,'#f97316');u.burned=0;}
+// Lava
+const t=B.grid[u.y]?.[u.x];
+if(t==='lava'){const d=TERRAINS.lava.dmg;u.hp=Math.max(0,u.hp-d);floatTxt(u.x,u.y,'-'+d,'#f97316');bLog(`${u.name} lava -${d}`,'dmg');}
+// Fort heal
+if((t==='fort'||t==='castle')&&TERRAINS[t]?.healPct&&u.hp>0&&u.hp<u.maxHp){const h=Math.round(u.maxHp*TERRAINS[t].healPct);u.hp=Math.min(u.maxHp,u.hp+h);floatTxt(u.x,u.y,'+'+h,'#22c55e');}
+// Lightning Trap: 10 damage, consumes tile
+if(t==='lightning_trap'){u.hp=Math.max(1,u.hp-10);floatTxt(u.x,u.y,'-10','#fbbf24');bLog(`${u.name} triggered Lightning Trap!`,'dmg');B.grid[u.y][u.x]='plain';}
+// Gravity Trap: freeze unit, consumes tile
+if(t==='gravity_trap'){u.frozen=true;floatTxt(u.x,u.y,'GRAVITY','#a855f7');bLog(`${u.name} hit by Gravity Trap!`,'dmg');B.grid[u.y][u.x]='plain';}
+});
+if(checkBattleOver())return;
+
+// Turn start passives (Bug #33: apply buffs to adjacent allies too)
+B.allUnits.filter(u=>u.hp>0).forEach(u=>{
+u.passives?.forEach(p=>{
+if(p.trigger==='TurnStart'&&evalCondition(p.condition,u,null)){
+if(p.effect.tag==='heal'){u.hp=Math.min(u.maxHp,u.hp+p.effect.val);}
+// Buff adjacent allies (Hone/Fortify C skills)
+if(p.effect.tag==='buff_atk'||p.effect.tag==='buff_def'||p.effect.tag==='buff_spd'){
+const adj=B.allUnits.filter(a=>a.hp>0&&a.side===u.side&&a!==u&&Math.abs(a.x-u.x)+Math.abs(a.y-u.y)<=1);
+adj.forEach(a=>{
+// Bug #47: use Math.max to prevent stacking, not addition
+if(p.effect.tag==='buff_atk')a._rallyAtk=Math.max(a._rallyAtk||0,p.effect.val);
+if(p.effect.tag==='buff_spd')a._rallySpd=Math.max(a._rallySpd||0,p.effect.val);
+if(p.effect.tag==='buff_def')a._rallyDef=Math.max(a._rallyDef||0,p.effect.val);
+});
+}
+// Threaten: debuff nearby foes
+if(p.effect.tag==='threat_spd'){
+B.allUnits.filter(e=>e.hp>0&&e.side!==u.side&&Math.abs(e.x-u.x)+Math.abs(e.y-u.y)<=2).forEach(e=>{
+e._rallySpd=Math.min(e._rallySpd||0,-p.effect.val);
+});
+}
+// Bug #40: Chill ATK - debuff foe with highest ATK
+if(p.effect.tag==='chill_atk'){
+const foes=B.allUnits.filter(e=>e.hp>0&&e.side!==u.side).sort((a,b)=>b.atk-a.atk);
+if(foes.length){foes[0]._rallyAtk=Math.min(foes[0]._rallyAtk||0,-p.effect.val);}
+}
+// Bug #40: Chill SPD - debuff foe with highest SPD
+if(p.effect.tag==='chill_spd'){
+const foes=B.allUnits.filter(e=>e.hp>0&&e.side!==u.side).sort((a,b)=>b.spd-a.spd);
+if(foes.length){foes[0]._rallySpd=Math.min(foes[0]._rallySpd||0,-p.effect.val);}
+}
+}
+});
+});
+
+B.phase='player';
+B.eUnits.filter(u=>u.hp>0).forEach(u=>{u.frozen=false;}); // unfreeze enemies after their phase
+B.pUnits.forEach(u=>{
+u.acted=false;u.moved=false;
+// Bug #70: Do NOT unfreeze here — frozen players skip their turn, then unfreeze in endPlayerPhase
+if(u.gravityApplied){u.frozen=true;u.gravityApplied=false;}
+u._panicked=false;u._galeforceUsed=false;
+u._rallyAtk=0;u._rallySpd=0;u._rallyDef=0; // field buffs expire each player phase
+});
+document.getElementById('turnInd').textContent='PLAYER PHASE';
+document.getElementById('turnInd').className='turn-ind turn-p';
+bLog('-- YOUR PHASE --','sys');if(bgm&&bgm.isPlaying)bgm.tempo=90;
+if(B.dangerZone)calcDangerZone();
+drawMap();updateBUI();updateEList();
+        if(bgm && bgm.setIntensity && B.phase === 'player') bgm.setIntensity('player');
+}
+
+function checkBattleOver() {
+    const prevPhase = B.phase;
+
+    // Track campaign_v2 victories
+    if(prevPhase !== 'over' && B.phase === 'over' && currentBattleMode === 'campaign_v2') {
+        const pe = B.pUnits.filter(u => u.hp > 0).length;
+        const ee = B.eUnits.filter(u => u.hp > 0).length;
+        const battleNum = B._currentCampaignBattle || currentBattleConfig?.battleNum;
+
+        if(ee === 0 && pe > 0 && battleNum) {
+            // Mark as cleared
+            if(!S.campaignDone.includes(battleNum)) {
+                S.campaignDone.push(battleNum);
+            }
+            // Track difficulty
+            if(!S.campaignClears) S.campaignClears = {};
+            if(!S.campaignClears[battleNum]) S.campaignClears[battleNum] = [];
+            const diff = currentDifficulty || 'normal';
+            if(!S.campaignClears[battleNum].includes(diff)) {
+                S.campaignClears[battleNum].push(diff);
+            }
+
+            // Bonus Flux for first clear
+            const config = generateBattleConfig(battleNum);
+            const isFirstClear = S.campaignClears[battleNum].length === 1;
+            if(isFirstClear) {
+                S.ap += config.fluxReward;
+                // Book completion bonus
+                if(battleNum % 100 === 0) {
+                    S.ap += 50;
+                    toast(`BOOK ${Math.ceil(battleNum / 100)} COMPLETE! +50 Bonus Flux!`, 'gold');
+                }
+            }
+
+            // Give AP meter progress for story battles
+            if(typeof addApexMeter === 'function') {
+                addApexMeter(15 + Math.floor(config.enemyMult * 5));
+            }
+
+            save(true);
+        }
+    }
+
+    return result;
+};
+
+function spawnParticles(){
+for(let i=0;i<20;i++){
+setTimeout(()=>{
+const p=document.createElement('div');
+const colors=['#ff2d55','#ffd700','#00e5ff','#7c4dff','#22c55e'];
+p.style.cssText=`position:fixed;z-index:300;width:6px;height:6px;border-radius:50%;
+background:${colors[~~(Math.random()*colors.length)]};
+left:${20+Math.random()*60}%;top:${20+Math.random()*60}%;
+pointer-events:none;animation:shineFly 1s ease-out forwards;
+--dx:${(Math.random()-.5)*200}px;--dy:${(Math.random()-.5)*200}px;`;
+document.body.appendChild(p);setTimeout(()=>{p.remove();},1100);
+},i*40);
+}
+}
+
+function showWin(ap,elo){
+    if(Math.random() < 0.4) {
+        const rarities = ['C','C','C','B','B','A','S'];
+        const rarity = rarities[~~(Math.random()*rarities.length)];
+        const item = grantRandomItem(rarity);
+        if(item) {
+            toast('Found item: ' + item.name + '!', 'gold');
+        }
+    }
+    if(Math.random() < 0.2) {
+        const ab = ABILITY_DB[~~(Math.random()*ABILITY_DB.length)];
+        if(ab && !S.unlockedAbilities.includes(ab.id)) {
+            S.unlockedAbilities.push(ab.id);
+            toast('Unlocked ability: ' + ab.name + '!', 'gold');
+        }
+    }
+        const xpData = [];
+        const expMult = (typeof currentBattleConfig !== 'undefined' && currentBattleConfig?.expMult) ?? 1;
+        if (typeof B !== 'undefined' && B.pUnits) {
+            B.pUnits.filter(u => u.hp > 0).forEach(bu => {
+                const ru = S.roster.find(r => r.id === bu.id);
+                if (ru) {
+                    const xpGain = Math.round(20 * expMult);
+                    const expReq = Math.floor(100 * Math.pow(ru.level || 1, 1.5));
+                    const prevPct = ru.level >= 40 ? 100 : Math.min(100, Math.round(((ru.exp || 0) / expReq) * 100));
+                    const newExpReq = Math.floor(100 * Math.pow(ru.level || 1, 1.5));
+                    const newPct = ru.level >= 40 ? 100 : Math.min(100, Math.round(((ru.exp || 0) / newExpReq) * 100));
+                    xpData.push({
+                        name: ru.name,
+                        level: ru.level || 1,
+                        xpGain: xpGain,
+                        pct: newPct,
+                        leveledUp: ru.level > (bu.level || ru.level)
+                    });
+                }
+            });
+        }
+const r=getEloRank(S.elo);
+document.getElementById('resultTitle').textContent='VICTORY';document.getElementById('resultTitle').className='win';
+document.getElementById('resultSub').textContent=`${r.name} | ELO: ${S.elo} (+${elo})`;
+document.getElementById('resultReward').textContent=`+${ap} AP | +${elo} ELO`;
+document.getElementById('resultBg').classList.add('show');
+
+        // Add XP breakdown to result card
+        if (xpData.length > 0) {
+            const rewardEl = document.getElementById('resultReward');
+            if (rewardEl) {
+                let xpHTML = rewardEl.innerHTML;
+                xpHTML += '<div class="result-xp-list">';
+                xpData.forEach((d, i) => {
+                    xpHTML += `<div class="result-xp-unit" style="animation-delay:${i * 0.1 + 0.3}s">
+                        <span class="result-xp-name">${d.name}</span>
+                        <div class="result-xp-bar"><div class="result-xp-fill" style="width:0%"></div></div>
+                        <span class="result-xp-text">+${d.xpGain} XP</span>
+                        ${d.leveledUp ? '<span class="result-lvlup">LV UP!</span>' : ''}
+                    </div>`;
+                });
+                xpHTML += '</div>';
+                rewardEl.innerHTML = xpHTML;
+
+                // Animate XP bars after a short delay
+                requestAnimationFrame(() => {
+                    setTimeout(() => {
+                        rewardEl.querySelectorAll('.result-xp-fill').forEach((bar, i) => {
+                            bar.style.width = xpData[i].pct + '%';
+                        });
+                    }, 400);
+                });
+            }
+        }
+        // Add difficulty badge to result
+        const resultSub = document.getElementById('resultSub');
+        if(resultSub) {
+            const diff = currentDifficulty || 'normal';
+            const info = DIFF_LABELS[diff];
+            resultSub.innerHTML += `<div style="margin-top:6px;font-family:var(--display);font-size:.7rem;color:${info.color};letter-spacing:2px">${info.icon} CLEARED ON ${info.name.toUpperCase()}</div>`;
+        }
+
+    if(currentBattleMode === 'campaign_v2') {
+        const battleNum = B._currentCampaignBattle || currentBattleConfig?.battleNum;
+        if(battleNum && battleNum < TOTAL_BATTLES) {
+            const resultBtns = document.querySelector('.result-btns');
+            // Guard: only add the button once (prevents duplicates from repeated showWin calls)
+            if(resultBtns && !resultBtns.querySelector('#campNextBattleBtn')) {
+                const contBtn = document.createElement('button');
+                contBtn.id = 'campNextBattleBtn';
+                contBtn.className = 'btn-t0';
+                contBtn.style.cssText = 'font-size:.75rem;padding:8px 14px';
+                contBtn.textContent = 'NEXT BATTLE ▸';
+                contBtn.onclick = function() {
+                    closeResult();
+                    // Delay launch so closeResult screen transition settles
+                    // and dialog/difficulty picker can render on a clean slate
+                    setTimeout(function() {
+                        launchCampaignBattle_v2(battleNum + 1);
+                    }, 120);
+                };
+                resultBtns.appendChild(contBtn);
+            }
+        }
+    }
+}
+
+function showLose(elo){
+document.getElementById('resultTitle').textContent='DEFEAT';document.getElementById('resultTitle').className='lose';
+document.getElementById('resultSub').textContent=`ELO: ${S.elo} (-${elo})`;
+document.getElementById('resultReward').textContent='';
+document.getElementById('resultBg').classList.add('show');
+// Clean up Hall of Forms temp units on defeat
+if(hofState){const _ids=hofState.savedTeamIds||[];hofState=null;S.roster=S.roster.filter(u=>!u.isForma);S.team=_ids.map(id=>S.roster.findIndex(u=>u.id===id)).filter(i=>i>=0);}
+}
+
+function closeResult(){document.getElementById('resultBg').classList.remove('show');}
+
+function updateBUI(){
+const u=B.sel;
+const info=document.getElementById('selInfo');
+const[bm,ba,bs,bw,bAssist]=[document.getElementById('btnMove'),document.getElementById('btnAtk'),document.getElementById('btnSpec'),document.getElementById('btnWait'),document.getElementById('btnAssist')];
+if(u?.side==='player'&&B.phase==='player'){
+const hpP=Math.round(u.hp/u.maxHp*100);
+const spReady=u.specialCharges===0;
+info.innerHTML=`
+<canvas id="selPC" width="76" height="76" style="width:38px;height:38px;border-radius:50%;flex-shrink:0"></canvas>
+<div class="sel-det" style="flex:1;min-width:0">
+<div class="sel-name">${esc(u.name)}${u.plus>0?` <span style="color:var(--gold);font-size:.55rem">+${u.plus}</span>`:''}</div>
+<div class="sel-hp"><div class="sel-hp-fill" style="width:${hpP}%;background:${hpP>50?'var(--green)':hpP>25?'#f59e0b':'var(--red)'}"></div></div>
+<div class="sel-extra">${u.hp}/${u.maxHp} | ${esc(u.weapon)} ${MOVE_STATS[u.moveType]?.label||''} | ${esc(u.special?.name||'None')}${spReady?' READY':` ${(u.special?.cd||0)-u.specialCharges}/${u.special?.cd||0}`}</div>
+</div>`;
+const sc=document.getElementById('selPC');
+if(sc){const ti=new Image();ti.onload=()=>{u.img=ti;drawUnitPortrait(sc,u,76);};ti.src=u.src;drawUnitPortrait(sc,u,76);}
+bm.disabled=u.moved||u.acted||u.frozen;
+ba.disabled=u.acted;
+if(bAssist){bAssist.disabled=u.acted||!u.assist;if(u.assist&&!u.acted){bAssist.textContent=u.assist.name;}else{bAssist.textContent='ASSIST';}}
+bs.disabled=u.acted||u.specialCharges>0;
+if(spReady&&!u.acted){bs.classList.add('ready');bs.textContent=u.special?.name||'SPECIAL';}
+else{bs.classList.remove('ready');bs.textContent='SPECIAL';}
+bw.disabled=u.acted;
+} else if (u?.side==='enemy') {
+const hpP=Math.round(u.hp/u.maxHp*100);
+info.innerHTML=`
+<div style="display:flex;align-items:center;gap:6px;cursor:pointer;width:100%" onclick="if(typeof openInspect==='function')openInspect(B.sel)">
+    <canvas id="selPC" width="76" height="76" style="width:38px;height:38px;border-radius:50%;flex-shrink:0;border:2px solid var(--red)"></canvas>
+    <div class="sel-det" style="flex:1;min-width:0">
+    <div class="sel-name" style="color:var(--red)">${esc(u.name)} <span style="font-size:.55rem;color:var(--text3)">(Tap to Inspect)</span></div>
+    <div class="sel-hp"><div class="sel-hp-fill" style="width:${hpP}%;background:${hpP>50?'var(--green)':hpP>25?'#f59e0b':'var(--red)'}"></div></div>
+    <div class="sel-extra">${u.hp}/${u.maxHp} | ${esc(u.weapon)} ${MOVE_STATS[u.moveType]?.label||''} | ${esc(u.special?.name||'None')}</div>
+    </div>
+</div>`;
+const sc=document.getElementById('selPC');
+if(sc){const ti=new Image();ti.onload=()=>{u.img=ti;drawUnitPortrait(sc,u,76);};ti.src=u.src;drawUnitPortrait(sc,u,76);}
+bm.disabled=ba.disabled=bs.disabled=bw.disabled=true;
+if(bAssist)bAssist.disabled=true;
+bs.classList.remove('ready');bs.textContent='SPECIAL';
+} else {
+info.innerHTML=`<div style="color:var(--text2);font-size:.7rem">${B.phase==='enemy'?'Enemy thinking...':'Select a unit'}</div>`;
+bm.disabled=ba.disabled=bs.disabled=bw.disabled=true;
+if(bAssist)bAssist.disabled=true;
+bs.classList.remove('ready');bs.textContent='SPECIAL';
+}
+        // Add support indicators to unit cards in battle
+        if(B.phase === 'over') return;
+        B.pUnits.filter(u => u.hp > 0).forEach(u => {
+            const bestAlly = B.pUnits.filter(a => a.hp > 0 && a !== u)
+                .map(a => ({a, sup: getSupport(u.id, a.id)}))
+                .sort((a, b) => b.sup - a.sup)[0];
+            if(bestAlly && bestAlly.sup >= 20) {
+                const rank = getSupportRank(bestAlly.sup);
+                // We can't easily modify the BUI DOM here without knowing its structure,
+                // so we apply combat bonuses silently based on support rank
+                // S-rank support gives +2 ATK/DEF during battle adjacency
+            }
+        });
+}
+
+function updateEList(){
+const el=document.getElementById('enemyList');el.innerHTML='';
+B.eUnits.filter(u=>u.hp>0).forEach(u=>{
+const pct=Math.round(u.hp/u.maxHp*100);
+el.innerHTML+=`<div style="font-size:.58rem;font-family:var(--mono)">
+<div style="display:flex;justify-content:space-between;color:var(--text2);margin-bottom:1px"><span>${esc(u.name)}</span><span style="color:var(--red)">${u.hp}</span></div>
+<div style="height:2px;background:var(--panel3);border-radius:1px"><div style="width:${pct}%;height:100%;background:var(--red);border-radius:1px"></div></div>
+</div>`;
+});
+    // Click-to-inspect on enemy list entries
+    el.querySelectorAll('div').forEach((div, i) => {
+        const enemy = B.eUnits.filter(u => u.hp > 0)[Math.floor(i/2)]; // rough mapping
+        if(enemy && i % 2 === 0) {
+            div.style.cursor = 'pointer';
+            div.title = 'Click to inspect';
+            div.onclick = () => openInspect(enemy);
+        }
+    });
+}
+
+function bLog(msg,type='sys'){
+const log=document.getElementById('bLog');
+if(!log)return;// Safe when called outside battle
+const d=document.createElement('div');d.className='blog-e blog-'+type;d.textContent=msg;
+log.appendChild(d);log.scrollTop=log.scrollHeight;
+while(log.children.length>60)log.removeChild(log.firstChild);
+// Add turn number to latest log entry
+if(log.lastChild) {
+    const turnNum = Math.floor((B.turnCount || 0) / 2) + 1;
+    const span = document.createElement('span');
+    span.style.cssText = 'font-size:.4rem;color:var(--text3);margin-left:4px';
+    span.textContent = `T${turnNum}`;
+    log.lastChild.appendChild(span);
+}
+}
+
+    function retreat() {
+        if(B.phase === 'over') { nav('home'); return; }
+        gameConfirm('Retreat from battle?', () => nav('home'));
+    };
+
+// ═══ SETTINGS ═══════════════════════════════════════════════
+document.addEventListener('DOMContentLoaded',()=>{
+const dz=document.getElementById('dropZone');if(!dz)return;
+dz.addEventListener('dragover',e=>{e.preventDefault();dz.classList.add('drag-over');});
+dz.addEventListener('dragleave',()=>dz.classList.remove('drag-over'));
+dz.addEventListener('drop',e=>{e.preventDefault();dz.classList.remove('drag-over');loadFiles(Array.from(e.dataTransfer.files));});
+});
+
+function toggleSound(){
+S.soundOn=!S.soundOn;save(true);
+// Hook procedural music engine
+if(S.soundOn){ bgm.start(); } else { bgm.stop(); }
+const b=document.getElementById('soundBtn');
+if(b){b.textContent=S.soundOn?'● ON':'○ OFF';b.className='toggle-btn'+(S.soundOn?' on':'');}
+toast(S.soundOn?'Sound ON':'Sound OFF');
+}
+function toggleFC(){
+S.forecastOn=!S.forecastOn;save(true);
+const b=document.getElementById('fcBtn');
+if(b){b.textContent=S.forecastOn?'● ON':'○ OFF';b.className='toggle-btn'+(S.forecastOn?' on':'');}
+toast(S.forecastOn?'Forecast ON':'Forecast OFF');
+}
+
+function setTeamSize(val){
+    S.teamSize=parseInt(val);
+    CFG.TEAM_SIZE=S.teamSize;
+    save(true);
+    // Trim current team if we shrank the size
+    if(S.team.length>CFG.TEAM_SIZE)S.team=S.team.slice(0,CFG.TEAM_SIZE);
+    if(S.teamPresets)S.teamPresets=S.teamPresets.map(p=>p?{...p,team:p.team.slice(0,CFG.TEAM_SIZE)}:p);
+    refreshBarracks();
+}
+
+
+// ═══ SAVE/LOAD ══════════════════════════════════════════════
+const SAVE_KEY='apex_tier0_v2';
+const SAVE_KEY_V1='apex_tier0_v1';
+const IDB_NAME='ApexTier0DB',IDB_STORE='images';
+let _idb=null;
+
+function openIDB(){
+if(_idb)return Promise.resolve(_idb);
+return new Promise((res,rej)=>{
+const r=indexedDB.open(IDB_NAME,1);
+r.onupgradeneeded=e=>{if(!e.target.result.objectStoreNames.contains(IDB_STORE))e.target.result.createObjectStore(IDB_STORE,{keyPath:'name'});};
+r.onsuccess=e=>{_idb=e.target.result;res(_idb);};r.onerror=()=>rej(r.error);
+});
+}
+
+async function saveIDB(images){
+try{const db=await openIDB();const tx=db.transaction(IDB_STORE,'readwrite');const st=tx.objectStore(IDB_STORE);st.clear();
+images.forEach(img=>st.put({name:img.name,src:img.src,isDefault:img.isDefault||false,hue:img.hue||0}));
+return new Promise((res,rej)=>{tx.oncomplete=res;tx.onerror=()=>rej(tx.error);});}catch(e){console.warn('IDB save fail:',e);}
+}
+
+async function loadIDB(){
+try{const db=await openIDB();return new Promise((res,rej)=>{
+const tx=db.transaction(IDB_STORE,'readonly');const r=tx.objectStore(IDB_STORE).getAll();
+r.onsuccess=()=>res(r.result||[]);r.onerror=()=>rej(r.error);
+});}catch(e){return[];}
+}
+
+async function save(silent=false){
+try{
+// Bug #10: Strip src (image data) from roster to reduce save size
+// Bug #11: Filter out temporary Forma units and remap team indices
+// During HoF, use savedTeamIds so we don't wipe the original team
+const teamIds=(typeof hofState!=='undefined'&&hofState&&hofState.savedTeamIds)?hofState.savedTeamIds:S.team.map(idx=>S.roster[idx]?.id).filter(Boolean);
+const clean=S.roster.filter(u=>!u.isForma).map(({img,src,...r})=>({...r,equippedItem:r.equippedItem||null,equippedAbilities:r.equippedAbilities||[null,null]}));
+const cleanTeam=teamIds.map(id=>clean.findIndex(u=>u.id===id)).filter(idx=>idx>=0);
+const cleanPresets=S.teamPresets?S.teamPresets.map(p=>{if(!p||!p.team)return p;const pIds=p.team.map(idx=>S.roster[idx]?.id).filter(Boolean);return{...p,team:pIds.map(id=>clean.findIndex(u=>u.id===id)).filter(idx=>idx>=0)};}):S.teamPresets;
+const sd={ap:S.ap,pullCount:S.pullCount,roster:clean,team:cleanTeam,teamPresets:cleanPresets,activePreset:S.activePreset,elo:S.elo,wins:S.wins,totalBattles:S.totalBattles,
+soundOn:S.soundOn,musicTempo:bgm?bgm.tempo:90,forecastOn:S.forecastOn,campaignDone:S.campaignDone,shards:S.shards,uid,
+banners:S.banners,activeBannerId:S.activeBannerId,seals:S.seals,
+trainingFloor:S.trainingFloor,arenaScore:S.arenaScore,arenaWeek:S.arenaWeek,
+loginStreak:S.loginStreak,lastLoginDate:S.lastLoginDate,
+quests:S.quests,questProgress:S.questProgress,
+ghbCleared:S.ghbCleared||[],
+gachaSession:null,
+itemInventory:S.itemInventory||[],
+unlockedAbilities:S.unlockedAbilities||[],
+teamSize:S.teamSize||4,currentBattleMode:currentBattleMode||'ladder',currentBattleConfig:currentBattleConfig,currentDifficulty:currentDifficulty||'normal',
+daycareSlots:S.daycareSlots||[null,null],daycareBond:S.daycareBond||0,supportMap:S.supportMap||{},fusionChildren:S.fusionChildren||[],
+achievements:S.achievements||[],compendium:S.compendium||[],
+apexTokens:S.apexTokens||0,apexMeter:S.apexMeter||0,profileTitle:S.profileTitle||'Rookie',unlockedTitles:S.unlockedTitles||['Rookie']};
+localStorage.setItem(SAVE_KEY,JSON.stringify(sd));
+await saveIDB(S.images);
+if(!silent)toast('Saved!','ok');refreshSettings();
+}catch(e){if(!silent)toast('Save failed','err');}
+}
+const saveGame=save;
+
+async function loadGame(){
+try{
+let raw=localStorage.getItem(SAVE_KEY);
+// v1 migration
+if(!raw){const v1=localStorage.getItem(SAVE_KEY_V1);if(v1)raw=v1;}
+const idbImgs=await loadIDB();
+if(raw){
+const d=JSON.parse(raw);
+Object.assign(S,{ap:d.ap??CFG.BASE_AP,pullCount:d.pullCount??0,roster:d.roster??[],team:d.team??[],
+images:idbImgs.length?idbImgs:S.images,elo:d.elo??0,wins:d.wins??0,totalBattles:d.totalBattles??0,
+soundOn:d.soundOn??false,forecastOn:d.forecastOn??true,campaignDone:d.campaignDone??[],shards:d.shards??0,
+banners:d.banners??[],activeBannerId:d.activeBannerId??null,seals:d.seals??[],
+trainingFloor:d.trainingFloor??1,arenaScore:d.arenaScore??0,arenaWeek:d.arenaWeek??0,
+loginStreak:d.loginStreak??0,lastLoginDate:d.lastLoginDate??'',
+quests:d.quests??{daily:[],story:[],lastDailyDate:''},
+questProgress:d.questProgress??{},
+ghbCleared:d.ghbCleared??[],
+teamSize:d.teamSize??4,
+itemInventory:d.itemInventory??[],
+unlockedAbilities:d.unlockedAbilities??[],
+teamPresets:d.teamPresets??[null,null,null,null,null],
+activePreset:d.activePreset??0});
+if(d.uid)uid=d.uid;
+if(d.currentBattleMode)currentBattleMode=d.currentBattleMode;
+if(d.currentBattleConfig)currentBattleConfig=d.currentBattleConfig;
+if(d.currentDifficulty)currentDifficulty=d.currentDifficulty;
+// Restore daycare & support systems from save
+if(d.daycareSlots)S.daycareSlots=d.daycareSlots;
+if(d.daycareBond!==undefined)S.daycareBond=d.daycareBond;
+if(d.supportMap)S.supportMap=d.supportMap;
+if(d.fusionChildren)S.fusionChildren=d.fusionChildren;
+// v3.5 expansion data
+if(d.achievements)S.achievements=d.achievements;
+if(d.compendium)S.compendium=d.compendium;
+if(d.apexTokens)S.apexTokens=d.apexTokens;
+if(d.apexMeter)S.apexMeter=d.apexMeter;
+if(d.profileTitle)S.profileTitle=d.profileTitle;
+if(d.unlockedTitles)S.unlockedTitles=d.unlockedTitles;
+}else if(idbImgs.length)S.images=idbImgs;
+// Migrate all roster units
+// Restore team size from save
+CFG.TEAM_SIZE=S.teamSize||4;
+S.roster.forEach(u=>{
+u.level=u.level??40;
+u.exp=u.exp??0;
+u.sp=u.sp??0;
+u.growthRates=u.growthRates??{hp:50,atk:50,def:40,mag:40,res:40,spd:50};
+// Bug #48: Reverse-engineer baseStat for legacy saves by subtracting growth gains
+if(!u.baseStat){
+const gr=u.growthRates;const lvl=u.level||1;
+u.baseStat={
+hp:u.maxHp-Math.floor((lvl-1)*gr.hp/100),
+atk:u.atk-Math.floor((lvl-1)*gr.atk/100),
+def:u.def-Math.floor((lvl-1)*gr.def/100),
+mag:u.mag-Math.floor((lvl-1)*gr.mag/100),
+res:u.res-Math.floor((lvl-1)*gr.res/100),
+spd:u.spd-Math.floor((lvl-1)*gr.spd/100)};
+}
+u.skillA=u.skillA??(u.passives?.[0]??null);
+u.skillB=u.skillB??(u.passives?.[1]??null);
+u.skillC=u.skillC??C_SKILLS[~~(Math.random()*C_SKILLS.length)];
+u.skillS=u.skillS??null;
+u.isAnimated=u.isAnimated??false;
+u.storyText=u.storyText??'';
+u.boon=u.boon??null;
+u.bane=u.bane??null;
+u.assist=u.assist??(typeof ASSIST_SKILLS!=='undefined'&&ASSIST_SKILLS.length?ASSIST_SKILLS[~~(Math.random()*ASSIST_SKILLS.length)]:null);
+if(!u.faction&&typeof assignFactionClass==='function')assignFactionClass(u);
+u.equippedItem=u.equippedItem??null;
+u.equippedAbilities=u.equippedAbilities??[null,null];
+u.passives=[u.skillA,u.skillB,u.skillC,u.skillS].filter(Boolean);
+// Bug #10: Reconstruct src from images by name (try originalImageName first for renamed units)
+if(!u.src){
+const imgMatch=S.images.find(i=>i.name===(u.originalImageName||u.name));
+if(imgMatch)u.src=imgMatch.src;
+}
+});
+if(!S.banners)S.banners=[];
+if(!S.activeBannerId)S.activeBannerId=null;
+if(!S.seals)S.seals=[];
+if(!S.teamPresets||!Array.isArray(S.teamPresets))S.teamPresets=[null,null,null,null,null];
+// Sanitize team — remove indices that point beyond roster length
+S.team=S.team.filter(idx=>idx>=0&&idx<S.roster.length);
+// Sanitize daycare — remove unit IDs that no longer exist
+const rosterIds=new Set(S.roster.map(u=>u.id));
+if(S.daycareSlots)S.daycareSlots=S.daycareSlots.map(uid=>uid&&rosterIds.has(uid)?uid:null);
+// Sanitize presets — remove stale indices
+S.teamPresets=(S.teamPresets||[]).map(p=>{
+if(!p||!p.team)return null;
+return{...p,team:p.team.filter(idx=>idx>=0&&idx<S.roster.length)};
+});
+if(S.activePreset===undefined)S.activePreset=0;
+if(!S.trainingFloor)S.trainingFloor=1;
+if(!S.arenaScore)S.arenaScore=0;
+if(!S.arenaWeek)S.arenaWeek=0;
+if(!S.loginStreak)S.loginStreak=0;
+if(!S.lastLoginDate)S.lastLoginDate='';
+if(!S.quests)S.quests={daily:[],story:[],lastDailyDate:''};
+if(!S.questProgress)S.questProgress={};
+refreshSettings();updateEloDisplay();
+}catch(e){console.warn('Load fail:',e);}
+}
+
+function exportJSON(){
+const clean=S.roster.map(({img,...r})=>r);
+const imgData=S.images.filter(i=>!i.isDefault);
+const totalSize=JSON.stringify(imgData).length;
+if(totalSize>5000000&&!confirm('Export includes '+(totalSize/1048576).toFixed(1)+'MB of images. Continue?'))return;
+const data={...S,roster:clean,images:imgData};
+const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
+const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='apex_tier0_save.json';a.click();
+toast('Exported!','ok');
+}
+
+function importJSON(){
+const input=document.createElement('input');input.type='file';input.accept='.json';
+input.onchange=e=>{
+const f=e.target.files[0];if(!f)return;
+const reader=new FileReader();reader.onload=ev=>{
+try{
+const d=JSON.parse(ev.target.result);
+if(d.roster)S.roster=d.roster;if(d.team)S.team=d.team;if(d.images)d.images.forEach(i=>{if(!S.images.find(x=>x.name===i.name))S.images.push(i);});
+if(d.elo!==undefined)S.elo=Math.max(0,Math.min(99999,d.elo||0));if(d.ap!==undefined)S.ap=Math.max(0,Math.min(99999,d.ap||0));
+// Bug #49: Sync uid to highest roster id to prevent collisions
+uid=Math.max(uid,...S.roster.map(u=>u.id||0));
+save(true);refreshSettings();updateEloDisplay();toast('Imported!','ok');
+}catch(err){toast('Invalid file','err');}
+};reader.readAsText(f);
+};input.click();
+}
+
+async function resetAll(){
+if(!confirm('Reset ALL data? Cannot be undone!'))return;
+localStorage.removeItem(SAVE_KEY);localStorage.removeItem(SAVE_KEY_V1);
+try{const db=await openIDB();db.transaction(IDB_STORE,'readwrite').objectStore(IDB_STORE).clear();}catch(e){}
+S={ap:CFG.BASE_AP,pullCount:0,roster:[],team:[],images:[],elo:0,wins:0,totalBattles:0,soundOn:false,forecastOn:true,campaignDone:[],shards:0,teamSize:4,
+banners:[],activeBannerId:null,seals:[],trainingFloor:1,arenaScore:0,arenaWeek:0,
+loginStreak:0,lastLoginDate:'',quests:{daily:[],story:[],lastDailyDate:''},questProgress:{},gachaSession:null,
+itemInventory:[],unlockedAbilities:[],
+teamPresets:[null,null,null,null,null],activePreset:0,
+daycareSlots:[null,null],daycareBond:0,supportMap:{},fusionChildren:[],
+achievements:[],compendium:[],
+apexTokens:0,apexMeter:0,profileTitle:'Rookie',unlockedTitles:['Rookie']};
+uid=0;initPlaceholders();toast('Reset complete');nav('home');
+}
+
+// ═══ GLOBAL CACHES & BATTLE STATE ═══════════════════════════
+const IMG_CACHE=new Map();
+const IMG_CACHE_MAX=200;
+function imgCacheSet(key,val){if(IMG_CACHE.size>=IMG_CACHE_MAX){const first=IMG_CACHE.keys().next().value;IMG_CACHE.delete(first);}IMG_CACHE.set(key,val);}
+let currentBattleMode='ladder';
+let currentBattleConfig=null;
+let currentDifficulty='normal'; // 'normal' | 'hard' | 'lunatic'
+let currentHeroDetailIdx=-1;
+let inheritTargetIdx=-1;
+let inheritActiveSlot='skillA';
+let inheritSelected=null;
+let questTabMode='daily';
+let bannerPickSelected=new Set();
+
+// ═══ QUEST SYSTEM ═══════════════════════════════════════════
+const DAILY_QUEST_DEFS=[
+{id:'dq_win',desc:'Win 3 battles',type:'wins',target:3,reward:{ap:15}},
+{id:'dq_summon',desc:'Summon 5 heroes',type:'summons',target:5,reward:{ap:10}},
+{id:'dq_kill',desc:'Defeat 10 enemies in battle',type:'kills',target:10,reward:{ap:12}},
+{id:'dq_highpull',desc:'Pull an A/S/T0 grade hero',type:'highPull',target:1,reward:{ap:20}},
+{id:'dq_lv',desc:'Level up a hero',type:'levelups',target:1,reward:{ap:8}},
+];
+const STORY_QUEST_DEFS=[
+{id:'sq_first',desc:'Win your first battle',type:'wins',target:1,reward:{ap:20}},
+{id:'sq_team',desc:'Build a team of 4 heroes',type:'teamBuilt',target:1,reward:{ap:15}},
+{id:'sq_summon10',desc:'Summon 10 total heroes',type:'summons',target:10,reward:{ap:30}},
+{id:'sq_lv5',desc:'Raise a hero to Level 5',type:'levelups',target:5,reward:{ap:25}},
+{id:'sq_campaign',desc:'Complete any Campaign chapter',type:'campaignDone',target:1,reward:{ap:40}},
+{id:'sq_summon50',desc:'Summon 50 total heroes',type:'summons',target:50,reward:{ap:100}},
+{id:'sq_training',desc:'Clear the Training Tower',type:'trainingDone',target:1,reward:{ap:30}},
+{id:'sq_wins10',desc:'Win 10 battles total',type:'wins',target:10,reward:{ap:50}},
+];
+
+function initQuests(){
+const today=new Date().toDateString();
+if(S.quests.lastDailyDate!==today){
+S.questProgress={};
+S.quests.daily=DAILY_QUEST_DEFS.slice(0,3).map(d=>({defId:d.id,progress:0,completed:false,claimed:false}));
+S.quests.lastDailyDate=today;
+}
+if(!S.quests.story||S.quests.story.length===0){
+S.quests.story=STORY_QUEST_DEFS.map(d=>({defId:d.id,progress:0,completed:false,claimed:false}));
+}
+}
+
+function trackQuest(type,amount=1){
+if(!S.questProgress)S.questProgress={};
+S.questProgress[type]=(S.questProgress[type]||0)+amount;
+const total=S.questProgress[type];
+[...S.quests.daily,...(S.quests.story||[])].forEach(q=>{
+if(q.completed)return;
+const def=[...DAILY_QUEST_DEFS,...STORY_QUEST_DEFS].find(d=>d.id===q.defId);
+if(!def||def.type!==type)return;
+q.progress=Math.min(def.target,total);
+if(q.progress>=def.target&&!q.completed){q.completed=true;toast(`Quest done: ${def.desc}!`,'gold');updateQuestBadge();}
+});
+}
+
+// Bug #6: use setQuestProgress for absolute values instead of additive trackQuest
+function setQuestProgress(type,absoluteAmount){
+if(!S.questProgress)S.questProgress={};
+S.questProgress[type]=absoluteAmount;
+[...S.quests.daily,...(S.quests.story||[])].forEach(q=>{
+if(q.completed)return;
+const def=[...DAILY_QUEST_DEFS,...STORY_QUEST_DEFS].find(d=>d.id===q.defId);
+if(!def||def.type!==type)return;
+q.progress=Math.min(def.target,absoluteAmount);
+if(q.progress>=def.target&&!q.completed){q.completed=true;toast(`Quest done: ${def.desc}!`,'gold');updateQuestBadge();}
+});
+}
+
+function checkStoryQuests(){
+if(S.campaignDone.length>0)setQuestProgress('campaignDone',S.campaignDone.length);
+if(S.team.length>=4)setQuestProgress('teamBuilt',1);
+}
+
+function updateQuestBadge(){
+const hasClaim=[...S.quests.daily,...(S.quests.story||[])].some(q=>q.completed&&!q.claimed);
+const badge=document.getElementById('homeQuestBadge');
+if(badge)badge.style.display=hasClaim?'inline':'none';
+}
+
+function switchQuestTab(tab){
+questTabMode=tab;
+document.getElementById('qtDaily')?.classList.toggle('active',tab==='daily');
+document.getElementById('qtStory')?.classList.toggle('active',tab==='story');
+renderQuests();
+}
+
+function renderQuests(){
+const list=document.getElementById('questList');if(!list)return;
+list.innerHTML='';
+const quests=questTabMode==='daily'?S.quests.daily:(S.quests.story||[]);
+const defs=questTabMode==='daily'?DAILY_QUEST_DEFS:STORY_QUEST_DEFS;
+quests.forEach(q=>{
+const def=defs.find(d=>d.id===q.defId);if(!def)return;
+const pct=Math.min(100,Math.round((q.progress/def.target)*100));
+const rewardStr=Object.entries(def.reward).map(([k,v])=>`+${v} ${k.toUpperCase()}`).join(', ');
+const el=document.createElement('div');
+el.className='quest-item'+(q.claimed?' done':'');
+el.innerHTML=`<div class="quest-info">
+<div class="quest-desc">${def.desc}</div>
+<div class="quest-progress">${q.progress}/${def.target}</div>
+<div class="quest-bar"><div class="quest-bar-fill" style="width:${pct}%"></div></div>
+</div>
+<div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">
+<div class="quest-reward">${rewardStr}</div>
+${q.completed&&!q.claimed?`<button class="btn2 btn-sm" onclick="claimQuestReward('${q.defId}','${questTabMode}')">CLAIM</button>`:''}
+${q.claimed?`<span style="font-size:.6rem;color:var(--green)">Claimed</span>`:''}
+</div>`;
+list.appendChild(el);
+});
+if(!quests.length)list.innerHTML='<div style="text-align:center;color:var(--text2);padding:30px;font-size:.75rem">No quests available.</div>';
+}
+
+function claimQuestReward(defId,tab){
+const quests=tab==='daily'?S.quests.daily:(S.quests.story||[]);
+const q=quests.find(x=>x.defId===defId);
+if(!q||!q.completed||q.claimed)return;
+q.claimed=true;
+const defs=tab==='daily'?DAILY_QUEST_DEFS:STORY_QUEST_DEFS;
+const def=defs.find(d=>d.id===defId);
+if(def?.reward?.ap){S.ap+=def.reward.ap;toast(`+${def.reward.ap} AP!`,'gold');}
+save(true);updateQuestBadge();renderQuests();
+}
+
+// ═══ ORB SESSION SYSTEM ═════════════════════════════════════
+function startSession(){
+if(_pullLock)return;
+if(S.ap<5){toast('Not enough Flux!','err');return;}
+const pool=getPool();
+if(!pool.length){toast('Add images first!','err');return;}
+// Generate 5 orbs with color distribution from pool
+const orbColors=['Red','Blue','Green','Colorless'];
+const colorCounts={Red:0,Blue:0,Green:0,Colorless:0};
+pool.forEach(img=>{
+// Guess color from name or use balanced distribution
+const c=orbColors[~~(Math.random()*orbColors.length)];
+colorCounts[c]++;
+});
+// Normalize to 5 orbs
+const orbs=[];
+for(let i=0;i<5;i++){
+const r=Math.random()*4;
+const col=r<1?'Red':r<2?'Blue':r<2.5?'Green':'Colorless';
+orbs.push({color:col,revealed:false,unit:null,picked:false});
+}
+S.gachaSession={orbs,picked:0,results:[]};
+renderSummonModal();
+document.getElementById('summonModal').classList.add('show');
+document.getElementById('summonModalAP').textContent=S.ap;
+}
+
+function renderSummonModal(){
+const row=document.getElementById('summonOrbRow');
+if(!row)return;
+row.innerHTML='';
+const sess=S.gachaSession;
+if(!sess)return;
+sess.orbs.forEach((orb,idx)=>{
+const el=document.createElement('div');
+el.className=`orb-card${orb.revealed?' flipped':''}`;
+el.innerHTML=`<div class="orb-inner">
+<div class="orb-face orb-${orb.color}"></div>
+<div class="orb-face orb-back-face" style="background:var(--panel2);display:flex;align-items:center;justify-content:center;font-size:.6rem;color:var(--gold)">
+${orb.unit?`<span>${orb.unit.grade}</span>`:'?'}
+</div>
+</div>`;
+if(!orb.revealed)el.onclick=()=>pickOrb(idx);
+row.appendChild(el);
+});
+const strip=document.getElementById('summonResultStrip');
+if(strip){strip.innerHTML='';
+sess.results.forEach(r=>{
+const u=r.unit;
+const chip=document.createElement('div');
+chip.className='pull-result-chip';
+const c=document.createElement('canvas');c.width=c.height=60;
+chip.appendChild(c);
+const gEl=document.createElement('div');gEl.className='grade-'+u.grade;
+gEl.style.cssText='font-family:var(--display);font-size:.55rem;font-weight:700;letter-spacing:1px';
+gEl.textContent=GRADE_LABEL[u.grade];
+chip.appendChild(gEl);
+const nm=document.createElement('div');nm.textContent=u.name;nm.style.cssText='font-size:.55rem;margin-top:2px';
+chip.appendChild(nm);
+strip.appendChild(chip);
+// Draw portrait async
+const ti=new Image();ti.onload=()=>{u.img=ti;drawUnitPortrait(c,u,60);};ti.src=u.src;
+drawUnitPortrait(c,u,60);
+});}
+document.getElementById('summonModalAP').textContent=S.ap;
+}
+
+function pickOrb(idx){
+const sess=S.gachaSession;
+if(!sess)return;
+const orb=sess.orbs[idx];
+if(orb.revealed||orb.picked)return;
+const cost=sess.picked===0?5:4;
+if(S.ap<cost){toast('Not enough Flux!','err');return;}
+S.ap-=cost;
+sess.picked++;
+const r=rollUnit();
+if(!r){renderSummonModal();return;}
+orb.revealed=true;orb.unit=r.unit;orb.picked=true;
+sess.results.push(r);
+sfx('summon');
+// Cinematic for high grades
+if(['S','T0'].includes(r.unit.grade))triggerSummonCinematic(r.unit.grade);
+save(true);renderSummonModal();
+}
+
+function pickAllOrbs(){
+const sess=S.gachaSession;if(!sess)return;
+for(let i=0;i<sess.orbs.length;i++){
+if(!sess.orbs[i].revealed){pickOrb(i);}
+}
+}
+
+function closeSummonSession(){
+document.getElementById('summonModal').classList.remove('show');
+S.gachaSession=null;
+save(true);refreshGacha();refreshBarracks();
+}
+
+function triggerSummonCinematic(grade){
+const el=document.getElementById('cinematicOverlay');
+if(!el)return;
+el.className=`cinematic-overlay grade-${grade} active`;
+setTimeout(()=>{el.className='cinematic-overlay';},1500);
+}
+
+// ═══ BANNER SYSTEM ══════════════════════════════════════════
+function openBannerCreator(){
+bannerPickSelected=new Set();
+const picker=document.getElementById('bannerHeroPicker');
+if(!picker)return;
+picker.innerHTML='';
+S.roster.forEach((u,i)=>{
+if(!u.src)return;
+const item=document.createElement('div');
+item.className='bpick-item'+(bannerPickSelected.has(i)?' selected':'');
+const c=document.createElement('canvas');c.width=c.height=64;
+item.appendChild(c);
+const nm=document.createElement('div');nm.className='bpick-name';nm.textContent=u.name;
+item.appendChild(nm);
+const ti=new Image();ti.onload=()=>{u.img=ti;drawUnitPortrait(c,u,64);};
+ti.src=u.src;drawUnitPortrait(c,u,64);
+item.onclick=()=>{
+if(bannerPickSelected.has(i)){bannerPickSelected.delete(i);item.classList.remove('selected');}
+else if(bannerPickSelected.size<5){bannerPickSelected.add(i);item.classList.add('selected');}
+else{toast('Max 5 heroes per banner','err');return;}
+document.getElementById('bannerPickCount').textContent=bannerPickSelected.size;
+};
+picker.appendChild(item);
+});
+document.getElementById('bannerNameInput').value='';
+document.getElementById('bannerPickCount').textContent='0';
+document.getElementById('bannerCreatorModal').classList.add('show');
+}
+
+function closeBannerModal(){document.getElementById('bannerCreatorModal').classList.remove('show');}
+
+function saveBanner(){
+const name=document.getElementById('bannerNameInput').value.trim()||'My Banner';
+const heroIds=[...bannerPickSelected].map(i=>S.roster[i]?.id).filter(Boolean);
+const heroImgNames=[...bannerPickSelected].map(i=>{const u=S.roster[i];if(!u)return null;const img=S.images.find(im=>im.src===u.src);return img?img.name:u.name;}).filter(Boolean);
+const banner={id:'banner_'+Date.now(),name,heroNames:heroImgNames,heroIds,createdAt:Date.now(),isDefault:false};
+S.banners.push(banner);
+S.activeBannerId=banner.id;
+closeBannerModal();save(true);toast('Banner created!','ok');
+refreshGacha();refreshSettings();
+}
+
+function clearActiveBanner(){S.activeBannerId=null;save(true);refreshGacha();}
+
+function setActiveBanner(id){S.activeBannerId=id;save(true);refreshGacha();toast('Banner set active!','ok');}
+
+function deleteBanner(id){
+if(!confirm('Delete this banner?'))return;
+S.banners=S.banners.filter(b=>b.id!==id);
+if(S.activeBannerId===id)S.activeBannerId=null;
+save(true);refreshSettings();refreshGacha();
+}
+
+// Bug #44: Removed duplicate refreshBannerList — see unified version below
+
+// ═══ SKILL INHERITANCE ══════════════════════════════════════
+const INHERIT_SLOTS=[
+{key:'skillA',label:'A SLOT'},
+{key:'skillB',label:'B SLOT'},
+{key:'skillC',label:'C SLOT'},
+{key:'skillS',label:'SEAL'},
+{key:'special',label:'SPECIAL'}, // Bug #35
+];
+
+const LEARNABLE_SKILLS=[
+{id:'fury3',name:'Fury 3',slot:'skillA',desc:'Grants ATK/SPD/DEF/RES+3 but deals 6 recoil per combat',spCost:240,trigger:'OnAttack',condition:'Always',effect:{tag:'buff_atk',val:3}},
+{id:'lifeanddeath3',name:'Life and Death 3',slot:'skillA',desc:'Grants ATK/SPD+5 but DEF/RES-5',spCost:240,trigger:'OnAttack',condition:'Always',effect:{tag:'buff_atk',val:5}},
+{id:'deathblow3',name:'Death Blow 3',slot:'skillA',desc:'Grants ATK+6 when initiating combat',spCost:200,trigger:'OnAttack',condition:'Always',effect:{tag:'buff_atk',val:6}},
+{id:'swift_sparrow',name:'Swift Sparrow 2',slot:'skillA',desc:'If unit initiates: ATK/SPD+4',spCost:240,trigger:'OnAttack',condition:'Always',effect:{tag:'buff_spd',val:4}},
+{id:'desperation3',name:'Desperation 3',slot:'skillB',desc:'If unit initiates and HP<75%: follow-up before foe counterattack',spCost:200,trigger:'OnAttack',condition:'HP<75%',effect:{tag:'desperation',val:0}},
+{id:'vantage3',name:'Vantage 3',slot:'skillB',desc:'If foe initiates: counterattack first when HP<75%',spCost:200,trigger:'OnDefend',condition:'HP<75%',effect:{tag:'vantage',val:0}},
+{id:'quick_riposte',name:'Quick Riposte 3',slot:'skillB',desc:'Guarantees follow-up when HP>75%',spCost:200,trigger:'OnDefend',condition:'HP>75%',effect:{tag:'brave',val:2}},
+{id:'lull_atk',name:'Lull ATK/SPD 2',slot:'skillB',desc:'Inflicts ATK/SPD-3 on foe in combat',spCost:180,trigger:'OnAttack',condition:'Always',effect:{tag:'poison',val:3}},
+{id:'hone_atk',name:'Hone ATK 3',slot:'skillC',desc:'Grants ATK+4 to adjacent allies at start of turn',spCost:180,trigger:'TurnStart',condition:'Always',effect:{tag:'buff_atk',val:4}},
+{id:'goad_cav',name:'Goad Cavalry',slot:'skillC',desc:'Grants Cavalry allies ATK/SPD+4 during combat',spCost:200,trigger:'TurnStart',condition:'Always',effect:{tag:'buff_atk',val:4}},
+{id:'ward_cav',name:'Ward Cavalry',slot:'skillC',desc:'Grants Cavalry allies DEF/RES+4 during combat',spCost:200,trigger:'TurnStart',condition:'Always',effect:{tag:'buff_def',val:4}},
+{id:'fortify_def',name:'Fortify DEF 3',slot:'skillC',desc:'Grants DEF+4 to adjacent allies at start of turn',spCost:180,trigger:'TurnStart',condition:'Always',effect:{tag:'buff_def',val:4}},
+];
+
+function openInheritModal(unitIdx){
+if(unitIdx===undefined)unitIdx=currentHeroDetailIdx;
+inheritTargetIdx=unitIdx;
+inheritSelected=null;
+inheritActiveSlot='skillA';
+const u=S.roster[unitIdx];if(!u)return;
+document.getElementById('inheritTargetInfo').textContent=`${u.name} — SP: ${u.sp||0}`;
+document.getElementById('inheritSP').textContent=u.sp||0;
+renderInheritTabs();
+renderInheritSkillList();
+document.getElementById('inheritModal').classList.add('show');
+}
+
+function renderInheritTabs(){
+const tabs=document.getElementById('inheritSlotTabs');if(!tabs)return;
+tabs.innerHTML='';
+INHERIT_SLOTS.forEach(slot=>{
+const b=document.createElement('button');
+b.className='fbtn'+(inheritActiveSlot===slot.key?' active':'');
+b.textContent=slot.label;
+b.onclick=()=>{inheritActiveSlot=slot.key;inheritSelected=null;renderInheritTabs();renderInheritSkillList();};
+tabs.appendChild(b);
+});
+}
+
+function renderInheritSkillList(){
+const list=document.getElementById('inheritSkillList');if(!list)return;
+list.innerHTML='';
+// Bug #35: show specials when special slot is selected
+let skills;
+if(inheritActiveSlot==='special'){
+skills=(typeof ACTIVE_SPECIALS!=='undefined'?ACTIVE_SPECIALS:[]).map(sp=>({id:sp.name.toLowerCase().replace(/\s/g,'_'),name:sp.name,desc:sp.desc,slot:'special',spCost:sp.cd*40,effect:sp.effect,val:sp.val,cd:sp.cd}));
+}else{
+skills=LEARNABLE_SKILLS.filter(s=>s.slot===inheritActiveSlot);
+}
+if(!skills.length){list.innerHTML='<div style="color:var(--text2);font-size:.7rem;padding:10px">No skills available for this slot.</div>';return;}
+skills.forEach(sk=>{
+const el=document.createElement('div');
+el.className='inherit-skill-item'+(inheritSelected?.id===sk.id?' selected':'');
+el.innerHTML=`<div class="inherit-skill-name">${sk.name}</div>
+<div class="inherit-skill-desc">${sk.desc}</div>
+<div class="inherit-cost">${sk.spCost} SP</div>`;
+el.onclick=()=>{inheritSelected=sk;renderInheritSkillList();
+const btn=document.getElementById('inheritConfirmBtn');
+if(btn){btn.textContent=`LEARN (${sk.spCost} SP)`;btn.disabled=false;}
+};
+list.appendChild(el);
+});
+}
+
+function confirmInherit(){
+if(!inheritSelected||inheritTargetIdx<0)return;
+const u=S.roster[inheritTargetIdx];if(!u)return;
+const sk=inheritSelected;
+if((u.sp||0)<sk.spCost){toast('Not enough SP!','err');return;}
+u.sp-=sk.spCost;
+// Bug #56: Warn before overwriting existing skill
+const existingSkill=inheritActiveSlot==='special'?u.special:u[inheritActiveSlot];
+if(existingSkill&&existingSkill.name&&existingSkill.name!=='—'){
+if(!confirm(`Replace ${existingSkill.name} with ${sk.name}?`))return;
+}
+// Build skill object for the slot
+if(inheritActiveSlot==='special'){
+// Bug #35: handle special slot separately
+u.special={name:sk.name,desc:sk.desc,effect:sk.effect,val:sk.val||0,cd:sk.cd||3};
+}else{
+const skillObj={name:sk.name,desc:sk.desc,tag:sk.id,val:sk.effect?.val??0,trigger:sk.trigger||'OnAttack',condition:sk.condition||'Always',effect:sk.effect||{tag:sk.id,val:0}};
+u[inheritActiveSlot]=skillObj;
+}
+// Always rebuild regardless of which slot changed (C-Skills and Seals now matter)
+u.passives=[u.skillA,u.skillB,u.skillC,u.skillS].filter(Boolean);
+toast(`${sk.name} learned!`,'ok');save(true);
+closeInheritModal();
+if(currentHeroDetailIdx===inheritTargetIdx)openHeroDetail(inheritTargetIdx);
+}
+
+function closeInheritModal(){document.getElementById('inheritModal').classList.remove('show');inheritSelected=null;}
+
+// ═══ HERO DETAIL SCREEN ═════════════════════════════════════
+function openHeroDetail(idx){
+currentHeroDetailIdx=idx;
+const u=S.roster[idx];if(!u)return;
+nav('heroDetail');
+// Header — editable name
+const hdNameEl=document.getElementById('hdName');
+hdNameEl.textContent=u.name;
+hdNameEl.style.cursor='pointer';
+hdNameEl.title='Click to rename';
+hdNameEl.onclick=()=>{
+const newName=prompt('Rename unit:',u.name);
+if(newName&&newName.trim()){u.name=newName.trim();hdNameEl.textContent=u.name;refreshBarracks();save(true);}
+};
+// Portrait
+const pc=document.getElementById('hdPortrait');
+if(u.isAnimated){
+// For animated units, use an img tag approach
+pc.style.display='none';
+let anim=document.getElementById('hdAnimatedPortrait');
+if(!anim){anim=document.createElement('img');anim.id='hdAnimatedPortrait';anim.style.cssText='width:160px;height:160px;border-radius:50%;object-fit:cover;border:3px solid var(--gold)';pc.parentNode.insertBefore(anim,pc);}
+anim.src=u.src;anim.style.display='block';
+}else{
+const anim=document.getElementById('hdAnimatedPortrait');if(anim)anim.style.display='none';
+pc.style.display='block';
+const ti=new Image();ti.onload=()=>{u.img=ti;drawUnitPortrait(pc,u,160);};
+ti.src=u.src;drawUnitPortrait(pc,u,160);
+}
+// Level badge
+document.getElementById('hdLvBadge').textContent=`Lv.${u.level||1} / 40`;
+// Grade / role
+const gEl=document.getElementById('hdGrade');gEl.textContent=GRADE_LABEL[u.grade];gEl.className='ucard-grade grade-'+u.grade;
+document.getElementById('hdRoleWeapon').textContent=`${u.role} | ${u.weapon} | ${MOVE_STATS[u.moveType]?.label||'INF'}`;
+// EXP bar
+const expRequired=Math.floor(100*Math.pow(u.level||1,1.5));
+const expPct=u.level>=40?100:Math.min(100,Math.round(((u.exp||0)/expRequired)*100));
+document.getElementById('hdExpBar').innerHTML=`<div style="font-size:.6rem;color:var(--text2);margin-bottom:2px">EXP: ${u.exp||0}/${u.level<40?expRequired:'MAX'}</div><div class="exp-bar-wrap"><div class="exp-bar-fill" style="width:${expPct}%"></div></div>`;
+// Meta row
+document.getElementById('hdMetaRow').innerHTML=`<span>Battles: —</span><span>SP: <span style="color:var(--gold)">${u.sp||0}</span></span><span>Copies: ${u.totalPulls||1}</span>`;
+// Stats with preview
+hdPreviewLvlVal=u.level||1;
+renderHdStats(u,hdPreviewLvlVal);
+document.getElementById('hdPreviewLvl').textContent=hdPreviewLvlVal;
+// Skills
+renderHdSkills(u);
+// Story text
+const story=document.getElementById('hdStory');if(story)story.textContent=u.storyText||'';
+// Team button
+const inTeam=S.team.includes(idx);
+document.getElementById('hdTeamBtn').textContent=inTeam?'Remove from Team':'Add to Team';
+// SP
+document.getElementById('hdSP').textContent=u.sp||0;
+document.getElementById('hdMerges').textContent=u.totalPulls||1;
+// Prestige/Awaken section
+const awakSec=document.getElementById('hdAwakenSection');
+const awakDesc=document.getElementById('hdAwakenDesc');
+if(awakSec&&awakDesc){
+const prestige=u.prestige||0;
+if(u.level>=40){
+awakSec.style.display='block';
+awakDesc.textContent=`Prestige ${prestige}/∞ — Reset to Lv.1 and gain a permanent +3 to all base stats. Prestige units gain a golden aura.`;
+}else{
+awakSec.style.display='none';
+}
+}
+    // Add item section to hero detail
+    
+    // Remove old expansion sections
+    hdContent.querySelectorAll('.expansion-section').forEach(el => el.remove());
+    
+    // Item section
+    const itemSec = document.createElement('div');
+    itemSec.className = 'expansion-section';
+    itemSec.style.cssText = 'background:var(--panel2);border:1px solid var(--border);border-radius:8px;padding:12px';
+    
+    let itemHTML = '<div style="font-family:var(--display);font-size:.65rem;color:var(--gold);letter-spacing:1px;margin-bottom:6px">EQUIPPED ITEM</div>';
+    if(u.equippedItem) {
+        itemHTML += `<div style="font-size:.72rem;font-weight:600">${u.equippedItem.name} <span style="color:var(--text2);font-size:.6rem">${u.equippedItem.rarity}</span></div>`;
+        itemHTML += `<div style="font-size:.62rem;color:var(--text2);margin-top:2px">${u.equippedItem.desc}</div>`;
+        itemHTML += `<button class="btn2 btn-sm" style="margin-top:6px" onclick="unequipItem(${idx});openHeroDetail(${idx})">Unequip</button>`;
+    } else {
+        itemHTML += '<div style="font-size:.62rem;color:var(--text3)">No item equipped</div>';
+    }
+    
+    // Show inventory for equipping
+    if(S.itemInventory && S.itemInventory.length > 0) {
+        itemHTML += '<div style="margin-top:8px;font-size:.6rem;color:var(--text2)">Inventory (' + S.itemInventory.length + '):</div>';
+        itemHTML += '<div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:4px;max-height:120px;overflow-y:auto">';
+        S.itemInventory.slice(0, 20).forEach(item => {
+            const rarityColor = {D:'#8e99a4',C:'#00e5ff',B:'#7c4dff',A:'#ff6b35',S:'#ffd700',T0:'#ff2d55'}[item.rarity] || '#8e99a4';
+            itemHTML += `<button class="btn2 btn-sm" style="font-size:.5rem;border-color:${rarityColor};color:${rarityColor}" onclick="equipItem(${idx},'${item.instanceId}');openHeroDetail(${idx})" title="${item.desc}">${item.name}</button>`;
+        });
+        itemHTML += '</div>';
+    }
+    
+    itemSec.innerHTML = itemHTML;
+    hdContent.appendChild(itemSec);
+    
+    // Ability section
+    const abSec = document.createElement('div');
+    abSec.className = 'expansion-section';
+    abSec.style.cssText = 'background:var(--panel2);border:1px solid var(--border);border-radius:8px;padding:12px';
+    
+    let abHTML = '<div style="font-family:var(--display);font-size:.65rem;color:#7c4dff;letter-spacing:1px;margin-bottom:6px">EQUIPPED ABILITIES</div>';
+    const eqAbs = u.equippedAbilities || [null, null];
+    for(let slot = 0; slot < 2; slot++) {
+        const ab = eqAbs[slot];
+        abHTML += `<div style="margin-bottom:6px"><span style="font-size:.55rem;color:var(--text3)">Slot ${slot+1}:</span> `;
+        if(ab) {
+            abHTML += `<span style="font-size:.65rem;font-weight:600">${ab.name}</span> <span style="font-size:.55rem;color:var(--text2)">${ab.desc}</span>`;
+        } else {
+            abHTML += '<span style="font-size:.6rem;color:var(--text3)">Empty</span>';
+        }
+        abHTML += '</div>';
+    }
+    
+    // Show unlocked abilities
+    if(S.unlockedAbilities && S.unlockedAbilities.length > 0) {
+        abHTML += '<div style="margin-top:6px;font-size:.55rem;color:var(--text2)">Unlocked (' + S.unlockedAbilities.length + '/' + ABILITY_DB.length + '):</div>';
+        abHTML += '<div style="display:flex;flex-wrap:wrap;gap:3px;margin-top:4px;max-height:100px;overflow-y:auto">';
+        S.unlockedAbilities.slice(0, 30).forEach(abId => {
+            const ab = ABILITY_DB.find(a => a.id === abId);
+            if(!ab) return;
+            abHTML += `<button class="btn2 btn-sm" style="font-size:.45rem" onclick="equipAbility(${idx},'${abId}',0);openHeroDetail(${idx})" title="${ab.desc}">${ab.name}</button>`;
+        });
+        abHTML += '</div>';
+    }
+    
+    abSec.innerHTML = abHTML;
+    hdContent.appendChild(abSec);
+    { // Enhanced inventory UI (scoped to avoid redeclarations)
+        const sections = hdContent.querySelectorAll('.expansion-section');
+        const itemSec2 = sections[0]; // First expansion section is items
+        if(!itemSec2) return;
+
+        function renderInventory() {
+            let html = '<div style="font-family:var(--display);font-size:.65rem;color:var(--gold);letter-spacing:1px;margin-bottom:6px">EQUIPPED ITEM</div>';
+
+            // Equipped item display
+            if(u.equippedItem) {
+                const ic = getItemIcon(u.equippedItem);
+                const rc = RARITY_COLORS[u.equippedItem.rarity] || '#8e99a4';
+                html += `<div style="font-size:.72rem;font-weight:600">${ic} ${u.equippedItem.name} <span style="color:${rc};font-size:.6rem;font-weight:700">${u.equippedItem.rarity}</span></div>`;
+                html += `<div style="font-size:.62rem;color:var(--text2);margin-top:2px">${u.equippedItem.desc}</div>`;
+                html += `<button class="btn2 btn-sm" style="margin-top:6px" onclick="unequipItem(${idx});openHeroDetail(${idx})">Unequip</button>`;
+            } else {
+                html += '<div style="font-size:.62rem;color:var(--text3)">No item equipped</div>';
+            }
+
+            // Inventory with sorting/filtering
+            if(S.itemInventory && S.itemInventory.length > 0) {
+                html += `<div style="margin-top:8px;font-size:.6rem;color:var(--text2)">Inventory (${S.itemInventory.length}):</div>`;
+
+                // Sort buttons
+                html += '<div class="inv-filters">';
+                html += `<span style="font-size:.5rem;color:var(--text3);padding:2px 0">Sort:</span>`;
+                ['rarity','stat','name'].forEach(s => {
+                    html += `<button class="${_invSort===s?'active':''}" onclick="_setInvSort('${s}',${idx})">${s.charAt(0).toUpperCase()+s.slice(1)}</button>`;
+                });
+                html += `<span style="font-size:.5rem;color:var(--text3);padding:2px 4px">|</span>`;
+                // Filter buttons
+                const filters = [
+                    {id:'all', label:'All'},
+                    {id:'atk', label:'⚔️ ATK'},
+                    {id:'def', label:'🛡️ DEF'},
+                    {id:'spd', label:'💨 SPD'},
+                    {id:'hp',  label:'❤️ HP'},
+                    {id:'utility', label:'📦 Util'},
+                ];
+                filters.forEach(f => {
+                    html += `<button class="${_invFilter===f.id?'active':''}" onclick="_setInvFilter('${f.id}',${idx})">${f.label}</button>`;
+                });
+                html += '</div>';
+
+                // Filtered & sorted items
+                let items = filterItems(S.itemInventory);
+                items = sortItems(items);
+
+                html += '<div class="inv-item-grid">';
+                if(items.length === 0) {
+                    html += '<div style="font-size:.55rem;color:var(--text3);padding:4px">No items match filter</div>';
+                }
+                items.forEach(item => {
+                    const rc = RARITY_COLORS[item.rarity] || '#8e99a4';
+                    const ic = getItemIcon(item);
+                    html += `<button class="btn2 btn-sm" style="font-size:.5rem;border-color:${rc};color:${rc}" onclick="equipItem(${idx},'${item.instanceId}');openHeroDetail(${idx})" title="${item.desc}">${ic} ${item.name}</button>`;
+                });
+                html += '</div>';
+            }
+
+            itemSec2.innerHTML = html;
+        }
+
+        // Expose sort/filter setters
+        window._setInvSort = function(s, i) { _invSort = s; openHeroDetail(i); };
+        window._setInvFilter = function(f, i) { _invFilter = f; openHeroDetail(i); };
+
+        renderInventory();
+    } // end enhanced inventory UI
+    { // Lore, class change, fusion, weapon viewer (scoped)
+        const loreEl = document.getElementById('hdLore');
+        if(loreEl) {
+            const lore = u.storyText || generateLore(u);
+            loreEl.textContent = lore;
+        }
+
+        // Class Change options
+        const classInfo = document.getElementById('hdClassInfo');
+        const classOpts = document.getElementById('hdClassOptions');
+        if(classInfo && classOpts) {
+            classInfo.textContent = `Current: ${u.role} (${u.weapon}/${u.moveType}). Costs ${RECLASS_COST_AP} AP to change class.`;
+            let html = '';
+            RECLASS_OPTIONS.forEach((cls, ci) => {
+                const isCurrent = u.role === cls.name;
+                const wc = WEAPON_COLORS[cls.weapon] || '#fff';
+                html += `<button class="class-btn${isCurrent?' current':''}"
+                    ${isCurrent?'disabled':''}
+                    onclick="doClassChange(${idx},${ci})"
+                    style="border-color:${wc}${isCurrent?'':';color:'+wc}">
+                    ${cls.name}<br><span style="font-size:.4rem;opacity:.7">${cls.weapon}/${cls.move}</span>
+                </button>`;
+            });
+            classOpts.innerHTML = html;
+        }
+
+        // Fusion info
+        const fusionEl = document.getElementById('hdFusionInfo');
+        const fusionParents = document.getElementById('hdFusionParents');
+        if(fusionEl && fusionParents) {
+            if(u.fusedFrom && u.fusedFrom.length === 2) {
+                fusionEl.style.display = 'block';
+                fusionParents.innerHTML = `💫 Fused from <strong>${u.fusedFrom[0]}</strong> & <strong>${u.fusedFrom[1]}</strong>`;
+                // Add glow to portrait
+                const portrait = document.getElementById('hdPortrait');
+                if(portrait) portrait.classList.add('fusion-glow');
+            } else {
+                fusionEl.style.display = 'none';
+            }
+        }
+
+        // Show extra skill slots for fusion units
+        const skillsEl = document.getElementById('hdSkills');
+        if(skillsEl && u.isFusion) {
+            const extraSlots = ['D','E','F'];
+            extraSlots.forEach(sl => {
+                const skill = u['skill' + sl];
+                if(skill) {
+                    const div = document.createElement('div');
+                    div.style.cssText = 'background:var(--panel2);border:1px solid rgba(255,45,85,.3);border-radius:6px;padding:6px';
+                    div.innerHTML = `<div style="font-size:.55rem;color:#ff2d55;font-weight:700">${sl}</div>
+                        <div style="font-size:.65rem;font-weight:600">${skill.name}</div>
+                        <div style="font-size:.55rem;color:var(--text2)">${skill.desc||''}</div>`;
+                    skillsEl.appendChild(div);
+                }
+            });
+        }
+        // Remove old weapon viewer
+        hdContent.querySelectorAll('.weapon-viewer').forEach(el => el.remove());
+
+        // Build weapon info section
+        const wv = document.createElement('div');
+        wv.className = 'weapon-viewer';
+
+        const wc = WEAPON_COLORS[u.weapon] || '#fff';
+        const moveLabel = MOVE_STATS[u.moveType]?.label || u.moveType;
+        const wRange = typeof getWeaponRange === 'function' ? getWeaponRange(u.weapon) : (['Bow'].includes(u.weapon) ? 2 : 1);
+
+        // Weapon triangle info
+        const beats = WEAPON_TRIANGLE[u.weapon] || 'None';
+        const losesTo = Object.entries(WEAPON_TRIANGLE).find(([k,v]) => v === u.weapon);
+
+        let html = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+            <span style="font-family:var(--display);font-size:.65rem;color:${wc};letter-spacing:1px">${u.weapon.toUpperCase()}</span>
+            <span class="weapon-tag" style="border-color:${wc};color:${wc}">${moveLabel} • Range ${wRange}</span>
+        </div>`;
+
+        // Triangle
+        html += `<div style="font-size:.58rem;color:var(--text2);margin-bottom:4px">
+            <span style="color:#22c55e">Strong vs:</span> ${beats} &nbsp;
+            <span style="color:#ef4444">Weak vs:</span> ${losesTo ? losesTo[0] : 'None'}
+        </div>`;
+
+        // Weapon effect
+        if(u.weaponEffectName) {
+            const effectDesc = u.passives?.find(p => p && p.name && p.name.includes('\u2694'))?.desc || 'Unique weapon effect';
+            html += `<div class="weapon-effect-box">
+                <div style="font-weight:700;color:var(--gold);margin-bottom:2px">${u.weaponEffectName}</div>
+                <div style="color:var(--text2)">${effectDesc}</div>
+            </div>`;
+        } else if(u.weaponEffect) {
+            const we = typeof WEAPON_EFFECTS !== 'undefined' ? WEAPON_EFFECTS.find(w => w.id === u.weaponEffect) : null;
+            if(we) {
+                html += `<div class="weapon-effect-box">
+                    <div style="font-weight:700;color:var(--gold);margin-bottom:2px">${we.name}</div>
+                    <div style="color:var(--text2)">${we.desc}</div>
+                </div>`;
+            }
+        } else {
+            html += `<div style="font-size:.55rem;color:var(--text3);margin-top:4px">Standard ${u.weapon} — No special effect</div>`;
+        }
+
+        // All weapon types reference
+        html += `<details style="margin-top:8px"><summary style="font-size:.55rem;color:var(--text3);cursor:pointer">All Weapon Types</summary>
+        <div style="display:flex;flex-wrap:wrap;gap:3px;margin-top:4px">`;
+        WEAPON_TYPES.forEach(w => {
+            const c = WEAPON_COLORS[w] || '#fff';
+            const active = w === u.weapon;
+            html += `<span class="weapon-tag" style="border-color:${c};color:${active?'#fff':c};${active?'background:'+c:''}font-size:.45rem">${w}</span>`;
+        });
+        html += '</div></details>';
+
+        wv.innerHTML = html;
+
+        // Insert after the stats section
+        const statsSection = hdContent.querySelector('#hdStats');
+        if(statsSection && statsSection.parentElement) {
+            statsSection.parentElement.after(wv);
+        } else {
+            hdContent.appendChild(wv);
+        }
+    } // end lore/class/fusion/weapon scope
+    { // Auto-lore + export buttons (scoped)
+        const loreEl2 = document.getElementById('hdLore');
+        if(u && loreEl2 && typeof generateLore === 'function') {
+            if(!u.storyText || u.storyText.trim() === '') {
+                loreEl2.textContent = generateLore(u);
+            }
+        }
+        const hdNav = document.querySelector('#heroDetail .hdr-nav');
+        if(hdNav && !hdNav.querySelector('.export-btn')) {
+            const btn = document.createElement('button');
+            btn.className = 'btn2 btn-sm export-btn';
+            btn.textContent = 'Export';
+            btn.onclick = () => window.exportUnit(idx);
+            hdNav.insertBefore(btn, hdNav.firstChild);
+        }
+        if(hdNav && !hdNav.querySelector('.merc-btn')) {
+            const btn2 = document.createElement('button');
+            btn2.className = 'btn2 btn-sm merc-btn';
+            btn2.textContent = 'Merc';
+            btn2.onclick = () => window.exportMercenary(idx);
+            hdNav.insertBefore(btn2, hdNav.firstChild);
+        }
+    } // end auto-lore/export scope
+}
+
+let hdPreviewLvlVal=1;
+
+function renderHdStats(u,previewLevel){
+const el=document.getElementById('hdStats');if(!el)return;
+const bs=u.baseStat||{hp:u.maxHp,atk:u.atk,def:u.def,mag:u.mag,res:u.res,spd:u.spd};
+const gr=u.growthRates||{hp:50,atk:50,def:40,mag:40,res:40,spd:50};
+const lvl=Math.max(1,Math.min(40,previewLevel));
+const stats={
+HP:bs.hp+Math.floor((lvl-1)*gr.hp/100),
+ATK:bs.atk+Math.floor((lvl-1)*gr.atk/100),
+DEF:bs.def+Math.floor((lvl-1)*gr.def/100),
+MAG:bs.mag+Math.floor((lvl-1)*(gr.mag||40)/100),
+RES:bs.res+Math.floor((lvl-1)*gr.res/100),
+SPD:bs.spd+Math.floor((lvl-1)*gr.spd/100),
+};
+const colors={HP:'#22c55e',ATK:'#ef4444',DEF:'#3b82f6',MAG:'#8b5cf6',RES:'#06b6d4',SPD:'#f97316'};
+// Bug #12: Show IV indicators (boon green, bane red)
+const ivMap={HP:'maxHp',ATK:'atk',DEF:'def',MAG:'mag',RES:'res',SPD:'spd'};
+el.innerHTML=Object.entries(stats).map(([k,v])=>{
+const statKey=ivMap[k];
+let ivColor='';let ivMark='';
+if(u.boon&&statKey===u.boon){ivColor='color:#22c55e;';ivMark=' ↑';}
+if(u.bane&&statKey===u.bane){ivColor='color:#ef4444;';ivMark=' ↓';}
+return`<div style="display:flex;gap:4px;align-items:center">
+<span style="font-size:.58rem;color:${colors[k]};font-family:var(--display);font-weight:700;min-width:28px">${k}</span>
+<div style="flex:1;height:5px;background:var(--panel2);border-radius:3px;overflow:hidden"><div style="width:${Math.min(100,v/65*100)}%;height:100%;background:${colors[k]};border-radius:3px"></div></div>
+<span style="font-size:.68rem;font-family:var(--mono);min-width:32px;text-align:right;${ivColor}">${v}${ivMark}</span>
+</div>`;}).join('');
+}
+
+function hdPreviewLevel(delta){
+const u=S.roster[currentHeroDetailIdx];if(!u)return;
+hdPreviewLvlVal=Math.max(1,Math.min(40,(hdPreviewLvlVal||u.level||1)+delta));
+document.getElementById('hdPreviewLvl').textContent=hdPreviewLvlVal;
+renderHdStats(u,hdPreviewLvlVal);
+}
+
+function renderHdSkills(u){
+const el=document.getElementById('hdSkills');if(!el)return;
+// Bug #24: show weapon effect at top
+const weSlot=u.weaponEffectName?`<div class="skill-slot" style="border-color:rgba(251,191,36,.25)">
+<div class="skill-slot-label"><span>WEAPON</span></div>
+<div class="skill-slot-name">${u.weaponEffectName}</div>
+<div class="skill-slot-desc">${u.weapon} — ${u.weaponEffectName}</div>
+</div>`:'';
+const slots=[
+{key:'skillA',label:'A SLOT',skill:u.skillA},
+{key:'skillB',label:'B SLOT',skill:u.skillB},
+{key:'skillC',label:'C SLOT',skill:u.skillC},
+{key:'skillS',label:'SEAL',skill:u.skillS},
+{key:'special',label:'SPECIAL',skill:u.special},
+];
+el.innerHTML=weSlot+slots.map(slot=>`<div class="skill-slot${!slot.skill?' empty':''}" onclick="openInheritModal(${currentHeroDetailIdx});inheritActiveSlot='${slot.key}';renderInheritTabs();renderInheritSkillList()">
+<div class="skill-slot-label"><span>${slot.label}</span></div>
+<div class="skill-slot-name">${slot.skill?.name||'—'}</div>
+<div class="skill-slot-desc">${slot.skill?.desc||'Empty slot'}</div>
+</div>`).join('');
+}
+
+function hdToggleTeam(){
+const idx=currentHeroDetailIdx;if(idx<0)return;
+const ti=S.team.indexOf(idx);
+if(ti>=0){S.team.splice(ti,1);toast('Removed from team');}
+else{if(S.team.length>=CFG.TEAM_SIZE){toast('Team full!','err');return;}S.team.push(idx);toast('Added to team!','ok');}
+const inTeam=S.team.includes(idx);
+document.getElementById('hdTeamBtn').textContent=inTeam?'Remove from Team':'Add to Team';
+}
+
+function hdDismiss(){
+const idx=currentHeroDetailIdx;if(idx<0)return;
+const u=S.roster[idx];if(!u)return;
+if(!confirm(`Dismiss ${u.name}?`))return;
+const dismissedId=u.id;
+const ti=S.team.indexOf(idx);if(ti>=0)S.team.splice(ti,1);
+S.team=S.team.map(t=>t>idx?t-1:t);
+// Update preset indices to account for the removed roster slot
+S.teamPresets=S.teamPresets.map(p=>{
+if(!p)return null;
+return{...p,team:p.team.filter(t=>t!==idx).map(t=>t>idx?t-1:t)};
+});
+// Clean up daycare slots referencing dismissed unit
+if(S.daycareSlots)S.daycareSlots=S.daycareSlots.map(uid=>uid===dismissedId?null:uid);
+// Clean up support map entries
+if(S.supportMap){Object.keys(S.supportMap).forEach(k=>{if(k.includes(String(dismissedId)))delete S.supportMap[k];});}
+S.roster.splice(idx,1);
+currentHeroDetailIdx=-1;
+save(true);nav('barracks');refreshBarracks();toast('Dismissed.');
+}
+
+function hdSaveStory(){
+const u=S.roster[currentHeroDetailIdx];if(!u)return;
+u.storyText=document.getElementById('hdStory').textContent||'';
+save(true);
+}
+
+function awakenUnit(idx){
+const u=S.roster[idx];if(!u||u.level<40){toast('Unit must be Lv.40 to Awaken!','err');return;}
+if(!confirm(`Awaken ${u.name}?\n\nResets to Lv.1 and grants +3 to all base stats permanently.\nPrestige count: ${(u.prestige||0)+1}`))return;
+u.prestige=(u.prestige||0)+1;
+// Boost base stats permanently
+if(!u.baseStat)u.baseStat={hp:u.maxHp,atk:u.atk,def:u.def,mag:u.mag||0,res:u.res,spd:u.spd};
+['hp','atk','def','mag','res','spd'].forEach(s=>{u.baseStat[s]=(u.baseStat[s]||0)+3;});
+// Reset level and recompute stats
+u.level=1;u.exp=0;
+applyLevel(u);
+u.hp=u.maxHp;
+toast(`✨ ${u.name} has Awakened! (Prestige ${u.prestige})`, 'ok');
+sfx('victory');save(true);openHeroDetail(idx);
+}
+
+// ═══ BATTLE MODES ═══════════════════════════════════════════
+function refreshModes() {
+    const el = document.getElementById('modesContent'); if(!el) return;
+    el.innerHTML = '';
+    const _ghbDay = new Date().getDay();
+    const modes = [
+        {icon:'🗼',name:'Training Tower',desc:'Progressive floors of increasing difficulty. Earn EXP and Flux rewards.',info:`Floor ${S.trainingFloor||1}/10`,_fn:()=>startTrainingMode(),modeKey:'training'},
+        {icon:'⚔',name:'Arena',desc:'Battle against AI opponents for Arena Score and ELO bonuses.',info:`Score: ${S.arenaScore||0}`,_fn:()=>startArenaMode(),modeKey:'arena'},
+        {icon:'★',name:'Grand Hero Battle',desc:'Face legendary bosses. Each day a new boss appears. Beat them to add them to your barracks!',info:'7 unique bosses',_fn:()=>startGHB(_ghbDay),modeKey:'ghb'},
+        {icon:'⚡',name:'Tempest Trials',desc:'7-battle gauntlet: same team, HP carries over. Earn massive Flux rewards.',info:'5 attempts/day',_fn:()=>startTempest(1),modeKey:'tempest'},
+        {icon:'🏛',name:'Hall of Forms',desc:'Roguelike 13-floor draft. Start with skillless units, pick a skill each floor.',info:'Random team',_fn:()=>startHallOfForms(),modeKey:'hof'},
+        {icon:'🏰',name:'Aether Raids',desc:'Import a friend\'s defense base code and attack it! Export your own base for others.',info:'Async PvP',_fn:()=>importAetherBase(),modeKey:'aether'},
+        {icon:'🎯',name:'Heroic Ordeal',desc:'Pick a hero and defeat a challenge with only them and one ally. Earn extra SP.',info:'Per-unit challenge',_fn:()=>startHeroicOrdeal(0),modeKey:'ordeal'},
+        {icon:'👥',name:'Bound Hero Battle',desc:'Face two synergized bosses with extreme stats. Beat them to earn bonus Flux.',info:'Boss duo',_fn:()=>startBHB(),modeKey:'bhb'},
+        {icon:'💕',name:'Unit Daycare',desc:'Bond two units together. Pet them, raise their support, and welcome fusion children with inherited skills and stats!',info:S.daycareSlots?`${S.daycareSlots.filter(Boolean).length}/2 units`:'Empty',_fn:()=>nav('daycare'),modeKey:'daycare'},
+    ];
+
+    modes.forEach(m => {
+        // Find highest difficulty clear for this mode
+        let modeClears = [];
+        Object.keys(S.modeClears || {}).forEach(key => {
+            if(key.startsWith(m.modeKey + '_')) {
+                (S.modeClears[key] || []).forEach(d => {
+                    if(!modeClears.includes(d)) modeClears.push(d);
+                });
+            }
+        });
+        const clearsHtml = modeClears.length ?
+            ['normal','hard','lunatic','max','apex'].map(d => {
+                const info = DIFF_LABELS[d];
+                const cleared = modeClears.includes(d);
+                return `<span style="color:${cleared ? info.color : 'var(--border)'};font-size:.6rem" title="${info.name}">${cleared ? '★' : '☆'}</span>`;
+            }).join('') : '';
+
+        const card = document.createElement('div');
+        card.className = 'mode-card';
+        card.innerHTML = `<div class="mode-card-icon">${m.icon}</div>
+        <div class="mode-card-name">${m.name}</div>
+        <div class="mode-card-desc">${m.desc}</div>
+        <div class="mode-card-info">${m.info}</div>
+        ${clearsHtml ? `<div style="margin-top:4px">${clearsHtml}</div>` : ''}`;
+        card.onclick = () => { if(typeof m._fn === 'function') m._fn(); };
+        el.appendChild(card);
+    });
+};
+
+function startTrainingMode() {
+    if(!S.trainingFloor) S.trainingFloor = 1;
+    const floors = document.getElementById('modesContent');
+    floors.innerHTML = `<div style="font-family:var(--display);font-size:.7rem;color:var(--t0);letter-spacing:1px;margin-bottom:10px">TRAINING TOWER — Select Floor</div>
+    <div class="tower-floors">${Array.from({length:10}, (_, i) => {
+        const fl = i + 1;
+        const cleared = fl < (S.trainingFloor || 1);
+        const floorClears = S.modeClears['training_' + fl] || [];
+        const starsHtml = floorClears.length ?
+            ['normal','hard','lunatic','max','apex'].map(d => {
+                const info = DIFF_LABELS[d];
+                return `<span style="color:${floorClears.includes(d) ? info.color : 'var(--border)'};font-size:.45rem">${floorClears.includes(d) ? '★' : '☆'}</span>`;
+            }).join('') : '';
+        return `<button class="tower-floor-btn${cleared ? ' ' : ''}" onclick="launchTrainingFloor(${fl})">
+        <div>Floor</div><div style="font-size:1rem;font-weight:700">${fl}</div>
+        ${cleared ? `<div style="font-size:.5rem;color:var(--green)">Done</div>` : ''}
+        ${starsHtml ? `<div>${starsHtml}</div>` : ''}
+        </button>`;
+    }).join('')}</div>
+    <button class="btn2 btn-sm" style="margin-top:10px" onclick="refreshModes()">Back</button>`;
+};
+
+function launchTrainingFloor(floor){
+currentBattleMode='training';
+const levelMultiplier=Math.max(0.5,floor*0.2);
+const enemyCount=Math.min(3+Math.floor(floor/3),5);
+currentBattleConfig={floor,enemyCount,expMult:levelMultiplier*0.5,apReward:floor*5};
+startBattle();
+}
+
+// Arena bonus unit: determined by ISO week number for weekly rotation
+function getArenaBonusTypes(){
+const week=Math.floor((Date.now()-new Date(new Date().getFullYear(),0,1))/6.048e8);
+const weapons=['Sword','Axe','Lance','Bow','LightMag','DarkMag','AnimaMag'];
+const moves=['Infantry','Cavalry','Flying','Armored'];
+const rng=(seed)=>{let x=Math.sin(seed+1)*10000;return x-Math.floor(x);};
+return [
+{weapon:weapons[~~(rng(week)*weapons.length)],move:moves[~~(rng(week+1)*moves.length)]},
+{weapon:weapons[~~(rng(week+2)*weapons.length)],move:moves[~~(rng(week+3)*moves.length)]},
+{weapon:weapons[~~(rng(week+4)*weapons.length)],move:moves[~~(rng(week+5)*moves.length)]},
+];
+}
+
+function hasArenaBonusUnit(){
+const bonus=getArenaBonusTypes();
+return S.team.some(i=>{
+const u=S.roster[i];
+return u&&bonus.some(b=>b.weapon===u.weapon&&b.move===u.moveType);
+});
+}
+
+function startArenaMode(){
+chooseDifficulty(()=>{
+currentBattleMode='arena';
+const bonusActive=hasArenaBonusUnit();
+currentBattleConfig={expMult:0.5,apReward:20,bonusActive};
+if(bonusActive)toast('Bonus unit active! Arena score ×2!','gold');
+startBattle();
+toast(`Arena — ${currentDifficulty.toUpperCase()}! +ELO on win.`,'ok');
+});
+}
+
+function startGHB(ghbIdx){
+chooseDifficulty(()=>{
+const ghb=GHB_DATA&&ghbIdx!=null?GHB_DATA[ghbIdx%GHB_DATA.length]:null;
+currentBattleMode='ghb';
+currentBattleConfig={expMult:0,apReward:ghb?ghb.apReward:30,isBoss:true,ghb};
+if(ghb)currentBattleConfig.ghb=ghb;
+startBattle(ghb?{enemyCount:ghb.enemyCount||2,enemyMult:ghb.enemyMult||2,...(ghb.terrain?{terrain:ghb.terrain}:{})}:null);
+toast(`Grand Hero Battle — ${ghb?ghb.name:'Random'}!`,'ok');
+});
+}
+
+function startTempest(stage=1){
+currentBattleMode='tempest';
+currentBattleConfig={stage,totalStages:7,expMult:0.8,apReward:10+stage*5};
+if(stage===1){chooseDifficulty(()=>startBattle());}else{startBattle();}
+}
+
+
+// ═══ IMAGE UPLOAD — ENHANCED FORMAT SUPPORT ═════════════════
+const ANIMATED_FORMATS=['image/gif','image/webp'];
+
+async function detectIsAnimated(file){
+// Check GIF: look for animation by checking for multiple frames heuristically
+if(file.type==='image/gif'){
+// All GIFs treated as potentially animated
+return true;
+}
+if(file.type==='image/png'){
+// Check for APNG by looking for 'acTL' chunk in first 64KB
+const buf=await file.slice(0,65536).arrayBuffer();
+const bytes=new Uint8Array(buf);
+for(let i=8;i<bytes.length-8;i++){
+if(bytes[i]===0x61&&bytes[i+1]===0x63&&bytes[i+2]===0x54&&bytes[i+3]===0x4C)return true;
+}
+return false;
+}
+return false;
+}
+
+function handleUpload(e){loadFiles(Array.from(e.target.files));}
+
+function loadFiles(files){
+files.forEach(async file=>{
+if(!file.type.startsWith('image/')&&!file.name.match(/\.(heic|heif|svg|bmp|avif|ico|gif|png|jpg|jpeg|webp)$/i)){return;}
+const name=file.name.replace(/\.[^.]+$/,'').replace(/[-_]/g,' ');
+const existing=S.images.find(i=>i.name===name);
+const finalName=existing?name+` (${Date.now()%10000})`:name;
+const isAnimated=await detectIsAnimated(file);
+const format=file.type||'image/jpeg';
+
+if(isAnimated){
+// For animated files (GIF, APNG): store as blob URL + base64 src
+const reader=new FileReader();
+reader.onload=ev=>{
+const src=ev.target.result;// dataURL with animation preserved
+S.images.push({src,name:finalName,isAnimated:true,format});
+refreshSettings();toast(`Added: ${finalName} (animated)`,'ok');
+};
+reader.readAsDataURL(file);
+}else if(file.type==='image/svg+xml'||file.name.endsWith('.svg')){
+const reader=new FileReader();
+reader.onload=ev=>{
+// SVG: encode as data URL
+const svgText=ev.target.result;
+const src='data:image/svg+xml;base64,'+btoa(unescape(encodeURIComponent(svgText)));
+S.images.push({src,name:finalName,isAnimated:false,format:'image/svg+xml'});
+refreshSettings();toast(`Added: ${finalName} (SVG)`,'ok');
+};
+reader.readAsText(file);
+}else{
+// For static images: resize and compress
+const reader=new FileReader();
+reader.onload=ev=>{
+const img=new Image();
+img.onload=()=>{
+const MAX=256;const scale=Math.min(1,MAX/Math.max(img.width,img.height));
+const w=Math.round(img.width*scale),h=Math.round(img.height*scale);
+const c=document.createElement('canvas');c.width=w;c.height=h;
+c.getContext('2d').drawImage(img,0,0,w,h);
+const src=c.toDataURL('image/jpeg',.82);
+S.images.push({src,name:finalName,isAnimated:false,format:'image/jpeg'});
+refreshSettings();toast(`Added: ${finalName}`,'ok');
+};
+img.onerror=()=>toast(`Failed to load: ${file.name}`,'err');
+img.src=ev.target.result;
+};
+reader.readAsDataURL(file);
+}
+});
+}
+
+function removeImage(idx){
+if(!confirm(`Remove "${S.images[idx].name}"?`))return;
+// Bug #66: Clear src on roster units that used this image
+const removedSrc=S.images[idx].src;
+const removedName=S.images[idx].name;
+S.roster.forEach(u=>{if(u.name===removedName)delete u.src;});
+// Clean up pooled DOM <img> element for this image to prevent DOM node accumulation
+if(typeof _animElPool!=='undefined'&&removedSrc&&_animElPool.has(removedSrc)){
+const el=_animElPool.get(removedSrc);if(el&&el.remove)el.remove();_animElPool.delete(removedSrc);
+}
+S.images.splice(idx,1);refreshSettings();toast('Removed');
+}
+
+// ═══ LOGIN BONUS ═════════════════════════════════════════════
+function checkLoginBonus(){
+const today=new Date().toDateString();
+if(S.lastLoginDate!==today){
+const el=document.getElementById('loginBonusModal');
+const streak=(S.loginStreak||0)+1;
+const ap=Math.min(5+streak*2,30);
+document.getElementById('lbDay').textContent=streak;
+document.getElementById('lbAP').textContent=ap;
+if(el)el.classList.add('show');
+}
+}
+
+function claimLoginBonus(){
+const today=new Date().toDateString();
+const now=Date.now();
+if(S.lastLoginDate===today){document.getElementById('loginBonusModal').classList.remove('show');return;}
+if(S._lastLoginTs&&now-S._lastLoginTs<72000000){document.getElementById('loginBonusModal').classList.remove('show');return;}
+S.lastLoginDate=today;
+S._lastLoginTs=now;
+S.loginStreak=(S.loginStreak||0)+1;
+const ap=Math.min(5+S.loginStreak*2,30);
+S.ap+=ap;
+toast(`Login bonus: +${ap} AP! Day ${S.loginStreak}`,'gold');
+document.getElementById('loginBonusModal').classList.remove('show');
+save(true);updateHomeScreen();
+}
+
+// ═══ HOME SCREEN ENHANCEMENTS ════════════════════════════════
+function updateHomeScreen(){
+// Banner strip
+const stripEl=document.getElementById('homeBannerStrip');
+if(stripEl){
+if(S.activeBannerId){
+const banner=S.banners.find(b=>b.id===S.activeBannerId);
+if(banner){
+stripEl.innerHTML=`<div class="home-banner-label">ACTIVE BANNER</div><div class="home-banner-name">${esc(banner.name)}</div>`;
+stripEl.style.display='block';
+}else stripEl.style.display='none';
+}else stripEl.style.display='none';
+}
+// Event pills
+const pills=document.getElementById('homeEventPills');
+if(pills){
+const events=[];
+if(S.quests.daily?.some(q=>q.completed&&!q.claimed))events.push('Quest Ready');
+if(S.trainingFloor&&S.trainingFloor<10)events.push(`Tower Floor ${S.trainingFloor}`);
+if(S.lastLoginDate!==new Date().toDateString())events.push('Daily Login');
+pills.innerHTML=events.map(e=>`<div class="event-pill">${e}</div>`).join('');
+}
+// Stats strip
+const stats=document.getElementById('homeStatStrip');
+if(stats)stats.textContent=`${S.roster.length} heroes | ${S.wins} wins | ELO: ${S.elo} | ${S.ap} AP`;
+updateQuestBadge();
+  // Ensure credit persists
+  const home = document.getElementById('home');
+  if (home && !home.querySelector('.home-credit')) {
+    const c = document.createElement('div');
+    c.className = 'home-credit';
+    c.textContent = 'Game made by Sincere Smith, ShadenXa';
+    home.appendChild(c);
+  }
+
+    // Add campaign progress to home
+    if(stats) {
+        const total = S.campaignDone.filter(n => n >= 1 && n <= 1000).length;
+        stats.textContent += ` | Story: ${total}/${TOTAL_BATTLES}`;
+    }
+}
+
+// ═══ SETTINGS TABS ═══════════════════════════════════════════
+let activeSettingsTab='images';
+
+function setSettingsTab(tab){
+activeSettingsTab=tab;
+document.querySelectorAll('.stab').forEach(b=>b.classList.remove('active'));
+const tb=document.getElementById('stab-'+tab);if(tb)tb.classList.add('active');
+renderSettingsTab(tab);
+}
+
+function renderSettingsTab(tab){
+const body=document.getElementById('settingsBody');if(!body)return;
+body.innerHTML='';
+if(tab==='images')renderSettingsImages(body);
+else if(tab==='config')renderSettingsConfig(body);
+else if(tab==='banners')renderSettingsBanners(body);
+else if(tab==='data')renderSettingsData(body);
+}
+
+function renderSettingsImages(body){
+const custom=S.images.filter(i=>!i.isDefault);
+body.innerHTML=`
+<div class="settings-section">
+  <h2>UPLOAD IMAGES</h2>
+  <div class="drop-zone-v2" id="dropZone" onclick="document.getElementById('fileIn').click()" ondragover="event.preventDefault();this.classList.add('drag-over')" ondragleave="this.classList.remove('drag-over')" ondrop="event.preventDefault();this.classList.remove('drag-over');loadFiles(Array.from(event.dataTransfer.files))">
+    <div class="dz-icon">⬆</div>
+    <div class="dz-title">DROP IMAGES HERE</div>
+    <div class="dz-sub">Click or drag any image format to create heroes.<br>Each image becomes a unique summomable unit.</div>
+    <div class="dz-formats">
+      <span class="dz-fmt-chip animated">GIF ✦</span>
+      <span class="dz-fmt-chip animated">APNG ✦</span>
+      <span class="dz-fmt-chip">PNG</span>
+      <span class="dz-fmt-chip">JPG</span>
+      <span class="dz-fmt-chip">SVG</span>
+      <span class="dz-fmt-chip">WEBP</span>
+      <span class="dz-fmt-chip">BMP</span>
+      <span class="dz-fmt-chip">AVIF</span>
+      <span class="dz-fmt-chip">ICO</span>
+    </div>
+  </div>
+  <div class="img-count-badge">
+    <span style="color:var(--t0);font-weight:700">${custom.length}</span> custom images
+    ${S.images.filter(i=>!i.isDefault&&i.isAnimated).length>0?`<span style="color:var(--t0);margin-left:6px">/ ${S.images.filter(i=>!i.isDefault&&i.isAnimated).length} animated ✦</span>`:''}
+  </div>
+</div>
+<div class="settings-section">
+  <h2>YOUR IMAGES</h2>
+  ${custom.length===0?`<div style="text-align:center;padding:30px;color:var(--text3);font-size:.75rem">No images uploaded yet.<br><span style="font-size:.65rem">Upload images above to create units!</span></div>`:''}
+  <div class="img-grid" id="imgGrid"></div>
+</div>`;
+// Render image grid
+const grid=document.getElementById('imgGrid');
+if(grid){
+S.images.filter(i=>!i.isDefault).forEach((img,rawIdx)=>{
+const actualIdx=S.images.indexOf(img);
+const card=document.createElement('div');card.className='img-card';
+const safeSrc=img.src&&img.src.startsWith('data:image/')?img.src:'';
+card.innerHTML=`<img src="${safeSrc}" title="${esc(img.name)}" draggable="false" style="width:100%;height:100%;object-fit:cover;pointer-events:none;">`
++`${img.isAnimated?`<div class="img-card-anim-badge">GIF</div>`:''}<div class="img-card-name">${esc(img.name)}</div>
+<button class="img-card-del" onclick="event.stopPropagation();removeImage(${actualIdx})" title="Remove">✕</button>`;
+grid.appendChild(card);
+});
+}
+}
+
+function renderSettingsConfig(body){
+body.innerHTML=`
+<div class="settings-section">
+  <h2>BATTLE CONFIG</h2>
+  <div class="cfg-row">
+    <div class="cfg-lbl">Map Size<span>Larger maps = longer battles</span></div>
+    <div class="range-wrap">
+      <input type="range" min="6" max="12" value="${document.getElementById('mapSizeSlider')?.value||8}" id="mapSizeSlider" oninput="document.getElementById('mapSizeVal').textContent=this.value+'×'+this.value">
+      <span class="range-val" id="mapSizeVal">${document.getElementById('mapSizeSlider')?.value||8}×${document.getElementById('mapSizeSlider')?.value||8}</span>
+    </div>
+  </div>
+  <div class="cfg-row">
+    <div class="cfg-lbl">Sound FX<span>Enable battle sounds</span></div>
+    <button class="toggle-btn${S.soundOn?' on':''}" id="soundBtn" onclick="toggleSound()">
+      ${S.soundOn?'● ON':'○ OFF'}
+    </button>
+  </div>
+  <div class="cfg-row">
+    <div class="cfg-lbl">Combat Forecast<span>Preview damage before attacking</span></div>
+    <button class="toggle-btn${S.forecastOn?' on':''}" id="fcBtn" onclick="toggleFC()">
+      ${S.forecastOn?'● ON':'○ OFF'}
+    </button>
+  </div>
+</div>
+<div class="cfg-row">
+    <div class="cfg-lbl">Team Size<span>Units in Ladder Battle (1-8)</span></div>
+    <div class="range-wrap">
+      <input type="range" min="1" max="8" value="${S.teamSize||4}" id="teamSizeSlider" oninput="document.getElementById('tsVal').textContent=this.value;setTeamSize(this.value);">
+      <span class="range-val" id="tsVal">${S.teamSize||4}</span>
+    </div>
+  </div>
+</div>
+<div class="settings-section">
+  <h2>VISUAL SETTINGS</h2>
+  <div class="cfg-row">
+    <div class="cfg-lbl">ELO Rank<span>Your current competitive standing</span></div>
+    <div style="font-family:var(--display);font-size:.7rem;color:${getEloRank(S.elo).color}">${getEloRank(S.elo).name}</div>
+  </div>
+  <div class="cfg-row">
+    <div class="cfg-lbl">Total Heroes<span>In your barracks</span></div>
+    <div style="font-family:var(--display);font-size:.7rem;color:var(--gold)">${S.roster.length}</div>
+  </div>
+  <div class="cfg-row">
+    <div class="cfg-lbl">AP Balance<span>Used for summoning & modes</span></div>
+    <div style="font-family:var(--display);font-size:.7rem;color:var(--gold)">${S.ap}</div>
+  </div>
+</div>`;
+}
+
+function renderSettingsBanners(body){
+body.innerHTML=`
+<div class="settings-section">
+  <h2>FOCUS BANNERS</h2>
+  <p style="font-size:.7rem;color:var(--text2);margin-bottom:12px;line-height:1.6">Create custom banners with your heroes as focus units. Focus units appear at 4× the normal rate during summoning sessions.</p>
+  <button class="btn-t0" style="font-size:.72rem;padding:8px 16px;width:100%" onclick="openBannerCreator()">+ CREATE NEW BANNER</button>
+</div>
+<div class="settings-section">
+  <h2>YOUR BANNERS</h2>
+  <div id="bannerList" style="display:flex;flex-direction:column;gap:8px"></div>
+</div>`;
+refreshBannerList();
+}
+
+function renderSettingsData(body){
+const saves=localStorage.getItem('apex_tier0_v2');
+const saveSize=saves?Math.round(saves.length/1024)+'KB':'—';
+body.innerHTML=`
+<div class="settings-section">
+  <h2>SAVE DATA</h2>
+  <p style="font-size:.7rem;color:var(--text2);margin-bottom:12px;line-height:1.6">Your progress is automatically saved after every action. Manual save/load is also available.</p>
+  <div class="data-grid">
+    <button class="data-btn" onclick="saveGame();renderSettingsTab('data')">
+      <div style="font-size:1.2rem;margin-bottom:4px">💾</div>
+      SAVE NOW
+    </button>
+    <button class="data-btn" onclick="loadGame()">
+      <div style="font-size:1.2rem;margin-bottom:4px">📂</div>
+      RELOAD
+    </button>
+    <button class="data-btn" onclick="exportJSON()">
+      <div style="font-size:1.2rem;margin-bottom:4px">📤</div>
+      EXPORT
+    </button>
+    <button class="data-btn" onclick="importJSON()">
+      <div style="font-size:1.2rem;margin-bottom:4px">📥</div>
+      IMPORT
+    </button>
+  </div>
+  <button class="data-btn danger" style="width:100%;margin-top:8px" onclick="resetAll()">
+    ⚠ RESET ALL DATA
+  </button>
+  <div class="save-status-bar" id="saveStatus">
+    Heroes: ${S.roster.length} &nbsp;|&nbsp; Battles: ${S.totalBattles} &nbsp;|&nbsp; Wins: ${S.wins}<br>
+    AP: ${S.ap} &nbsp;|&nbsp; ELO: ${S.elo} &nbsp;|&nbsp; Save: ${saveSize}
+  </div>
+</div>
+<div class="settings-section">
+  <h2>ABOUT</h2>
+  <div style="font-size:.7rem;color:var(--text2);line-height:1.8">
+    <div><span style="color:var(--text)">APEX TIER 0</span> — Tactical Gacha RPG Engine</div>
+    <div>Single-file HTML/CSS/JS. No servers. No data sent anywhere.</div>
+    <div style="margin-top:8px;color:var(--text3)">Upload images → Create heroes → Build teams → Battle</div>
+  </div>
+</div>`;
+}
+
+function refreshSettings(){
+renderSettingsTab(activeSettingsTab||'images');
+}
+
+function refreshBannerList(){
+        if(S.banners) {
+            const now = Date.now();
+            S.banners = S.banners.filter(b => {
+                if(!b.createdAt) { b.createdAt = now; return true; }
+                const age = now - b.createdAt;
+                const threeDays = 3 * 24 * 60 * 60 * 1000;
+                if(age > threeDays) { toast('Banner "' + b.name + '" expired!', ''); return false; }
+                return true;
+            });
+            if(S.activeBannerId && !S.banners.find(b => b.id === S.activeBannerId)) {
+                S.activeBannerId = null;
+            }
+        }
+const el=document.getElementById('bannerList');if(!el)return;
+el.innerHTML='';
+if(!S.banners.length){
+el.innerHTML='<div style="font-size:.68rem;color:var(--text2);text-align:center;padding:20px">No banners created yet.<br>Create one to set focus heroes for summoning!</div>';
+return;
+}
+S.banners.forEach(b=>{
+const isActive=b.id===S.activeBannerId;
+const d=document.createElement('div');
+d.className='banner-list-item'+(isActive?' active-banner':'');
+d.innerHTML=`<div>
+  <div class="banner-list-item-name">${isActive?'★ ':''}${esc(b.name)}</div>
+  <div class="banner-list-item-info">${b.heroNames?.length||0} focus heroes${isActive?' · ACTIVE':''}</div>
+</div>
+<div class="banner-actions">
+  ${!isActive?`<button class="fbtn" onclick="setActiveBanner('${b.id}')">Set Active</button>`:`<button class="fbtn active">Active</button>`}
+  <button class="fbtn" onclick="deleteBanner('${b.id}')" style="color:var(--red);border-color:rgba(239,68,68,.3)">Del</button>
+</div>`;
+el.appendChild(d);
+});
+        // Add export buttons and expiry display
+        const actions = document.querySelectorAll('.banner-actions');
+        actions.forEach((act, i) => {
+            const banner = S.banners ? S.banners[i] : null;
+            if(banner) {
+                if(!act.querySelector('.export-bn-btn')) {
+                    const btn = document.createElement('button');
+                    btn.className = 'fbtn export-bn-btn';
+                    btn.textContent = 'Export';
+                    btn.style.color = '#00e5ff';
+                    btn.onclick = () => window.exportBanner(banner.id);
+                    act.insertBefore(btn, act.firstChild);
+                }
+                // Show expiry
+                if(banner.createdAt && !act.querySelector('.bn-expiry')) {
+                    const exp = document.createElement('span');
+                    exp.className = 'bn-expiry';
+                    const hoursLeft = Math.max(0, Math.floor((banner.createdAt + 3*24*60*60*1000 - Date.now()) / (60*60*1000)));
+                    exp.style.cssText = 'font-size:.5rem;color:var(--text3);font-family:var(--mono)';
+                    exp.textContent = hoursLeft + 'h left';
+                    act.appendChild(exp);
+                }
+            }
+        });
+}
+
+// ═══ TUTORIAL SYSTEM ════════════════════════════════════════
+const TUTORIAL_STEPS=[
+{
+title:'Welcome to APEX TIER 0',
+text:'This is a tactical gacha RPG where you upload your own images to create unique heroes. Let\'s walk through the core systems so you can start building your squad!',
+tip:'You can skip this tutorial at any time and restart it from the Settings screen.',
+screen:'home',spotlight:'.home-btns',pos:'center',
+},
+{
+title:'Step 1 — Upload Your Images',
+text:'Go to Settings to upload images. Every image you upload becomes a unique summomable hero with its own stats, role, and skills.\n\nGIF and APNG files become animated heroes with a glowing rainbow border!',
+tip:'Supports: GIF (animated!), PNG, JPG, SVG, WEBP, BMP, AVIF, ICO and more.',
+screen:'settings',spotlight:'#dropZone',pos:'bottom',
+action:()=>nav('settings'),
+},
+{
+title:'Step 2 — Your Image Gallery',
+text:'All uploaded images appear in a grid below the drop zone. Each thumbnail shows the image name. Tap or hover to reveal the delete button.',
+tip:'Images from the pool are randomly selected when you summon. More images = more variety!',
+screen:'settings',spotlight:'.settings-section:nth-child(2)',pos:'top',
+},
+{
+title:'Step 3 — Summon Heroes',
+text:'Go to the Summon Gate to pull new heroes using AP. There are two pull modes:\n\n• 1-PULL: Single pull for 5 AP\n• SESSION: Reveals 5 color-coded orbs — pick each for 5 AP (4 AP after first)',
+tip:'The pity counter guarantees an A+ grade hero every 50 pulls. Duplicate images power up your existing hero.',
+screen:'gacha',spotlight:'.gacha-btns',pos:'top',
+action:()=>nav('gacha'),
+},
+{
+title:'Step 4 — The Orb Session',
+text:'Tap "START SUMMONING" to begin a session. Five colored orbs appear — Red, Blue, Green, and Colorless. Each color corresponds to a weapon type.\n\nPick the orbs you want and skip ones you don\'t!',
+tip:'You don\'t have to pick all 5 orbs. Save AP by only picking the colors you want.',
+screen:'gacha',spotlight:'#summonModal',pos:'center',
+},
+{
+title:'Step 5 — Hero Grades',
+text:'Heroes come in 6 grades, each stronger than the last:\n\n▸ D (grey) → C (cyan) → B (purple)\n▸ A (orange) → S (gold) → TIER 0 (rainbow)\n\nHigher grades have better base stats and growth rates.',
+tip:'TIER 0 heroes have an animated rainbow border and trigger a special summon cinematic!',
+screen:'gacha',spotlight:'.pity-w',pos:'bottom',
+},
+{
+title:'Step 6 — Barracks & Team Building',
+text:'All summoned heroes are stored in the Barracks. Tap any hero card to view their full detail page.\n\nBuild your team of up to 4 heroes by tapping cards to select them (highlighted in blue) then tap the team slots at the bottom.',
+tip:'Sort your heroes by Grade, ATK, SPD, or Level using the toolbar buttons.',
+screen:'barracks',spotlight:'.brk-toolbar',pos:'bottom',
+action:()=>nav('barracks'),
+},
+{
+title:'Step 7 — Hero Detail & Skills',
+text:'Tap any hero in Barracks to open their detail page. Here you can:\n\n• See stats at any level (use +5/-5 preview)\n• View and change skill slots (A/B/C/Seal/Special)\n• Edit their story/flavor text\n• Add to or remove from your team',
+tip:'Use the Skill Inheritance button to learn new skills for SP. SP is earned from battles.',
+screen:'barracks',spotlight:'.brk-grid',pos:'top',
+},
+{
+title:'Step 8 — Battle System',
+text:'Battle is a tactical grid RPG:\n\n1. Select a unit (gold highlight)\n2. MOVE — navigate to blue tiles\n3. ATTACK — hit red tile enemies\n4. SPECIAL — powerful attack when charged\n5. WAIT — end this unit\'s turn\n\nEnd your turn when all units have acted.',
+tip:'Use the DANGER button to preview which cells enemies can attack before moving!',
+screen:'home',spotlight:'.home-btns',pos:'top',
+},
+{
+title:'Step 9 — Weapon Triangle',
+text:'The weapon triangle gives +20%/-20% to attack power:\n\n⚔ Sword > 🪓 Axe > 🏹 Lance > Sword\n✨ Light > 🌑 Dark > 🌪 Anima > Light\n\nBows deal 3× damage to Flying units!',
+tip:'The Combat Forecast (tap or hover over enemies during attack mode) shows predicted damage including triangle bonuses.',
+screen:'battle',spotlight:'#battleCanvas',pos:'center',
+},
+{
+title:'Step 10 — Assist Skills',
+text:'Each hero has an Assist Skill (Reposition, Draw Back, Dance, Heal, etc.).\n\nIn battle, select a unit and tap ASSIST to use it on an adjacent ally. Assists let you reposition allies, refresh their turn, or heal them!',
+tip:'Dance/Sing lets an ally act again — extremely powerful for aggressive plays.',
+screen:'home',spotlight:'.home-btns',pos:'center',
+},
+{
+title:'Step 11 — IVs (Boons & Banes)',
+text:'Every summoned hero gets a random Boon (+3 to one stat) and Bane (-3 to another). This gives each copy individuality.\n\nCheck hero detail to see which stats are boosted (green) or reduced (red).',
+tip:'Boons and Banes are fixed at summon time and cannot be changed.',
+screen:'home',spotlight:'.home-btns',pos:'center',
+},
+{
+title:'Step 12 — Map Biomes & Terrain',
+text:'Battle maps feature random biomes — Grassland, Volcanic, Winter, Ruins, or Desert. Each biome has unique terrain, weather effects, and color palettes.\n\nBreakable walls can be attacked and destroyed to open new paths!',
+tip:'Trench tiles give +4 DEF but slow movement. Castle tiles heal 10% HP per turn.',
+screen:'home',spotlight:'.home-btns',pos:'center',
+},
+{
+title:'Step 13 — Modes & Quests',
+text:'Beyond the ladder, there are many modes:\n\nTraining Tower — 10 floors of increasing difficulty\nArena — fight for score and ELO\nGrand Hero Battle — boss fights with Seal rewards\nTempest Trials — 7-stage gauntlet\nHall of Forms — roguelike draft with skill picks\nHeroic Ordeals — solo unit challenges\nBound Hero Battle — synergized boss duos',
+tip:'Complete daily quests for bonus AP. Check Quests screen for fresh objectives.',
+screen:'modes',spotlight:'#modesContent',pos:'top',
+action:()=>nav('modes'),
+},
+{
+title:'Step 14 — Focus Banners',
+text:'Use the banner carousel on the Summon screen to browse available banners. Create custom Focus Banners in Settings with your heroes as featured units.\n\nFocus heroes appear at 4x the normal rate!',
+tip:'Auto-generated weekly and thematic banners rotate alongside your custom ones.',
+screen:'settings',spotlight:'.settings-section:nth-child(1)',pos:'bottom',
+action:()=>{nav('settings');setSettingsTab('banners');},
+},
+{
+title:'You\'re Ready!',
+text:'That covers all the major systems. A few last tips:\n\n- Save often using Settings > Data\n- Higher ELO opponents drop more AP\n- Animated GIF heroes have special rainbow borders\n- Login daily for the AP streak bonus\n- Hover or long-press buttons for tooltips\n\nNow go build your ultimate Tier 0 team!',
+tip:'Tap the ? button anytime to restart this tutorial.',
+screen:'home',spotlight:'.home-btns',pos:'center',
+action:()=>nav('home'),
+},
+];
+
+let tutStep=0;
+let tutActive=false;
+
+function startTutorial(){
+tutStep=0;tutActive=true;
+const overlay=document.getElementById('tutorialOverlay');
+if(overlay)overlay.classList.add('active');
+document.getElementById('tutHintBtn').style.display='none';
+showTutStep();
+}
+
+function showTutStep(){
+const step=TUTORIAL_STEPS[tutStep];if(!step)return endTutorial();
+// Navigate if needed
+if(step.action)step.action();
+else if(step.screen)nav(step.screen);
+// Populate card
+document.getElementById('tutBadge').textContent=`STEP ${tutStep+1} OF ${TUTORIAL_STEPS.length}`;
+document.getElementById('tutTitle').textContent=step.title;
+document.getElementById('tutText').textContent=step.text;
+const tipEl=document.getElementById('tutTip');
+if(step.tip){tipEl.textContent=step.tip;tipEl.style.display='block';}
+else tipEl.style.display='none';
+document.getElementById('tutProgress').textContent=`${tutStep+1} / ${TUTORIAL_STEPS.length}`;
+document.getElementById('tutNextBtn').textContent=tutStep===TUTORIAL_STEPS.length-1?'Finish ✓':'Next →';
+// Position card and spotlight
+setTimeout(()=>positionTutCard(step),300);
+}
+
+function positionTutCard(step){
+const overlay=document.getElementById('tutorialOverlay');
+const card=document.getElementById('tutCard');
+const spotlight=document.getElementById('tutSpotlight');
+if(!overlay||!card)return;
+// Find spotlight target — move spotlight only, card stays fixed at bottom
+let targetEl=null;
+try{if(step.spotlight)targetEl=document.querySelector(step.spotlight);}catch(e){}
+if(targetEl&&targetEl.getBoundingClientRect){
+const r=targetEl.getBoundingClientRect();
+const pad=8;
+spotlight.style.cssText=`left:${r.left-pad}px;top:${r.top-pad}px;width:${r.width+pad*2}px;height:${r.height+pad*2}px`;
+spotlight.style.display='block';
+}else{
+spotlight.style.display='none';
+}
+// Card always fixed at bottom center — never moves around
+card.style.cssText='left:50%;bottom:24px;top:auto;transform:translateX(-50%);position:fixed;z-index:10002';
+}
+
+function nextTutStep(){
+tutStep++;
+if(tutStep>=TUTORIAL_STEPS.length)endTutorial();
+else showTutStep();
+}
+
+function skipTutorial(){endTutorial();}
+
+function endTutorial(){
+tutActive=false;tutStep=0;
+localStorage.setItem('apex_tut_done','true');
+const overlay=document.getElementById('tutorialOverlay');
+if(overlay)overlay.classList.remove('active');
+document.getElementById('tutHintBtn').style.display='flex';
+nav('home');
+}
+
+// ═══ ENHANCED MAP RENDERING ══════════════════════════════════
+const MAP_ANIM_TIME={};
+let mapAnimFrame=0;
+
+// Enhanced terrain definitions with more visual detail
+const TERRAIN_DETAIL={
+plain: {noise:0.08,accent:'rgba(100,160,80,.04)'},
+forest:{noise:0.12,accent:'rgba(30,80,30,.15)',symbol:'♦'},
+water: {noise:0.20,accent:'rgba(40,100,200,.15)',symbol:'~',pulse:true},
+fort:  {noise:0.05,accent:'rgba(100,200,100,.06)',symbol:'+'},
+lava:  {noise:0.15,accent:'rgba(255,80,0,.12)',symbol:'!',pulse:true},
+wall:  {noise:0.03,accent:'rgba(200,180,160,.06)',symbol:'▪'},
+peak:  {noise:0.10,accent:'rgba(180,160,120,.08)',symbol:'▲'},
+rough: {noise:0.12,accent:'rgba(120,110,80,.08)',symbol:'·'},
+trench:{noise:0.08,accent:'rgba(100,100,60,.08)',symbol:'T'},
+castle:{noise:0.04,accent:'rgba(150,150,180,.06)',symbol:'C'},
+void:  {noise:0,accent:'transparent',symbol:''},
+};
+
+function drawMapEnhanced(){
+const ctx=B.ctx,w=B.mapW,h=B.mapH;
+const T=Date.now()*0.001;
+ctx.clearRect(0,0,B.canvas.width,B.canvas.height);
+
+// Layer 1: Base terrain
+for(let y=0;y<h;y++)for(let x=0;x<w;x++){
+const t=B.grid[y][x],td=TERRAINS[t],det=TERRAIN_DETAIL[t]||{};
+const px=x*CS,py=y*CS;
+// Void tiles: clear canvas to reveal background
+if(t==='void'){ctx.clearRect(px,py,CS,CS);continue;}
+// Biome palette override
+let c1=td.c1,c2=td.c2;
+if(currentBiome?.palette?.[t]){c1=currentBiome.palette[t][0];c2=currentBiome.palette[t][1];}
+// Rich gradient base
+const g=ctx.createLinearGradient(px,py,px+CS,py+CS);
+g.addColorStop(0,c1);g.addColorStop(1,c2);
+ctx.fillStyle=g;ctx.fillRect(px,py,CS,CS);
+// Faux-3D for walls and peaks
+if(t==='wall'||t==='peak'){
+ctx.fillStyle='rgba(0,0,0,.35)';ctx.fillRect(px+3,py+CS*.3+4,CS,CS*.7);
+ctx.fillStyle=c2;ctx.fillRect(px,py+CS*.3,CS,CS*.7);
+ctx.fillStyle=c1;ctx.fillRect(px,py-CS*.15,CS,CS*.75);
+}
+// Procedural clutter
+const clutterSeed=x*23+y*37;
+if(t==='plain'){
+for(let ci=0;ci<3;ci++){const cx=px+((clutterSeed+ci*17)%CS);const cy=py+((clutterSeed+ci*31)%CS);
+ctx.fillStyle='rgba(40,80,30,.15)';ctx.beginPath();ctx.moveTo(cx,cy);ctx.lineTo(cx-2,cy+4);ctx.lineTo(cx+2,cy+4);ctx.fill();}
+}
+if(t==='rough'){
+for(let ci=0;ci<5;ci++){const cx=px+((clutterSeed+ci*11)%(CS-4))+2;const cy=py+((clutterSeed+ci*19)%(CS-4))+2;
+ctx.fillStyle='rgba(100,90,60,.15)';ctx.beginPath();ctx.arc(cx,cy,1+ci%2,0,Math.PI*2);ctx.fill();}
+}
+// Subtle texture noise overlay
+const noiseSeed=(x*7+y*13)%100/100;
+ctx.fillStyle=`rgba(${noiseSeed>0.5?'255,255,255':'0,0,0'},${(det.noise||0.05)*Math.abs(noiseSeed-0.5)})`;
+ctx.fillRect(px,py,CS,CS);
+// Special terrain overlays
+if(t==='water'){
+const wAnim=Math.sin(T*1.5+(x+y)*0.4)*0.08+0.06;
+ctx.fillStyle=`rgba(60,140,255,${wAnim})`;ctx.fillRect(px,py,CS,CS);
+// Wave lines
+ctx.strokeStyle=`rgba(120,180,255,${0.15+Math.sin(T*2+x*0.8)*0.06})`;ctx.lineWidth=1;
+ctx.beginPath();ctx.moveTo(px,py+CS*(0.35+Math.sin(T+x)*0.05));ctx.lineTo(px+CS,py+CS*(0.35+Math.sin(T+x+1)*0.05));ctx.stroke();
+ctx.beginPath();ctx.moveTo(px,py+CS*(0.65+Math.sin(T*1.2+x)*0.05));ctx.lineTo(px+CS,py+CS*(0.65+Math.sin(T*1.2+x+1)*0.05));ctx.stroke();
+}
+if(t==='lava'){
+const lAnim=Math.sin(T*2.5+(x*3+y*5)*0.3)*0.12+0.15;
+const lg=ctx.createRadialGradient(px+CS/2,py+CS/2,CS*.05,px+CS/2,py+CS/2,CS*.55);
+lg.addColorStop(0,`rgba(255,140,0,${lAnim})`);
+lg.addColorStop(0.5,`rgba(255,60,0,${lAnim*0.6})`);
+lg.addColorStop(1,'transparent');
+ctx.fillStyle=lg;ctx.fillRect(px,py,CS,CS);
+}
+if(t==='forest'){
+// Canopy dapple effect
+for(let i=0;i<2;i++){
+const fx=px+CS*(0.2+i*0.5)+Math.sin(T*0.5+x+i)*3;
+const fy=py+CS*(0.25+i*0.3);
+const fr=CS*0.18;
+ctx.fillStyle='rgba(0,40,10,.18)';
+ctx.beginPath();ctx.arc(fx,fy,fr,0,Math.PI*2);ctx.fill();
+}
+}
+if(t==='fort'){
+// Subtle green healing aura
+const fAnim=Math.sin(T*1.8+x+y)*0.03+0.05;
+ctx.fillStyle=`rgba(34,197,94,${fAnim})`;ctx.fillRect(px,py,CS,CS);
+}
+// Terrain label / symbol
+if(t!=='plain'){
+const sym=det.symbol||td.label;
+if(sym){
+ctx.save();ctx.globalAlpha=0.22;
+ctx.font=`bold ${CS*.28}px sans-serif`;ctx.fillStyle='#fff';
+ctx.textAlign='center';ctx.textBaseline='middle';
+ctx.fillText(sym,px+CS/2,py+CS/2);ctx.restore();
+}
+}
+}
+
+// Layer 2: Wavy organic terrain borders (auto-tiling)
+ctx.lineWidth=1.2;
+for(let y=0;y<h;y++)for(let x=0;x<w;x++){
+const t=B.grid[y][x];
+const px=x*CS,py=y*CS;
+const seed=x*31+y*47;
+[[0,-1,'top'],[0,1,'bot'],[-1,0,'left'],[1,0,'right']].forEach(([dx,dy,side])=>{
+const nx=x+dx,ny=y+dy;
+if(nx<0||ny<0||nx>=w||ny>=h)return;
+if(B.grid[ny][nx]!==t){
+ctx.strokeStyle='rgba(255,255,255,.09)';
+ctx.beginPath();
+const segs=8,amp=CS*0.04;
+if(side==='top'||side==='bot'){
+const by=side==='top'?py:py+CS;
+ctx.moveTo(px,by);
+for(let i=1;i<=segs;i++){
+const sx=px+(CS/segs)*i;
+const sy=by+Math.sin(seed+i*2.7)*amp*(i%2?1:-1);
+ctx.lineTo(sx,sy);
+}
+}else{
+const bx=side==='left'?px:px+CS;
+ctx.moveTo(bx,py);
+for(let i=1;i<=segs;i++){
+const sy=py+(CS/segs)*i;
+const sx=bx+Math.sin(seed+i*2.7)*amp*(i%2?1:-1);
+ctx.lineTo(sx,sy);
+}
+}
+ctx.stroke();
+}
+});
+}
+
+// Layer 3: Grid lines (subtle)
+ctx.strokeStyle='rgba(255,255,255,.035)';ctx.lineWidth=.5;
+for(let x=0;x<=w;x++){ctx.beginPath();ctx.moveTo(x*CS,0);ctx.lineTo(x*CS,h*CS);ctx.stroke();}
+for(let y=0;y<=h;y++){ctx.beginPath();ctx.moveTo(0,y*CS);ctx.lineTo(w*CS,y*CS);ctx.stroke();}
+
+// Layer 4: Danger zone
+if(B.dangerZone){
+B.dangerCells.forEach(({x,y})=>{
+ctx.fillStyle='rgba(239,68,68,.13)';ctx.fillRect(x*CS,y*CS,CS,CS);
+ctx.strokeStyle='rgba(239,68,68,.25)';ctx.lineWidth=1;
+ctx.strokeRect(x*CS+1,y*CS+1,CS-2,CS-2);
+});
+}
+
+// Layer 5: Move/attack highlights with glow
+B.highlights.forEach(c=>{
+const types={
+move:{fill:'rgba(59,130,246,.22)',stroke:'#3b82f6',glow:'rgba(59,130,246,.3)'},
+attack:{fill:'rgba(239,68,68,.22)',stroke:'#ef4444',glow:'rgba(239,68,68,.3)'},
+special:{fill:'rgba(251,191,36,.2)',stroke:'#fbbf24',glow:'rgba(251,191,36,.3)'},
+};
+const s=types[c.type]||types.move;
+ctx.fillStyle=s.fill;ctx.fillRect(c.x*CS,c.y*CS,CS,CS);
+ctx.shadowColor=s.glow;ctx.shadowBlur=CS*.15;
+ctx.strokeStyle=s.stroke;ctx.lineWidth=1.5;
+ctx.strokeRect(c.x*CS+1.5,c.y*CS+1.5,CS-3,CS-3);
+ctx.shadowBlur=0;
+});
+
+// Layer 6: Coordinates on edge tiles (small labels)
+if(CS>=48){
+ctx.font=`bold ${Math.max(8,CS*.14)}px 'Rajdhani', sans-serif`;
+ctx.fillStyle='rgba(255,255,255,.2)';ctx.textAlign='center';ctx.textBaseline='top';
+for(let x=0;x<w;x++)ctx.fillText(String.fromCharCode(65+x),x*CS+CS/2,2);
+ctx.textAlign='right';ctx.textBaseline='middle';
+for(let y=0;y<h;y++)ctx.fillText(y+1,(CS*.18),y*CS+CS/2);
+}
+
+// Layer 7: Units
+B.allUnits.filter(u=>u.hp>0).forEach(u=>drawBUnitEnhanced(ctx,u,T));
+
+// Layer 7b: Projectile trails
+if(B.projectiles&&B.projectiles.length){
+const now=Date.now();
+B.projectiles=B.projectiles.filter(p=>{
+const elapsed=now-p.startT,frac=Math.min(1,elapsed/p.dur);
+if(frac>=1)return false;
+// Draw arc of particles: leading head + trailing tail
+const count=8;
+for(let i=0;i<count;i++){
+const pf=Math.max(0,frac-(count-1-i)*0.04);
+if(pf<=0)continue;
+// Arc path: lerp with slight sine arc
+const mx=(p.x0+p.x1)/2,my=(p.y0+p.y1)/2-20; // arc apex
+const t0=pf*pf*(3-2*pf); // smooth
+const bx=Math.pow(1-t0,2)*p.x0+2*(1-t0)*t0*mx+t0*t0*p.x1;
+const by=Math.pow(1-t0,2)*p.y0+2*(1-t0)*t0*my+t0*t0*p.y1;
+const alpha=(i/count)*(1-frac)*1.4;
+const r=1.5+i*.5;
+ctx.globalAlpha=Math.min(1,alpha);
+ctx.fillStyle=p.col;
+ctx.beginPath();ctx.arc(bx+p.particles[i%p.particles.length].offX*pf,by+p.particles[i%p.particles.length].offY*pf,r,0,Math.PI*2);ctx.fill();
+}
+ctx.globalAlpha=1;
+return true;
+});
+}
+
+// Layer 8: Weather overlay (above units)
+if(currentBiome?.weather){
+const cw=B.canvas.width,ch=B.canvas.height;
+if(currentBiome.weather==='snow'){
+ctx.fillStyle='rgba(255,255,255,.5)';
+for(let i=0;i<40;i++){const sx=(i*37+T*40)%cw;const sy=(i*19+T*60)%ch;ctx.beginPath();ctx.arc(sx,sy,1+i%2,0,Math.PI*2);ctx.fill();}
+}else if(currentBiome.weather==='embers'){
+ctx.fillStyle='rgba(255,120,0,.6)';
+for(let i=0;i<25;i++){const ex=(i*41+T*30)%cw;const ey=ch-(i*23+T*80)%ch;ctx.beginPath();ctx.arc(ex,ey,1+Math.sin(T+i)*.5,0,Math.PI*2);ctx.fill();}
+}else if(currentBiome.weather==='fog'){
+ctx.fillStyle='rgba(200,200,220,.06)';
+for(let i=0;i<8;i++){const fx=(i*60+Math.sin(T*0.3+i)*40)%cw;const fy=(i*50+ch/2)%ch;ctx.beginPath();ctx.ellipse(fx,fy,60+Math.sin(T*0.2+i)*10,20,0,0,Math.PI*2);ctx.fill();}
+}
+}
+
+// Layer 9: Floating damage/heal text (driven by B.floatingTexts array)
+if(B.floatingTexts&&B.floatingTexts.length){
+B.floatingTexts=B.floatingTexts.filter(ft=>{
+ctx.save();ctx.globalAlpha=ft.alpha;
+ctx.fillStyle=ft.color;
+ctx.font=`bold ${ft.sz}px 'Orbitron',sans-serif`;
+if(ft.isCrit){ctx.shadowColor='#fff';ctx.shadowBlur=14;}
+else{ctx.shadowColor=ft.color;ctx.shadowBlur=6;}
+ctx.textAlign='center';
+ctx.fillText(ft.text,ft.px+ft.critJitter,ft.py-ft.yOff);
+ctx.restore();
+ft.yOff+=ft.speed;ft.alpha-=0.04;
+return ft.alpha>0;
+});
+}
+}
+
+// Maintain a pool of off-screen <img> elements for animated GIFs so canvas drawImage
+// picks up the current animation frame (canvas only captures frame 0 from Image objects)
+const _animElPool=new Map();
+function _getAnimEl(u){
+if(!u||!u.src)return null;
+if(!_animElPool.has(u.src)){
+const el=document.createElement('img');
+el.src=u.src;
+el.style.cssText='position:absolute;left:-9999px;width:1px;height:1px;pointer-events:none';
+document.body.appendChild(el);
+_animElPool.set(u.src,el);
+}
+return _animElPool.get(u.src);
+}
+
+function drawBUnitEnhanced(ctx,u,T){
+const _bumpActive=u._bxEnd&&Date.now()<u._bxEnd;
+const _bx=_bumpActive?(u._bx||0):0,_by=_bumpActive?(u._by||0):0;
+const px=u.x*CS+_bx,py=u.y*CS+_by,pad=4,sz=CS-pad*2;
+const isP=u.side==='player',isSel=B.sel===u;
+const acted=u.acted&&isP;
+
+// Selected glow
+if(isSel){
+ctx.shadowColor='rgba(251,191,36,.8)';ctx.shadowBlur=CS*.2;
+ctx.fillStyle='rgba(251,191,36,.07)';ctx.fillRect(px,py,CS,CS);
+ctx.shadowBlur=0;
+}
+
+// T0/S unit ambient glow
+if(u.grade==='T0'||u.grade==='S'){
+const glowColor=u.grade==='T0'?`hsla(${(T*60)%360},100%,60%,.2)`:'rgba(255,215,0,.15)';
+ctx.fillStyle=glowColor;ctx.fillRect(px,py,CS,CS);
+}
+
+// Portrait clipped to circle
+ctx.save();
+ctx.beginPath();ctx.arc(px+CS/2,py+CS/2,sz/2,0,Math.PI*2);ctx.clip();
+// Animated GIFs: draw from a persistent <img> DOM element so the browser advances frames
+const _drawSrc=u.isAnimated?_getAnimEl(u):u.img;
+if(_drawSrc&&(_drawSrc.complete||_drawSrc instanceof HTMLImageElement)&&(_drawSrc.naturalWidth||_drawSrc.width)>0){
+ctx.globalAlpha=acted?.45:1;
+ctx.drawImage(_drawSrc,px+pad,py+pad,sz,sz);
+}else{
+const hue=u.hue||((u.id*47)%360);
+const g=ctx.createRadialGradient(px+CS*.35,py+CS*.3,sz*.08,px+CS/2,py+CS/2,sz/2);
+g.addColorStop(0,`hsl(${hue},60%,55%)`);g.addColorStop(1,`hsl(${hue},50%,20%)`);
+ctx.fillStyle=g;ctx.fill();
+}
+ctx.globalAlpha=1;
+// Overlay acted dimming
+if(acted){ctx.fillStyle='rgba(0,0,0,.35)';ctx.fill();}
+ctx.restore();
+
+// Grade ring
+if(u.grade==='T0'){
+const segments=6;
+for(let i=0;i<segments;i++){
+const a=i/segments*Math.PI*2+T*1.5;
+ctx.strokeStyle=`hsl(${(i*60+T*80)%360},90%,60%)`;ctx.lineWidth=2;ctx.globalAlpha=.75;
+ctx.beginPath();ctx.arc(px+CS/2,py+CS/2,sz/2,a,a+Math.PI/segments);ctx.stroke();
+}ctx.globalAlpha=1;
+}else if(u.grade==='S'){
+ctx.strokeStyle='rgba(255,215,0,.8)';ctx.lineWidth=1.5;
+ctx.beginPath();ctx.arc(px+CS/2,py+CS/2,sz/2,0,Math.PI*2);ctx.stroke();
+}else{
+const ringColors={A:'rgba(255,107,53,.7)',B:'rgba(124,77,255,.7)',C:'rgba(0,229,255,.7)',D:'rgba(142,153,164,.5)'};
+const ringColor=isSel?'rgba(251,191,36,.9)':(isP?ringColors[u.grade]||'rgba(59,130,246,.6)':'rgba(239,68,68,.6)');
+ctx.strokeStyle=ringColor;ctx.lineWidth=isSel?2:1.5;
+ctx.beginPath();ctx.arc(px+CS/2,py+CS/2,sz/2,0,Math.PI*2);ctx.stroke();
+}
+
+// HP bar (gradient)
+const hpR=u.hp/u.maxHp;
+const bw=sz,bh=Math.max(3,CS*.065),bx=px+pad,by=py+CS-pad-bh;
+ctx.fillStyle='rgba(0,0,0,.65)';roundRect(ctx,bx,by,bw,bh,1.5);ctx.fill();
+const hpGrad=ctx.createLinearGradient(bx,by,bx+bw*hpR,by);
+if(hpR>0.6){hpGrad.addColorStop(0,'#16a34a');hpGrad.addColorStop(1,'#22c55e');}
+else if(hpR>0.3){hpGrad.addColorStop(0,'#d97706');hpGrad.addColorStop(1,'#f59e0b');}
+else{hpGrad.addColorStop(0,'#dc2626');hpGrad.addColorStop(1,'#ef4444');}
+ctx.fillStyle=hpGrad;roundRect(ctx,bx,by,Math.max(2,bw*hpR),bh,1.5);ctx.fill();
+
+// Weapon color dot
+ctx.fillStyle=WEAPON_COLORS[u.weapon]||'#888';
+ctx.beginPath();ctx.arc(px+CS-pad-3,py+pad+3,2.5,0,Math.PI*2);ctx.fill();
+
+// Special charge pip strip
+const maxPips=Math.min(u.special.cd,5);
+for(let i=0;i<maxPips;i++){
+const charged=i<(u.special.cd-u.specialCharges);
+ctx.beginPath();ctx.arc(px+pad+i*5+3,py+pad+3,2,0,Math.PI*2);
+ctx.fillStyle=charged?'#fbbf24':'rgba(255,255,255,.12)';ctx.fill();
+}
+
+// Status icon row above HP bar
+const _statuses=[];
+if(u.frozen)_statuses.push({t:'❄',c:'rgba(0,229,255,.9)'});
+if(u.shielded)_statuses.push({t:'🛡',c:'rgba(251,191,36,.9)'});
+if(u.poisoned>0)_statuses.push({t:'☠',c:'rgba(168,85,247,.9)'});
+if(u.burned>0)_statuses.push({t:'🔥',c:'rgba(249,115,22,.9)'});
+if(u.gravityApplied)_statuses.push({t:'⬇',c:'rgba(99,102,241,.9)'});
+if(u._panicked)_statuses.push({t:'!',c:'rgba(239,68,68,.9)'});
+if(_statuses.length>0){
+const iconSz=Math.max(7,CS*.16);
+ctx.font=`${iconSz}px sans-serif`;ctx.textAlign='left';ctx.textBaseline='middle';
+_statuses.forEach((s,i)=>{ctx.fillStyle=s.c;ctx.fillText(s.t,px+pad+i*(iconSz+1),py+pad+CS*.22);});
+}
+// Prestige aura ring (golden pulse for awakened units)
+if(u.prestige>0){
+const pa=0.4+0.35*Math.sin(T*2.5);
+ctx.strokeStyle=`rgba(255,215,0,${pa})`;ctx.lineWidth=2.5;
+ctx.beginPath();ctx.arc(px+CS/2,py+CS/2,sz/2+2.5,0,Math.PI*2);ctx.stroke();
+// Prestige star badge
+ctx.fillStyle='rgba(255,215,0,.9)';ctx.font=`bold ${Math.max(7,CS*.13)}px 'Rajdhani', sans-serif`;
+ctx.textAlign='center';ctx.textBaseline='top';
+ctx.fillText('★'.repeat(Math.min(u.prestige,3)),px+CS/2,py+1);
+}
+}
+
+// Override drawMap with enhanced version + self-sustaining RAF loop
+let _mapAnimRAF=0;
+
+// ═══ IV SYSTEM (BOONS / BANES) ═══════════════════════════════
+function applyIVs(unit){
+const stats=['maxHp','atk','def','mag','res','spd'];
+const boon=stats[~~(Math.random()*stats.length)];
+let bane=stats[~~(Math.random()*stats.length)];
+for(let _g=0;bane===boon&&_g<50;_g++)bane=stats[~~(Math.random()*stats.length)];
+unit.boon=boon;unit.bane=bane;
+unit[boon]=(unit[boon]||0)+3;
+unit[bane]=Math.max(1,(unit[bane]||0)-3);
+const bsBoon=boon==='maxHp'?'hp':boon;
+const bsBane=bane==='maxHp'?'hp':bane;
+if(unit.baseStat){
+unit.baseStat[bsBoon]=(unit.baseStat[bsBoon]||0)+3;
+unit.baseStat[bsBane]=Math.max(1,(unit.baseStat[bsBane]||0)-3);
+}
+}
+
+// ═══ ASSIST SKILLS (defined above createUnit for hoisting safety) ═══
+// ASSIST_SKILLS already declared at top of script
+
+function getAssistRange(unit){
+    const assist=unit.assist; if(!assist) return [];
+    const range=assist.id==='physic'?2:1;
+    const cells=[];
+    for(let dy=-range;dy<=range;dy++) for(let dx=-range;dx<=range;dx++){
+        const d=Math.abs(dx)+Math.abs(dy); if(d===0||d>range) continue;
+        const nx=unit.x+dx,ny=unit.y+dy;
+        if(nx<0||ny<0||nx>=B.mapW||ny>=B.mapH) continue;
+        const t=unitAt(nx,ny);
+        
+        // --- NEW LOGIC START ---
+        if(t && t.side===unit.side && t!==unit) {
+            // Prevent Dancers from Dancing other Dancers
+            if(assist.type === 'refresh' && t.assist && t.assist.type === 'refresh') {
+                continue;
+            }
+            cells.push({x:nx,y:ny,type:'assist'});
+        }
+        // --- NEW LOGIC END ---
+    }
+    return cells;
+}
+
+function doAssist(){
+const u=B.sel;if(!u||u.acted||!u.assist)return;
+B.mode='assist';B.highlights=getAssistRange(u);
+if(!B.highlights.length){toast('No allies in range','err');B.mode='select';return;}
+drawMap();sfx('click');
+}
+
+function executeAssist(user,target){
+const a=user.assist;if(!a)return;
+const dx=target.x-user.x,dy=target.y-user.y;
+if(a.id==='reposition'){
+const nx=user.x-dx,ny=user.y-dy;
+if(nx>=0&&ny>=0&&nx<B.mapW&&ny<B.mapH&&!unitAt(nx,ny)&&canTraverse(target,nx,ny)){
+target.x=nx;target.y=ny;
+bLog(`${user.name} repositions ${target.name}`,'sys');
+}else{toast('No space!','err');return;}
+}else if(a.id==='drawback'){
+const bx=user.x-dx,by=user.y-dy;
+if(bx>=0&&by>=0&&bx<B.mapW&&by<B.mapH&&!unitAt(bx,by)&&canTraverse(user,bx,by)&&canTraverse(target,user.x,user.y)){
+target.x=user.x;target.y=user.y;user.x=bx;user.y=by;
+bLog(`${user.name} draws back ${target.name}`,'sys');
+}else{toast('No space!','err');return;}
+}else if(a.id==='smite'){
+const px=target.x+dx*2,py=target.y+dy*2;
+const px1=target.x+dx,py1=target.y+dy;
+if(px1>=0&&py1>=0&&px1<B.mapW&&py1<B.mapH&&!unitAt(px1,py1)&&canTraverse(target,px1,py1)){
+target.x=px1;target.y=py1;
+if(px>=0&&py>=0&&px<B.mapW&&py<B.mapH&&!unitAt(px,py)&&canTraverse(target,px,py)){target.x=px;target.y=py;}
+bLog(`${user.name} smites ${target.name} forward`,'sys');
+}else{toast('No space!','err');return;}
+}else if(a.id==='shove'){
+const px=target.x+dx,py=target.y+dy;
+if(px>=0&&py>=0&&px<B.mapW&&py<B.mapH&&!unitAt(px,py)&&canTraverse(target,px,py)){
+target.x=px;target.y=py;
+bLog(`${user.name} shoves ${target.name}`,'sys');
+}else{toast('No space!','err');return;}
+}else if(a.id==='dance'||a.id==='sing'){
+target.acted=false;target.moved=false;
+bLog(`${user.name}: ${a.name}! ${target.name} can act again!`,'spec');sfx('heal');
+}else if(a.id==='rally_atk'){
+target._rallyAtk=(target._rallyAtk||0)+4;
+bLog(`${user.name} rallies ${target.name} ATK+4`,'spec');
+}else if(a.id==='rally_spd'){
+target._rallySpd=(target._rallySpd||0)+4;
+bLog(`${user.name} rallies ${target.name} SPD+4`,'spec');
+}else if(a.id==='heal'||a.id==='physic'){
+const amt=a.id==='physic'?8:10;
+target.hp=Math.min(target.maxHp,target.hp+amt);
+floatTxt(target.x,target.y,'+'+amt,'#22c55e');
+bLog(`${user.name} heals ${target.name} +${amt}`,'spec');sfx('heal');
+}
+markActed(user);if(B.dangerZone)calcDangerZone(); // Bug #36
+drawMap();updateBUI();updateEList();checkTurnEnd();
+        if(user.equippedItem?.effect?.type==='assist_buff'){
+            const v=user.equippedItem.effect.val||3;
+            target._rallyAtk=(target._rallyAtk||0)+v;
+        }
+}
+
+// ═══ BREAKABLE WALLS ═════════════════════════════════════════
+const wallHpMap=new Map();
+
+function initWallHp(){
+wallHpMap.clear();
+for(let y=0;y<B.mapH;y++)for(let x=0;x<B.mapW;x++){
+if(B.grid[y][x]==='wall')wallHpMap.set(`${x},${y}`,TERRAINS.wall.hp);
+}
+}
+
+function attackWall(unit,wx,wy){
+const key=`${wx},${wy}`;
+const hp=wallHpMap.get(key);if(hp===undefined)return false;
+const dmg=Math.max(5,unit.atk);
+const newHp=hp-dmg;
+floatTxt(wx,wy,'-'+dmg,'#f97316');
+bLog(`${unit.name} attacks wall for ${dmg}`,'dmg');
+if(newHp<=0){
+wallHpMap.delete(key);
+B.grid[wy][wx]='plain';
+bLog('Wall destroyed!','spec');sfx('crit');
+}else wallHpMap.set(key,newHp);
+markActed(unit);if(B.dangerZone)calcDangerZone(); // Bug #36
+drawMap();updateBUI();checkTurnEnd();
+return true;
+}
+
+// ═══ DEFENSIVE TERRAIN ═══════════════════════════════════════
+// Add trench and castle terrain types
+if(!TERRAINS.trench)TERRAINS.trench={c1:'#1a1a12',c2:'#2a2a1a',label:'T',movCost:2,def:4,atk:-1,name:'Trench',passable:1};
+if(!TERRAINS.castle)TERRAINS.castle={c1:'#2a2a30',c2:'#3a3a40',label:'C',movCost:1,def:5,atk:1,name:'Castle',passable:1,healPct:0.1};
+if(!TERRAINS.void)TERRAINS.void={c1:'transparent',c2:'transparent',label:'',movCost:99,def:0,atk:0,name:'Void',passable:0};
+
+// ═══ MAP BIOMES ══════════════════════════════════════════════
+const MAP_BIOMES={
+grassland:{name:'Grassland',palette:{plain:['#1a2a1a','#223322'],forest:['#0f1f0f','#1a301a'],water:['#081428','#0f1e3a']},weather:null},
+volcanic:{name:'Volcano',palette:{plain:['#1a0a0a','#2a1212'],forest:['#1a1008','#2a1a10'],water:['#2a0800','#3a1000']},weather:'embers',
+terrainSwap:{water:'lava',forest:'rough'}},
+winter:{name:'Winter',palette:{plain:['#1a1e2a','#222833'],forest:['#0f161f','#1a222a'],water:['#0a1828','#122840']},weather:'snow'},
+ruins:{name:'Ruins',palette:{plain:['#1a1a1a','#252525'],forest:['#12120f','#1d1d18'],water:['#081420','#0f1e30']},weather:'fog',
+extraTerrain:['trench','castle']},
+desert:{name:'Desert',palette:{plain:['#2a2210','#3a3018'],forest:['#1a1a08','#2a2210'],water:['#081428','#0f1e3a']},weather:null,
+extraTerrain:['rough']},
+};
+let currentBiome=null;
+
+function pickBiome(){
+const keys=Object.keys(MAP_BIOMES);
+return MAP_BIOMES[keys[~~(Math.random()*keys.length)]];
+}
+
+// ═══ BANNER CAROUSEL ════════════════════════════════════════
+function getWeekSeed(){return Math.floor(Date.now()/604800000);}
+
+function generateAutoFocusBanner(){
+if(S.roster.length<4)return null;
+const seed=getWeekSeed();
+const rng=(i)=>{let s=seed*31+i*7;s=(s^(s>>16))&0x7fffffff;return(s%1000)/1000;};
+const pool=[...S.roster].sort((a,b)=>(rng(a.id)-rng(b.id)));
+const heroes=pool.slice(0,4).map(u=>u.name);
+return{id:'auto_weekly',name:'Weekly Focus',heroNames:heroes,isAuto:true};
+}
+
+function generateThematicBanner(){
+if(S.roster.length<4)return null;
+const themes=[
+{name:'Cavalry Charge',filter:u=>u.moveType==='Cavalry'},
+{name:'Sky Knights',filter:u=>u.moveType==='Flying'},
+{name:'Magic Users',filter:u=>['AnimaMag','LightMag','DarkMag'].includes(u.weapon)},
+{name:'Speedy Heroes',filter:u=>u.spd>=30},
+{name:'Tanky Wall',filter:u=>u.def>=25},
+];
+const theme=themes[getWeekSeed()%themes.length];
+const matches=S.roster.filter(theme.filter);
+if(matches.length<2)return null;
+return{id:'auto_thematic',name:theme.name+' Focus',heroNames:matches.slice(0,4).map(u=>u.name),isAuto:true};
+}
+
+let activeBannerIndex=0;
+
+function getAvailableBanners() {
+    const banners = [];
+    const pool = S.images.filter(i => !i.isDefault);
+    if(!pool.length) {
+        banners.push({id:'standard',name:'Standard Banner',heroNames:[],isAuto:true,isStandard:true});
+        return banners;
+    }
+
+    // Standard banner — full pool, no restrictions
+    banners.push({id:'standard',name:'Standard Banner',heroNames:[],isAuto:true,isStandard:true,
+        desc:'Pull from the entire image pool. All heroes available at normal rates.'});
+
+    // Generate featured banners with 10+ chars each, 2+ guaranteed T0 slots
+    const seed = getWeekSeed();
+    const rng = (i) => { let s = seed*31 + i*7; s = (s^(s>>16)) & 0x7fffffff; return (s%1000)/1000; };
+
+    // Shuffle pool deterministically
+    const shuffled = [...pool].sort((a,b) => rng(pool.indexOf(a)*3+1) - rng(pool.indexOf(b)*3+1));
+
+    // Banner 1: "Apex Vanguard" — combat focused
+    if(pool.length >= 10) {
+        const b1Heroes = shuffled.slice(0, Math.max(10, Math.ceil(pool.length * 0.4)));
+        banners.push({
+            id:'apex_vanguard',name:'Apex Vanguard',
+            heroNames: b1Heroes.map(h => h.name),
+            isAuto: true, isFeatured: true,
+            t0Names: b1Heroes.slice(0,2).map(h => h.name),
+            desc: `${b1Heroes.length} heroes. 2 guaranteed Tier 0 focus units at boosted rates.`
+        });
+    }
+
+    // Banner 2: "Neon Eclipse" — different set
+    if(pool.length >= 20) {
+        const b2Start = Math.ceil(pool.length * 0.3);
+        const b2Heroes = shuffled.slice(b2Start, b2Start + Math.max(10, Math.ceil(pool.length * 0.4)));
+        banners.push({
+            id:'neon_eclipse',name:'Neon Eclipse',
+            heroNames: b2Heroes.map(h => h.name),
+            isAuto: true, isFeatured: true,
+            t0Names: b2Heroes.slice(0,2).map(h => h.name),
+            desc: `${b2Heroes.length} heroes. 2 guaranteed Tier 0 focus units at boosted rates.`
+        });
+    }
+
+    // Banner 3: "Phantom Rift" — if enough images
+    if(pool.length >= 30) {
+        const b3Start = Math.ceil(pool.length * 0.6);
+        const b3Heroes = shuffled.slice(b3Start, b3Start + Math.max(10, Math.ceil(pool.length * 0.35)));
+        if(b3Heroes.length >= 10) {
+            banners.push({
+                id:'phantom_rift',name:'Phantom Rift',
+                heroNames: b3Heroes.map(h => h.name),
+                isAuto: true, isFeatured: true,
+                t0Names: b3Heroes.slice(0,3).map(h => h.name),
+                desc: `${b3Heroes.length} heroes. 3 guaranteed Tier 0 focus units at boosted rates.`
+            });
+        }
+    }
+
+    // User-created banners (ensure they also have 10+ chars)
+    S.banners.forEach(b => banners.push(b));
+
+    return banners;
+};
+
+function cycleBanner(dir){
+const banners=getAvailableBanners();
+if(!banners.length)return;
+activeBannerIndex=(activeBannerIndex+dir+banners.length)%banners.length;
+const b=banners[activeBannerIndex];
+if(b.isStandard)S.activeBannerId=null;
+else if(b.isAuto)S.activeBannerId=null;// Auto banners just show info
+else S.activeBannerId=b.id;
+save(true);refreshGacha();
+}
+
+// ═══ NEW GAME MODES ══════════════════════════════════════════
+
+// Hall of Forms — rogue-like 13-floor draft
+let hofState=null;
+
+function startHallOfForms(){
+if(!S.images.length||S.images.length<4){toast('Need at least 4 images!','err');return;}
+const pool=S.images.slice();
+const team=[];
+for(let i=0;i<4&&pool.length;i++){
+const img=pool.splice(~~(Math.random()*pool.length),1)[0];
+const u=createUnit(img.src,img.name);
+u.level=10;u.exp=0;u.sp=0;
+u.skillA=null;u.skillB=null;u.skillC=null;u.skillS=null;
+u.passives=[];u.assist=null;
+applyLevel(u);
+team.push(u);
+}
+hofState={floor:1,maxFloor:13,team,skillChoices:[],savedTeamIds:S.team.map(i=>S.roster[i]?.id).filter(Boolean)};
+toast('Hall of Forms: Floor 1','gold');
+currentBattleMode='hof';
+// Floor 1-12: scaling random enemies; Floor 13: fixed boss squad
+currentBattleConfig={floor:1,enemyCount:3,expMult:1.5,apReward:3,hofBossFloor:false};
+const tempRoster=team.map(u=>{
+u.isForma=true; // Mark as temporary — deleted when run ends
+if(!S.roster.find(r=>r.id===u.id))S.roster.push(u);
+return u;
+});
+S.team=tempRoster.map(u=>S.roster.indexOf(u));
+startBattle();
+}
+
+function hofVictoryReward(){
+if(!hofState)return;
+hofState.floor++;
+if(hofState.floor>hofState.maxFloor){
+toast('Hall of Forms COMPLETE! +30 AP','gold');
+S.ap+=30;
+const _hofIds=hofState.savedTeamIds||[];
+S.roster=S.roster.filter(u=>!u.isForma);
+S.team=_hofIds.map(id=>S.roster.findIndex(u=>u.id===id)).filter(i=>i>=0);
+hofState=null;save(true);return;
+}
+// Offer 3 random skills to pick before next floor
+const allSkills=[...LEARNABLE_SKILLS,...ASSIST_SKILLS.map(a=>({...a,slot:'assist',spCost:0}))];
+const choices=[];
+const seen=new Set();
+for(let _g=0;choices.length<3&&_g<200;_g++){
+const sk=allSkills[~~(Math.random()*allSkills.length)];
+if(!seen.has(sk.id)){seen.add(sk.id);choices.push(sk);}
+}
+hofState.skillChoices=choices;
+showHoFSkillPick(choices);
+}
+
+function showHoFSkillPick(choices){
+const html=choices.map((sk,i)=>`<button class="btn2" style="display:block;width:100%;margin-bottom:6px;text-align:left;font-size:.7rem" onclick="pickHoFSkill(${i})"><strong>${sk.name}</strong><br><span style="color:var(--text2);font-size:.6rem">${sk.desc}</span></button>`).join('');
+const el=document.getElementById('gachaResult');
+el.innerHTML=`<div style="font-family:var(--display);color:var(--gold);font-size:.8rem;margin-bottom:12px">FLOOR ${hofState.floor-1} CLEAR — PICK A SKILL</div>${html}<button class="btn2 btn-sm" onclick="skipHoFSkill()">Skip</button>`;
+el.classList.add('show');
+}
+
+function pickHoFSkill(idx){
+const sk=hofState.skillChoices[idx];if(!sk)return;
+// Let player pick which unit gets it
+const teamHtml=hofState.team.map((u,i)=>`<button class="btn2 btn-sm" style="margin:3px" onclick="applyHoFSkill(${idx},${i})">${u.name}</button>`).join('');
+document.getElementById('gachaResult').innerHTML+=`<div style="margin-top:8px;font-size:.65rem;color:var(--text2)">Give to:</div>${teamHtml}`;
+}
+
+function applyHoFSkill(skillIdx,unitIdx){
+const sk=hofState.skillChoices[skillIdx];
+const u=hofState.team[unitIdx];if(!sk||!u)return;
+if(sk.slot==='assist'){
+u.assist=sk;
+}else{
+const skillObj={name:sk.name,desc:sk.desc,tag:sk.id,val:sk.effect?.val??0,trigger:sk.trigger||'OnAttack',condition:sk.condition||'Always',effect:sk.effect||{tag:sk.id,val:0}};
+u[sk.slot]=skillObj;
+u.passives=[u.skillA,u.skillB,u.skillC,u.skillS].filter(Boolean);
+}
+toast(`${u.name} learned ${sk.name}!`,'ok');
+document.getElementById('gachaResult').classList.remove('show');
+startHoFFloor();
+}
+
+function skipHoFSkill(){
+document.getElementById('gachaResult').classList.remove('show');
+startHoFFloor();
+}
+
+function startHoFFloor(){
+if(!hofState)return;
+const floor=hofState.floor;
+const isBoss=floor===hofState.maxFloor;
+if(isBoss){
+toast('FLOOR 13: THE FINAL BOSS! 4 fully-equipped +10 units await…','spec');
+// Boss floor: 4 enemies, all at +10 merge power, lunatic stats
+const prevDiff=currentDifficulty;currentDifficulty='lunatic';
+currentBattleConfig={floor,enemyCount:4,expMult:2,apReward:10,hofBossFloor:true};
+startBattle();
+currentDifficulty=prevDiff;
+}else{
+const count=Math.min(4,2+Math.floor(floor/4));
+currentBattleConfig={floor,enemyCount:count,expMult:1.5,apReward:3,hofBossFloor:false};
+startBattle();
+}
+}
+
+// Aether Raids — export/import base defense
+function exportAetherBase(){
+if(S.team.length<1){toast('Set a team first!','err');return;}
+const ms=8;
+// Guarantee a valid map is always exported (B.grid may be undefined outside battle)
+const exportGrid=B.grid?.length?B.grid:generateMap(ms,ms);
+const base={
+units:S.team.map((idx,i)=>{
+const u=S.roster[idx];if(!u)return null;
+// Right side of map, spread vertically — receiver will spawn enemies here
+return{name:u.name,src:u.src.substring(0,50)+'...',grade:u.grade,role:u.role,weapon:u.weapon,
+maxHp:u.maxHp,atk:u.atk,def:u.def,mag:u.mag,res:u.res,spd:u.spd,
+special:{...u.special},passives:u.passives.map(p=>({...p})),level:u.level,moveType:u.moveType,
+x:ms-1,y:Math.min(i,ms-1)};
+}).filter(Boolean),
+map:exportGrid,
+mapW:ms,mapH:ms,
+};
+// Bug #26: Use encodeURIComponent to handle non-ASCII characters safely
+const code=btoa(encodeURIComponent(JSON.stringify(base)));
+navigator.clipboard?.writeText(code).then(()=>toast('Base code copied!','ok'));
+return code;
+}
+
+function importAetherBase(){
+const code=prompt('Paste Aether Raid base code:');
+if(!code)return;
+try{
+// Bug #26: decodeURIComponent to match export encoding
+const base=JSON.parse(decodeURIComponent(atob(code)));
+if(!base.units||!base.units.length){toast('Invalid base code','err');return;}
+// Bug #62: Validate base dimensions
+const bW=base.mapW||8,bH=base.mapH||8;
+if(bW<4||bW>20||bH<4||bH>20){toast('Invalid base dimensions','err');return;}
+currentBattleMode='aether';
+currentBattleConfig={expMult:0.5,apReward:8};
+nav('battle');
+const ms=base.mapW||8;
+B.mapW=ms;B.mapH=ms;
+B.grid=base.map||generateMap(ms,ms);
+B.phase='player';B.mode='select';B.sel=null;B.highlights=[];
+B.dangerZone=false;B.dangerCells=[];B.hover={x:-1,y:-1};B.shaking=false;
+let pRoster=S.team.map(i=>S.roster[i]).filter(Boolean);
+if(!pRoster.length)pRoster=S.roster.slice(0,4);
+B.pUnits=pRoster.slice(0,CFG.TEAM_SIZE).map((u,i)=>{const bu=prepUnit(u,'player');bu.x=Math.min(Math.floor(i/ms),ms-1);bu.y=i%ms;return bu;});
+{const occ=new Set();B.pUnits.forEach(u=>{const key=u.x+','+u.y;if(occ.has(key)){for(let x=0;x<ms;x++)for(let y=0;y<ms;y++){const k2=x+','+y;if(!occ.has(k2)){u.x=x;u.y=y;occ.add(k2);x=ms;break;}}}else{occ.add(key);}});}
+B.eUnits=base.units.map((ud,i)=>{
+// Use stored spawn positions if present, otherwise default to right column
+const u={...ud,hp:ud.maxHp,x:ud.x??ms-1,y:ud.y??Math.min(i,ms-1),acted:false,moved:false,
+specialCharges:ud.special?.cd||3,shielded:false,frozen:false,extraAction:false,
+poisoned:0,burned:0,side:'enemy',img:null,hue:0};
+u.passives=u.passives||[];
+return u;
+});
+B.allUnits=[...B.pUnits,...B.eUnits];
+initWallHp();
+B.canvas=document.getElementById('battleCanvas');B.ctx=B.canvas.getContext('2d');
+resizeCanvas(); // use the shared resizer instead of hardcoded 440px
+B.allUnits.forEach(u=>{if(u.src&&!u.src.endsWith('...')){const i2=new Image();i2.onload=()=>{u.img=i2;drawMap();};i2.src=u.src;}});
+drawMap();updateBUI();updateEList();
+document.getElementById('turnInd').textContent='AETHER RAID';
+toast('Aether Raid: Defeat the base!','gold');
+}catch(e){toast('Invalid base code','err');}
+}
+
+// Heroic Ordeals — unit-specific challenge
+function startHeroicOrdeal(unitIdx){
+const u=S.roster[unitIdx];if(!u)return;
+S._savedOrdealTeamIds=S.team.map(i=>S.roster[i]?.id).filter(Boolean);
+currentBattleMode='ordeal';
+currentBattleConfig={expMult:1,apReward:5,ordealUnit:unitIdx};
+// Force team to be this unit + 1 random ally
+const ally=S.roster.find((r,i)=>i!==unitIdx&&r.hp>0);
+const tempTeam=[unitIdx];
+if(ally)tempTeam.push(S.roster.indexOf(ally));
+S.team=tempTeam;
+toast(`Heroic Ordeal: ${u.name}`,'gold');
+startBattle();
+}
+
+// Bound Hero Battle — 2 synergized bosses
+function startBHB(){
+currentBattleMode='bhb';
+const pool=S.images.length?S.images:PLACEHOLDERS.map(p=>({src:makePlaceholderSrc(p.hue),name:p.name,hue:p.hue}));
+// Create two boss enemies with extreme synergy
+const img1=pool[~~(Math.random()*pool.length)];
+const img2=pool[~~(Math.random()*pool.length)];
+const boss1=createUnit(img1.src,img1.name);
+const boss2=createUnit(img2.src,img2.name);
+// Make one a tanky armor, one a mage buffer
+boss1.role='Knight';boss1.weapon='Lance';boss1.moveType='Armored';
+boss1.def=Math.round(boss1.def*2);boss1.maxHp=Math.round(boss1.maxHp*1.8);
+boss2.role='Bishop';boss2.weapon='LightMag';
+boss2.skillC={name:'Fortify DEF 3',desc:'Grants adjacent allies DEF+4 at start of turn',trigger:'TurnStart',condition:'Always',effect:{tag:'buff_def',val:8}};
+boss2.passives=[boss2.skillA,boss2.skillB,boss2.skillC,boss2.skillS].filter(Boolean);
+const eMult=1+S.elo/2000;
+[boss1,boss2].forEach(b=>{['maxHp','atk','def','mag','res','spd'].forEach(s=>b[s]=Math.round(b[s]*eMult));});
+currentBattleConfig={expMult:1,apReward:10,isBoss:true,bhbBosses:[prepUnit(boss1,'enemy'),prepUnit(boss2,'enemy')]};
+toast('Bound Hero Battle!','gold');
+startBattle();
+}
+
+// ═══ EXPANDED LEARNABLE SKILLS ═══════════════════════════════
+// Append more skills to LEARNABLE_SKILLS (already has 12)
+const EXTRA_SKILLS=[
+// A Skills
+{id:'atk_spd_solo',name:'ATK/SPD Solo 3',slot:'skillA',desc:'If no adjacent allies: ATK/SPD+6',spCost:240,trigger:'OnAttack',condition:'IsSolo',effect:{tag:'buff_atk',val:6}},
+{id:'close_counter',name:'Close Counter',slot:'skillA',desc:'Unit can counter melee attacks at range',spCost:300,trigger:'OnDefend',condition:'Always',effect:{tag:'buff_def',val:2}},
+{id:'distant_counter',name:'Distant Counter',slot:'skillA',desc:'Unit can counter ranged attacks at melee',spCost:300,trigger:'OnDefend',condition:'Always',effect:{tag:'buff_def',val:2}},
+{id:'steady_breath',name:'Steady Breath',slot:'skillA',desc:'If foe initiates: DEF+4 and accelerate Special CD',spCost:240,trigger:'OnDefend',condition:'Always',effect:{tag:'buff_def',val:4}},
+{id:'brazen_atk',name:'Brazen ATK/SPD 3',slot:'skillA',desc:'If HP<80%: ATK/SPD+7',spCost:200,trigger:'OnAttack',condition:'HP<80%',effect:{tag:'buff_atk',val:7}},
+{id:'mirror_impact',name:'Mirror Impact',slot:'skillA',desc:'If unit initiates: ATK+6 and RES+10',spCost:240,trigger:'OnAttack',condition:'Always',effect:{tag:'buff_atk',val:6}},
+{id:'heavy_blade',name:'Heavy Blade 3',slot:'skillA',desc:'If ATK > foe ATK: accelerate Special CD',spCost:200,trigger:'OnAttack',condition:'Always',effect:{tag:'buff_atk',val:3}},
+{id:'bond_atk',name:'ATK/DEF Bond 3',slot:'skillA',desc:'If adjacent to ally: ATK/DEF+5',spCost:200,trigger:'OnAttack',condition:'AdjacentAlly',effect:{tag:'buff_atk',val:5}},
+// B Skills
+{id:'wary_fighter',name:'Wary Fighter 3',slot:'skillB',desc:'Unit and foe cannot double when HP>50%',spCost:200,trigger:'OnDefend',condition:'HP>75%',effect:{tag:'guard',val:0.1}},
+{id:'guard3',name:'Guard 3',slot:'skillB',desc:'Reduces damage by 20% when HP>80%',spCost:200,trigger:'OnDefend',condition:'HP>75%',effect:{tag:'guard',val:0.2}},
+{id:'renewal3',name:'Renewal 3',slot:'skillB',desc:'Heals 10 HP at start of turn',spCost:180,trigger:'TurnStart',condition:'Always',effect:{tag:'heal',val:10}},
+{id:'wings_mercy',name:'Wings of Mercy 3',slot:'skillB',desc:'Can warp to injured allies',spCost:200,trigger:'OnMove',condition:'Always',effect:{tag:'heal',val:0}},
+{id:'escape_route',name:'Escape Route 3',slot:'skillB',desc:'Can warp to allies when HP<50%',spCost:180,trigger:'OnMove',condition:'HP<50%',effect:{tag:'heal',val:0}},
+{id:'null_followup',name:'Null Follow-Up 3',slot:'skillB',desc:'Disables foe guaranteed follow-ups',spCost:240,trigger:'OnDefend',condition:'Always',effect:{tag:'guard',val:0.05}},
+{id:'special_spiral',name:'Special Spiral 3',slot:'skillB',desc:'After combat with Special: -2 Special CD',spCost:240,trigger:'OnAttack',condition:'Always',effect:{tag:'buff_spd',val:2}},
+{id:'lunge',name:'Lunge',slot:'skillB',desc:'Swap positions with foe after combat',spCost:150,trigger:'OnAttack',condition:'Always',effect:{tag:'lunge',val:0}},
+// C Skills
+{id:'atk_smoke',name:'ATK Smoke 3',slot:'skillC',desc:'After combat: inflicts ATK-7 on foes within 2 spaces',spCost:200,trigger:'TurnStart',condition:'Always',effect:{tag:'buff_atk',val:-3}},
+{id:'spd_smoke',name:'SPD Smoke 3',slot:'skillC',desc:'After combat: inflicts SPD-7 on foes within 2 spaces',spCost:200,trigger:'TurnStart',condition:'Always',effect:{tag:'buff_spd',val:-3}},
+{id:'panic_ploy',name:'Panic Ploy 3',slot:'skillC',desc:'At start of turn: panics foes with less HP',spCost:200,trigger:'TurnStart',condition:'Always',effect:{tag:'panic',val:0}},
+{id:'infantry_pulse',name:'Infantry Pulse 3',slot:'skillC',desc:'Infantry allies start with -1 Special CD',spCost:200,trigger:'TurnStart',condition:'Always',effect:{tag:'heal',val:5}},
+{id:'hone_fliers',name:'Hone Fliers',slot:'skillC',desc:'Grants Flying allies ATK/SPD+6 at turn start',spCost:200,trigger:'TurnStart',condition:'Always',effect:{tag:'buff_atk',val:6}},
+{id:'ward_fliers',name:'Ward Fliers',slot:'skillC',desc:'Grants Flying allies DEF/RES+4 during combat',spCost:200,trigger:'TurnStart',condition:'Always',effect:{tag:'buff_def',val:4}},
+{id:'savage_blow',name:'Savage Blow 3',slot:'skillC',desc:'After combat: deals 7 damage to foes within 2 spaces',spCost:180,trigger:'OnAttack',condition:'Always',effect:{tag:'burn',val:3}},
+{id:'breath_life',name:'Breath of Life 3',slot:'skillC',desc:'After combat: heals adjacent allies 7 HP',spCost:180,trigger:'OnAttack',condition:'Always',effect:{tag:'heal',val:3}},
+{id:'threaten_atk',name:'Threaten ATK 3',slot:'skillC',desc:'Inflicts ATK-5 on foes within 2 spaces at start of turn',spCost:180,trigger:'TurnStart',condition:'Always',effect:{tag:'buff_atk',val:-2}},
+{id:'odd_wave',name:'Odd ATK Wave 3',slot:'skillC',desc:'On odd turns: grants ATK+6 to unit and adjacent allies',spCost:200,trigger:'TurnStart',condition:'Always',effect:{tag:'buff_atk',val:4}},
+{id:'joint_hone',name:'Joint Hone SPD',slot:'skillC',desc:'Grants SPD+5 to unit and adjacent allies at turn start',spCost:200,trigger:'TurnStart',condition:'Always',effect:{tag:'buff_spd',val:3}},
+{id:'pulse_smoke',name:'Pulse Smoke 3',slot:'skillC',desc:'After combat: inflicts Guard on foes within 2 spaces',spCost:240,trigger:'OnAttack',condition:'Always',effect:{tag:'guard',val:0.1}},
+{id:'time_pulse',name:'Time\'s Pulse 3',slot:'skillC',desc:'At start of turn: if Special CD is max, -1 CD',spCost:240,trigger:'TurnStart',condition:'Always',effect:{tag:'heal',val:0}},
+{id:'rouse_atk_def',name:'Rouse ATK/DEF 3',slot:'skillC',desc:'If no adjacent allies at start of turn: ATK/DEF+6',spCost:200,trigger:'TurnStart',condition:'IsSolo',effect:{tag:'buff_atk',val:4}},
+{id:'def_smoke',name:'DEF Smoke 3',slot:'skillC',desc:'After combat: inflicts DEF-7 on foes near target',spCost:200,trigger:'OnAttack',condition:'Always',effect:{tag:'poison',val:2}},
+// === STATUS EFFECT SKILLS ===
+{id:'gravity3',name:'Gravity 3',slot:'skillB',desc:'After combat: target cannot move next turn',spCost:200,trigger:'OnAttack',condition:'Always',effect:{tag:'gravity',val:0}},
+{id:'panic3',name:'Panic 3',slot:'skillC',desc:'After combat: converts foe\'s buffs into penalties',spCost:200,trigger:'OnAttack',condition:'Always',effect:{tag:'panic',val:0}},
+{id:'triangle_adept3',name:'Triangle Adept 3',slot:'skillA',desc:'Weapon advantage/disadvantage becomes ±40% instead of ±20%',spCost:240,trigger:'OnAttack',condition:'Always',effect:{tag:'triangle_adept',val:0}},
+{id:'seal_atk3',name:'Seal ATK 3',slot:'skillB',desc:'After combat: inflicts ATK-7 on target',spCost:180,trigger:'OnAttack',condition:'Always',effect:{tag:'burn',val:3}},
+{id:'seal_spd3',name:'Seal SPD 3',slot:'skillB',desc:'After combat: inflicts SPD-7 on target',spCost:180,trigger:'OnAttack',condition:'Always',effect:{tag:'freeze',val:0}},
+{id:'dull_close3',name:'Dull Close 3',slot:'skillB',desc:'Neutralizes foe\'s bonuses during combat at melee',spCost:200,trigger:'OnDefend',condition:'Always',effect:{tag:'guard',val:0.15}},
+{id:'dull_ranged3',name:'Dull Ranged 3',slot:'skillB',desc:'Neutralizes foe\'s bonuses during combat at range',spCost:200,trigger:'OnDefend',condition:'Always',effect:{tag:'guard',val:0.15}},
+// === MOVEMENT SKILLS ===
+{id:'pass3',name:'Pass 3',slot:'skillB',desc:'Unit can move through foes during combat phase',spCost:200,trigger:'OnMove',condition:'Always',effect:{tag:'pass',val:0}},
+{id:'groundsweep3',name:'Ground Sweep 3',slot:'skillB',desc:'After melee combat: foe cannot counterattack and loses 5 HP',spCost:220,trigger:'OnAttack',condition:'Always',effect:{tag:'poison',val:5}},
+{id:'armor_march3',name:'Armor March 3',slot:'skillC',desc:'If adjacent to armored ally: unit and ally gain +1 movement',spCost:180,trigger:'TurnStart',condition:'IsArmored',effect:{tag:'buff_spd',val:2}},
+{id:'flier_guidance3',name:'Flier Guidance 3',slot:'skillC',desc:'Flying allies within 2 spaces gain +1 movement',spCost:180,trigger:'TurnStart',condition:'Always',effect:{tag:'buff_spd',val:2}},
+// === DAMAGE REDUCTION SKILLS ===
+{id:'spd_def_link3',name:'SPD/DEF Link 3',slot:'skillB',desc:'After using assist: SPD/DEF+6 self and target',spCost:200,trigger:'OnDefend',condition:'AdjacentAlly',effect:{tag:'buff_def',val:6}},
+{id:'spd_smoke3',name:'SPD Smoke 3',slot:'skillC',desc:'After combat: foes within 2 spaces lose SPD-7',spCost:200,trigger:'OnAttack',condition:'Always',effect:{tag:'burn',val:2}},
+{id:'brash_assault3',name:'Brash Assault 3',slot:'skillB',desc:'If HP<50%: unit always initiates follow-up when attacking',spCost:180,trigger:'OnAttack',condition:'HP<50%',effect:{tag:'brave',val:0}},
+{id:'bold_fighter3',name:'Bold Fighter 3',slot:'skillB',desc:'When unit initiates: grants guaranteed follow-up and special acceleration',spCost:240,trigger:'OnAttack',condition:'IsArmored',effect:{tag:'brave',val:0}},
+{id:'vengeful_fighter3',name:'Vengeful Fighter 3',slot:'skillB',desc:'When foe initiates: guaranteed follow-up if HP>50%',spCost:240,trigger:'OnDefend',condition:'HP>50%',effect:{tag:'brave',val:2}},
+{id:'dodge3',name:'Dodge 3',slot:'skillB',desc:'If SPD > foe: reduces damage taken by 35%',spCost:220,trigger:'OnDefend',condition:'Speed>Target',effect:{tag:'spd_reduction',val:0.35}},
+{id:'mystic_boost3',name:'Mystic Boost 3',slot:'skillB',desc:'Disables foe\'s skills that reduce damage; unit heals 6 HP after combat',spCost:200,trigger:'OnDefend',condition:'Always',effect:{tag:'heal',val:6}},
+// === SPECTRUM / POWER SKILLS ===
+{id:'atk_res_solo3',name:'ATK/RES Solo 3',slot:'skillA',desc:'If no adjacent allies: ATK/RES+6',spCost:240,trigger:'OnAttack',condition:'NoAdjacentAlly',effect:{tag:'buff_atk',val:6}},
+{id:'triple_threat',name:'Triple Threat',slot:'skillA',desc:'Grants ATK/SPD/DEF+4 when initiating combat',spCost:280,trigger:'OnAttack',condition:'Always',effect:{tag:'spectrum',val:4}},
+{id:'life_and_death3',name:'Life and Death 3',slot:'skillA',desc:'ATK/SPD+6, DEF/RES-5',spCost:240,trigger:'OnAttack',condition:'Always',effect:{tag:'buff_atk',val:6}},
+{id:'swift_sparrow3',name:'Swift Sparrow 3',slot:'skillA',desc:'If unit initiates: ATK+6 and SPD+7',spCost:280,trigger:'OnAttack',condition:'Always',effect:{tag:'buff_atk',val:6}},
+{id:'distant_pressure',name:'Distant Pressure',slot:'skillA',desc:'If foe is 2+ spaces away: ATK/SPD+5 in combat',spCost:240,trigger:'OnAttack',condition:'Always',effect:{tag:'buff_atk',val:5}},
+{id:'fury4',name:'Fury 4',slot:'skillA',desc:'ATK/SPD/DEF/RES+4; unit takes 8 damage after combat',spCost:280,trigger:'OnAttack',condition:'Always',effect:{tag:'spectrum',val:4}},
+// === C SLOT SUPPORT SKILLS ===
+{id:'atk_tactic3',name:'ATK Tactic 3',slot:'skillC',desc:'At start of turn: grants ATK+6 to allies with varied movement types',spCost:200,trigger:'TurnStart',condition:'Always',effect:{tag:'buff_atk',val:4}},
+{id:'spd_tactic3',name:'SPD Tactic 3',slot:'skillC',desc:'At start of turn: grants SPD+6 to allies with varied movement types',spCost:200,trigger:'TurnStart',condition:'Always',effect:{tag:'buff_spd',val:4}},
+{id:'infantry_pulse3',name:'Infantry Pulse 3',slot:'skillC',desc:'At start of turn: if unit has more HP: -1 Special CD for infantry allies',spCost:200,trigger:'TurnStart',condition:'Always',effect:{tag:'heal',val:0}},
+{id:'chill_atk3',name:'Chill ATK 3',slot:'skillC',desc:'At start of turn: inflicts ATK-7 on foe with highest ATK',spCost:200,trigger:'TurnStart',condition:'Always',effect:{tag:'chill_atk',val:7}},
+{id:'chill_spd3',name:'Chill SPD 3',slot:'skillC',desc:'At start of turn: inflicts SPD-7 on foe with highest SPD',spCost:200,trigger:'TurnStart',condition:'Always',effect:{tag:'chill_spd',val:7}},
+{id:'ward_cavalry',name:'Ward Cavalry',slot:'skillC',desc:'Grants cavalry allies within 2 spaces DEF/RES+4',spCost:180,trigger:'TurnStart',condition:'Always',effect:{tag:'buff_def',val:3}},
+{id:'hone_atk4',name:'Hone ATK 4',slot:'skillC',desc:'Grants ATK+7 to all allies within 2 spaces at start of turn',spCost:200,trigger:'TurnStart',condition:'Always',effect:{tag:'buff_atk',val:5}},
+{id:'goad_armored',name:'Goad Armored',slot:'skillC',desc:'Grants armored allies within 2 spaces ATK/SPD+4',spCost:200,trigger:'TurnStart',condition:'IsArmored',effect:{tag:'buff_atk',val:4}},
+// === SPECIAL BOOST SKILLS (Seal slot appropriate) ===
+{id:'atk_spd_push3',name:'ATK/SPD Push 3',slot:'skillS',desc:'If HP=100%: ATK/SPD+5, unit takes 1 damage after combat',spCost:160,trigger:'OnAttack',condition:'Always',effect:{tag:'buff_atk',val:5}},
+{id:'spd_def_push3',name:'SPD/DEF Push 3',slot:'skillS',desc:'If HP=100%: SPD/DEF+5, unit takes 1 damage after combat',spCost:160,trigger:'OnDefend',condition:'Always',effect:{tag:'buff_def',val:4}},
+{id:'speed_ploy3',name:'Speed Ploy 3',slot:'skillS',desc:'At start of turn: inflicts SPD-5 on foes in cardinal directions with lower RES',spCost:160,trigger:'TurnStart',condition:'Always',effect:{tag:'burn',val:2}},
+{id:'atk_smoke_s',name:'ATK Smoke 3 (S)',slot:'skillS',desc:'After combat: foes within 2 spaces lose ATK-7 through next action',spCost:160,trigger:'OnAttack',condition:'Always',effect:{tag:'poison',val:2}},
+];
+EXTRA_SKILLS.forEach(s=>LEARNABLE_SKILLS.push(s));
+
+// ═══ TOOLTIP SYSTEM (hover + Android long-press) ═════════════
+let _ttTimer=0;let _ttEl=null;
+
+function initTooltips(){
+// Create tooltip element
+if(!document.getElementById('gameTooltip')){
+const tt=document.createElement('div');
+tt.id='gameTooltip';
+tt.style.cssText='position:fixed;z-index:10000;background:rgba(6,8,14,.95);border:1px solid var(--border);border-radius:8px;padding:8px 12px;font-size:.65rem;color:var(--text);max-width:260px;pointer-events:none;opacity:0;transition:opacity .15s;font-family:var(--mono);line-height:1.5;backdrop-filter:blur(8px);box-shadow:0 4px 20px rgba(0,0,0,.6)';
+document.body.appendChild(tt);
+_ttEl=tt;
+}
+// Delegate hover + long-press on [data-tip] elements
+document.addEventListener('mouseover',e=>{
+if(!e.target||!e.target.closest)return;
+const target=e.target.closest('[data-tip]');
+if(target)showTooltip(target.dataset.tip,e);
+});
+document.addEventListener('mouseout',e=>{
+if(!e.target||!e.target.closest)return;
+if(e.target.closest('[data-tip]'))hideTooltip();
+});
+document.addEventListener('mousemove',e=>{
+if(_ttEl&&_ttEl.style.opacity==='1'){
+_ttEl.style.left=Math.min(e.clientX+12,window.innerWidth-270)+'px';
+_ttEl.style.top=Math.min(e.clientY+12,window.innerHeight-80)+'px';
+}
+});
+// Android long-press
+document.addEventListener('touchstart',e=>{
+if(!e.target||!e.target.closest)return;
+const target=e.target.closest('[data-tip]');
+if(target){
+_ttTimer=setTimeout(()=>{
+const touch=e.touches[0];
+showTooltip(target.dataset.tip,{clientX:touch.clientX,clientY:touch.clientY});
+},500);
+}
+},{passive:true});
+document.addEventListener('touchend',()=>{clearTimeout(_ttTimer);hideTooltip();},{passive:true});
+document.addEventListener('touchmove',()=>{clearTimeout(_ttTimer);hideTooltip();},{passive:true});
+}
+
+function showTooltip(text,e){
+if(!_ttEl)_ttEl=document.getElementById('gameTooltip');
+if(!_ttEl)return;
+_ttEl.textContent=text;
+_ttEl.style.left=Math.min(e.clientX+12,window.innerWidth-270)+'px';
+_ttEl.style.top=Math.min(e.clientY+12,window.innerHeight-80)+'px';
+_ttEl.style.opacity='1';
+}
+
+function hideTooltip(){
+if(_ttEl)_ttEl.style.opacity='0';
+}
+
+// ═══ TOAST ══════════════════════════════════════════════════
+let toastTimer;
+function toast(msg,type=''){
+        const icons = { ok: '✓ ', err: '✕ ', gold: '★ ' };
+        const prefix = icons[type] || '';
+    if(typeof msg === 'string') {
+        msg = msg.replace(/\bAP\b/g, 'Flux');
+        msg = msg.replace(/\bApex Token\b/g, 'Zenith Mark');
+        msg = msg.replace(/\bAPEX TOKEN\b/g, 'ZENITH MARK');
+        msg = msg.replace(/\bshards\b/g, 'Prisms');
+        msg = msg.replace(/\bSH\b(?=[^a-zA-Z]|$)/g, 'PR');
+    }
+const t=document.getElementById('toast');t.textContent=msg;t.className='toast show '+(type||'');
+clearTimeout(toastTimer);toastTimer=setTimeout(()=>t.classList.remove('show'),2400);
+}
+
+// Bug #52: Prevent accidental file drops outside the drop zone from navigating away
+document.addEventListener('dragover',e=>e.preventDefault());
+document.addEventListener('drop',e=>e.preventDefault());
+
+// ═══ INIT ═══════════════════════════════════════════════════
+async function init(){
+initPlaceholders();
+await loadGame();
+if(!S.images.length)initPlaceholders();
+initQuests();
+if(typeof initTooltips==='function')initTooltips();
+updateEloDisplay();
+updateHomeScreen();
+updateQuestBadge();
+const hintBtn=document.getElementById('tutHintBtn');
+if(hintBtn)hintBtn.style.display='flex';
+// Let login bonus appear first, then tutorial after a longer delay so they don't overlap
+setTimeout(checkLoginBonus,800);
+if(S.totalBattles===0&&S.roster.length===0&&!localStorage.getItem('apex_tut_done')){
+  setTimeout(()=>{startTutorial();},3000);
+}
+}
+init();
+// Auto-start music if sound was already enabled from save
+if(S.soundOn){ try { bgm.start(); } catch(e){} }
+
+// --- INJECTED MOBILE NATIVE SUPPORT JS ---
+// 1. Force a resize and scroll-reset when rotating the phone
+window.addEventListener('orientationchange', () => {
+    setTimeout(() => {
+        window.scrollTo(0,0);
+        if(typeof resizeCanvas === 'function') resizeCanvas();
+    }, 200);
+});
+
+// 2. Fix Touch Interactions for Battle (The "Tap to Move" Fix)
+const battleCvs = document.getElementById('battleCanvas');
+if(battleCvs) {
+    // We handle touchstart manually to bridge the gap between "Touch" and the game's "Click" logic
+    battleCvs.addEventListener('touchstart', (e) => {
+        if(e.target !== battleCvs) return;
+        
+        // Prevent default to stop scrolling/zooming, BUT...
+        e.preventDefault(); 
+        
+        // ...manually trigger the game logic with the touch coordinates
+        const t = e.changedTouches[0]; 
+        
+        if(typeof battleClick === 'function') {
+            // Create a fake event object that looks like a mouse click
+            battleClick({
+                clientX: t.clientX,
+                clientY: t.clientY
+            });
+        }
+    }, {passive: false});
+
+    // Prevent scrolling while dragging finger on map
+    battleCvs.addEventListener('touchmove', (e) => {
+        if(e.target === battleCvs) e.preventDefault();
+    }, {passive: false});
+}
+
+// 3. Prevent accidental double-tap zooming on buttons
+document.addEventListener('dblclick', function(event) {
+    event.preventDefault();
+}, { passive: false });
+// --- END INJECTED JS ---
+
+
+const ITEM_DB = [{"id":"item_1","name":"ATK+2 Ring","desc":"Grants ATK+2","category":"stat_booster","rarity":"D","effect":{"type":"stat_boost","stat":"atk","val":2},"tier":1},{"id":"item_2","name":"ATK+4 Ring","desc":"Grants ATK+4","category":"stat_booster","rarity":"C","effect":{"type":"stat_boost","stat":"atk","val":4},"tier":2},{"id":"item_3","name":"ATK+6 Crown","desc":"Grants ATK+6","category":"stat_booster","rarity":"B","effect":{"type":"stat_boost","stat":"atk","val":6},"tier":3},{"id":"item_4","name":"ATK+9 Crown","desc":"Grants ATK+9","category":"stat_booster","rarity":"A","effect":{"type":"stat_boost","stat":"atk","val":9},"tier":4},{"id":"item_5","name":"ATK+13 Godstone","desc":"Grants ATK+13","category":"stat_booster","rarity":"S","effect":{"type":"stat_boost","stat":"atk","val":13},"tier":5},{"id":"item_6","name":"DEF+2 Ring","desc":"Grants DEF+2","category":"stat_booster","rarity":"D","effect":{"type":"stat_boost","stat":"def","val":2},"tier":1},{"id":"item_7","name":"DEF+4 Ring","desc":"Grants DEF+4","category":"stat_booster","rarity":"C","effect":{"type":"stat_boost","stat":"def","val":4},"tier":2},{"id":"item_8","name":"DEF+6 Crown","desc":"Grants DEF+6","category":"stat_booster","rarity":"B","effect":{"type":"stat_boost","stat":"def","val":6},"tier":3},{"id":"item_9","name":"DEF+9 Crown","desc":"Grants DEF+9","category":"stat_booster","rarity":"A","effect":{"type":"stat_boost","stat":"def","val":9},"tier":4},{"id":"item_10","name":"DEF+13 Godstone","desc":"Grants DEF+13","category":"stat_booster","rarity":"S","effect":{"type":"stat_boost","stat":"def","val":13},"tier":5},{"id":"item_11","name":"SPD+2 Ring","desc":"Grants SPD+2","category":"stat_booster","rarity":"D","effect":{"type":"stat_boost","stat":"spd","val":2},"tier":1},{"id":"item_12","name":"SPD+4 Ring","desc":"Grants SPD+4","category":"stat_booster","rarity":"C","effect":{"type":"stat_boost","stat":"spd","val":4},"tier":2},{"id":"item_13","name":"SPD+6 Crown","desc":"Grants SPD+6","category":"stat_booster","rarity":"B","effect":{"type":"stat_boost","stat":"spd","val":6},"tier":3},{"id":"item_14","name":"SPD+9 Crown","desc":"Grants SPD+9","category":"stat_booster","rarity":"A","effect":{"type":"stat_boost","stat":"spd","val":9},"tier":4},{"id":"item_15","name":"SPD+13 Godstone","desc":"Grants SPD+13","category":"stat_booster","rarity":"S","effect":{"type":"stat_boost","stat":"spd","val":13},"tier":5},{"id":"item_16","name":"MAG+2 Ring","desc":"Grants MAG+2","category":"stat_booster","rarity":"D","effect":{"type":"stat_boost","stat":"mag","val":2},"tier":1},{"id":"item_17","name":"MAG+4 Ring","desc":"Grants MAG+4","category":"stat_booster","rarity":"C","effect":{"type":"stat_boost","stat":"mag","val":4},"tier":2},{"id":"item_18","name":"MAG+6 Crown","desc":"Grants MAG+6","category":"stat_booster","rarity":"B","effect":{"type":"stat_boost","stat":"mag","val":6},"tier":3},{"id":"item_19","name":"MAG+9 Crown","desc":"Grants MAG+9","category":"stat_booster","rarity":"A","effect":{"type":"stat_boost","stat":"mag","val":9},"tier":4},{"id":"item_20","name":"MAG+13 Godstone","desc":"Grants MAG+13","category":"stat_booster","rarity":"S","effect":{"type":"stat_boost","stat":"mag","val":13},"tier":5},{"id":"item_21","name":"RES+2 Ring","desc":"Grants RES+2","category":"stat_booster","rarity":"D","effect":{"type":"stat_boost","stat":"res","val":2},"tier":1},{"id":"item_22","name":"RES+4 Ring","desc":"Grants RES+4","category":"stat_booster","rarity":"C","effect":{"type":"stat_boost","stat":"res","val":4},"tier":2},{"id":"item_23","name":"RES+6 Crown","desc":"Grants RES+6","category":"stat_booster","rarity":"B","effect":{"type":"stat_boost","stat":"res","val":6},"tier":3},{"id":"item_24","name":"RES+9 Crown","desc":"Grants RES+9","category":"stat_booster","rarity":"A","effect":{"type":"stat_boost","stat":"res","val":9},"tier":4},{"id":"item_25","name":"RES+13 Godstone","desc":"Grants RES+13","category":"stat_booster","rarity":"S","effect":{"type":"stat_boost","stat":"res","val":13},"tier":5},{"id":"item_26","name":"HP+2 Ring","desc":"Grants HP+2","category":"stat_booster","rarity":"D","effect":{"type":"stat_boost","stat":"maxHp","val":2},"tier":1},{"id":"item_27","name":"HP+4 Ring","desc":"Grants HP+4","category":"stat_booster","rarity":"C","effect":{"type":"stat_boost","stat":"maxHp","val":4},"tier":2},{"id":"item_28","name":"HP+6 Crown","desc":"Grants HP+6","category":"stat_booster","rarity":"B","effect":{"type":"stat_boost","stat":"maxHp","val":6},"tier":3},{"id":"item_29","name":"HP+9 Crown","desc":"Grants HP+9","category":"stat_booster","rarity":"A","effect":{"type":"stat_boost","stat":"maxHp","val":9},"tier":4},{"id":"item_30","name":"HP+13 Godstone","desc":"Grants HP+13","category":"stat_booster","rarity":"S","effect":{"type":"stat_boost","stat":"maxHp","val":13},"tier":5},{"id":"item_31","name":"Fire Shard","desc":"Boosts Fire damage by 15%","category":"elemental","rarity":"B","effect":{"type":"elem_amp","element":"fire","val":0.15},"tier":1},{"id":"item_32","name":"Fire Prism","desc":"Boosts Fire damage by 30%","category":"elemental","rarity":"S","effect":{"type":"elem_amp","element":"fire","val":0.3},"tier":2},{"id":"item_33","name":"Ice Shard","desc":"Boosts Ice damage by 15%","category":"elemental","rarity":"B","effect":{"type":"elem_amp","element":"ice","val":0.15},"tier":1},{"id":"item_34","name":"Ice Prism","desc":"Boosts Ice damage by 30%","category":"elemental","rarity":"S","effect":{"type":"elem_amp","element":"ice","val":0.3},"tier":2},{"id":"item_35","name":"Thunder Shard","desc":"Boosts Thunder damage by 15%","category":"elemental","rarity":"B","effect":{"type":"elem_amp","element":"thunder","val":0.15},"tier":1},{"id":"item_36","name":"Thunder Prism","desc":"Boosts Thunder damage by 30%","category":"elemental","rarity":"S","effect":{"type":"elem_amp","element":"thunder","val":0.3},"tier":2},{"id":"item_37","name":"Wind Shard","desc":"Boosts Wind damage by 15%","category":"elemental","rarity":"B","effect":{"type":"elem_amp","element":"wind","val":0.15},"tier":1},{"id":"item_38","name":"Wind Prism","desc":"Boosts Wind damage by 30%","category":"elemental","rarity":"S","effect":{"type":"elem_amp","element":"wind","val":0.3},"tier":2},{"id":"item_39","name":"Light Shard","desc":"Boosts Light damage by 15%","category":"elemental","rarity":"B","effect":{"type":"elem_amp","element":"light","val":0.15},"tier":1},{"id":"item_40","name":"Light Prism","desc":"Boosts Light damage by 30%","category":"elemental","rarity":"S","effect":{"type":"elem_amp","element":"light","val":0.3},"tier":2},{"id":"item_41","name":"Dark Shard","desc":"Boosts Dark damage by 15%","category":"elemental","rarity":"B","effect":{"type":"elem_amp","element":"dark","val":0.15},"tier":1},{"id":"item_42","name":"Dark Prism","desc":"Boosts Dark damage by 30%","category":"elemental","rarity":"S","effect":{"type":"elem_amp","element":"dark","val":0.3},"tier":2},{"id":"item_43","name":"Earth Shard","desc":"Boosts Earth damage by 15%","category":"elemental","rarity":"B","effect":{"type":"elem_amp","element":"earth","val":0.15},"tier":1},{"id":"item_44","name":"Earth Prism","desc":"Boosts Earth damage by 30%","category":"elemental","rarity":"S","effect":{"type":"elem_amp","element":"earth","val":0.3},"tier":2},{"id":"item_45","name":"Water Shard","desc":"Boosts Water damage by 15%","category":"elemental","rarity":"B","effect":{"type":"elem_amp","element":"water","val":0.15},"tier":1},{"id":"item_46","name":"Water Prism","desc":"Boosts Water damage by 30%","category":"elemental","rarity":"S","effect":{"type":"elem_amp","element":"water","val":0.3},"tier":2},{"id":"item_47","name":"Vampiric Fang","desc":"Heals 15% of damage dealt","category":"passive","rarity":"B","effect":{"type":"lifesteal","val":0.15},"tier":3},{"id":"item_48","name":"Thorned Shield","desc":"Reflects 20% damage taken","category":"passive","rarity":"A","effect":{"type":"reflect","val":0.2},"tier":4},{"id":"item_49","name":"Quicksilver Boots","desc":"Grants +1 Movement","category":"passive","rarity":"A","effect":{"type":"mov_boost","val":1},"tier":4},{"id":"item_50","name":"Iron Will Pendant","desc":"Reduces first hit by 50%","category":"passive","rarity":"S","effect":{"type":"first_hit_shield","val":0.5},"tier":5},{"id":"item_51","name":"Phoenix Feather","desc":"Revives once with 25% HP","category":"passive","rarity":"S","effect":{"type":"revive","val":0.25},"tier":5},{"id":"item_52","name":"Assassins Mark","desc":"Crits deal 2.5x instead of 1.5x","category":"passive","rarity":"A","effect":{"type":"crit_mult","val":2.5},"tier":4},{"id":"item_53","name":"Lucky Clover","desc":"+15% crit chance","category":"passive","rarity":"B","effect":{"type":"crit_chance","val":0.15},"tier":3},{"id":"item_54","name":"Berserker Charm","desc":"ATK+30% when HP<30%","category":"passive","rarity":"A","effect":{"type":"low_hp_atk","val":0.3},"tier":4},{"id":"item_55","name":"Aegis Stone","desc":"DEF+50% when HP<40%","category":"passive","rarity":"A","effect":{"type":"low_hp_def","val":0.5},"tier":4},{"id":"item_56","name":"Miracle Bead","desc":"Survive lethal hit with 1HP once","category":"passive","rarity":"S","effect":{"type":"miracle","val":1},"tier":5},{"id":"item_57","name":"Warding Charm","desc":"Immune to Freeze","category":"passive","rarity":"B","effect":{"type":"immune_freeze","val":1},"tier":3},{"id":"item_58","name":"Cleansing Bell","desc":"Immune to Poison and Burn","category":"passive","rarity":"B","effect":{"type":"immune_dot","val":1},"tier":3},{"id":"item_59","name":"Mind Shield","desc":"Immune to Panic","category":"passive","rarity":"C","effect":{"type":"immune_panic","val":1},"tier":2},{"id":"item_60","name":"Gravity Belt","desc":"Immune to Gravity","category":"passive","rarity":"C","effect":{"type":"immune_gravity","val":1},"tier":2},{"id":"item_61","name":"Firestarter Gem","desc":"Attacks inflict 5 burn damage","category":"passive","rarity":"B","effect":{"type":"on_hit_burn","val":5},"tier":3},{"id":"item_62","name":"Frostbite Ring","desc":"Attacks have 20% chance to Freeze","category":"passive","rarity":"A","effect":{"type":"on_hit_freeze","val":0.2},"tier":4},{"id":"item_63","name":"Toxic Needle","desc":"Attacks inflict 4 poison","category":"passive","rarity":"B","effect":{"type":"on_hit_poison","val":4},"tier":3},{"id":"item_64","name":"Panic Whistle","desc":"Attacks have 25% chance to Panic","category":"passive","rarity":"A","effect":{"type":"on_hit_panic","val":0.25},"tier":4},{"id":"item_65","name":"Pursuit Ring","desc":"Always double attack when initiating","category":"passive","rarity":"S","effect":{"type":"always_double","val":1},"tier":5},{"id":"item_66","name":"Brace Shield","desc":"Never get doubled when defending","category":"passive","rarity":"A","effect":{"type":"anti_double","val":1},"tier":4},{"id":"item_67","name":"Distant Scope","desc":"Ranged weapon range +1","category":"passive","rarity":"S","effect":{"type":"range_boost","val":1},"tier":5},{"id":"item_68","name":"Close Guard Pin","desc":"Can counter melee from range","category":"passive","rarity":"S","effect":{"type":"close_counter","val":1},"tier":5},{"id":"item_69","name":"Far Guard Pin","desc":"Can counter ranged from melee","category":"passive","rarity":"S","effect":{"type":"distant_counter","val":1},"tier":5},{"id":"item_70","name":"Healers Mace","desc":"Heals 8 HP at turn start","category":"passive","rarity":"B","effect":{"type":"regen","val":8},"tier":3},{"id":"item_71","name":"Warriors Brand","desc":"ATK+5 when initiating","category":"passive","rarity":"B","effect":{"type":"initiate_atk","val":5},"tier":3},{"id":"item_72","name":"Guardians Brand","desc":"DEF+5 when defending","category":"passive","rarity":"B","effect":{"type":"defend_def","val":5},"tier":3},{"id":"item_73","name":"Snipers Eye","desc":"Ignore 20% of enemy DEF","category":"passive","rarity":"A","effect":{"type":"def_pierce","val":0.2},"tier":4},{"id":"item_74","name":"Mages Lens","desc":"Ignore 20% of enemy RES","category":"passive","rarity":"A","effect":{"type":"res_pierce","val":0.2},"tier":4},{"id":"item_75","name":"Dancers Ribbon","desc":"Assist skills grant ATK+3","category":"passive","rarity":"B","effect":{"type":"assist_buff","val":3},"tier":3},{"id":"item_76","name":"Commanders Seal","desc":"All allies within 2 get +2 all stats","category":"passive","rarity":"S","effect":{"type":"aura_all","val":2},"tier":5},{"id":"item_77","name":"Sol Badge","desc":"Special charges -1 at battle start","category":"passive","rarity":"A","effect":{"type":"cd_reduce","val":1},"tier":4},{"id":"item_78","name":"Luna Badge","desc":"Specials deal +20% bonus damage","category":"passive","rarity":"A","effect":{"type":"spec_boost","val":0.2},"tier":4},{"id":"item_79","name":"Galeforce Ring","desc":"25% chance of extra action after kill","category":"passive","rarity":"S","effect":{"type":"extra_action_chance","val":0.25},"tier":5},{"id":"item_80","name":"Fortress Token","desc":"Terrain DEF bonus doubled","category":"passive","rarity":"B","effect":{"type":"terrain_def_mult","val":2},"tier":3},{"id":"item_81","name":"Wind Talisman","desc":"Terrain movement penalties halved","category":"passive","rarity":"B","effect":{"type":"terrain_mov_reduce","val":0.5},"tier":3},{"id":"item_82","name":"Bond Bracelet","desc":"ATK/DEF+4 when adjacent to ally","category":"passive","rarity":"A","effect":{"type":"bond_boost","val":4},"tier":4},{"id":"item_83","name":"Solo Earring","desc":"ATK/SPD+5 when no adjacent allies","category":"passive","rarity":"A","effect":{"type":"solo_boost","val":5},"tier":4},{"id":"item_84","name":"Shield of Ruin","desc":"After combat, enemy ATK-5 next turn","category":"passive","rarity":"B","effect":{"type":"post_combat_debuff_atk","val":5},"tier":3},{"id":"item_85","name":"Chain of Binding","desc":"After combat, enemy SPD-5 next turn","category":"passive","rarity":"B","effect":{"type":"post_combat_debuff_spd","val":5},"tier":3},{"id":"item_86","name":"Null Stone","desc":"Neutralizes enemy bonus stats in combat","category":"passive","rarity":"S","effect":{"type":"null_bonuses","val":1},"tier":5},{"id":"item_87","name":"War Drum","desc":"All allies ATK+3 at battle start","category":"battle_start","rarity":"B","effect":{"type":"start_buff_atk","val":3},"tier":3},{"id":"item_88","name":"Shield Wall Banner","desc":"All allies DEF+3 at battle start","category":"battle_start","rarity":"B","effect":{"type":"start_buff_def","val":3},"tier":3},{"id":"item_89","name":"Swiftwind Horn","desc":"All allies SPD+3 at battle start","category":"battle_start","rarity":"B","effect":{"type":"start_buff_spd","val":3},"tier":3},{"id":"item_90","name":"Barrier Scroll","desc":"All allies gain Shield at battle start","category":"battle_start","rarity":"A","effect":{"type":"start_shield","val":1},"tier":4},{"id":"item_91","name":"Ambush Cloak","desc":"Unit starts with Special fully charged","category":"battle_start","rarity":"A","effect":{"type":"start_special_ready","val":1},"tier":4},{"id":"item_92","name":"Vanguard Badge","desc":"Unit acts first regardless of phase","category":"battle_start","rarity":"S","effect":{"type":"first_strike","val":1},"tier":5},{"id":"item_93","name":"Smokescreen Bomb","desc":"All enemies lose 5 HP at battle start","category":"battle_start","rarity":"A","effect":{"type":"start_dmg_enemies","val":5},"tier":4},{"id":"item_94","name":"Flash Grenade","desc":"All enemies SPD-4 at battle start","category":"battle_start","rarity":"A","effect":{"type":"start_debuff_spd","val":4},"tier":4},{"id":"item_95","name":"Hex Orb","desc":"Randomly panic one enemy at start","category":"battle_start","rarity":"B","effect":{"type":"start_panic","val":1},"tier":3},{"id":"item_96","name":"Summon Stone","desc":"Spawn a 50% stat clone at start","category":"battle_start","rarity":"S","effect":{"type":"start_clone","val":0.5},"tier":5},{"id":"item_97","name":"Rally Standard","desc":"All allies +2 all stats at start","category":"battle_start","rarity":"A","effect":{"type":"start_spectrum","val":2},"tier":4},{"id":"item_98","name":"Feint Dagger","desc":"Invisible for first turn","category":"battle_start","rarity":"A","effect":{"type":"stealth_start","val":1},"tier":4},{"id":"item_99","name":"Trap Kit","desc":"Place a trap on a random tile","category":"battle_start","rarity":"B","effect":{"type":"place_trap","val":1},"tier":3},{"id":"item_100","name":"Scout Map","desc":"Reveals enemy movement ranges for 1 turn","category":"battle_start","rarity":"C","effect":{"type":"reveal_danger","val":1},"tier":2},{"id":"item_101","name":"Supply Cache","desc":"+15 AP at battle end win","category":"battle_start","rarity":"B","effect":{"type":"bonus_ap","val":15},"tier":3},{"id":"item_102","name":"EXP Scroll","desc":"Double EXP from this battle","category":"battle_start","rarity":"B","effect":{"type":"exp_mult","val":2},"tier":3},{"id":"item_103","name":"SP Charm","desc":"Double SP from this battle","category":"battle_start","rarity":"B","effect":{"type":"sp_mult","val":2},"tier":3},{"id":"item_104","name":"Gold Compass","desc":"Guaranteed item drop on win","category":"battle_start","rarity":"A","effect":{"type":"item_drop","val":1},"tier":4},{"id":"item_105","name":"Mercenary Contract","desc":"Spawn 1 extra allied unit","category":"battle_start","rarity":"S","effect":{"type":"extra_unit","val":1},"tier":5},{"id":"item_106","name":"Dimensional Key","desc":"+1 map size on all sides","category":"battle_start","rarity":"C","effect":{"type":"map_expand","val":1},"tier":2},{"id":"item_107","name":"Chrono Shard 1","desc":"Reduces Special cooldown by 1 at turn start","category":"cooldown","rarity":"B","effect":{"type":"cd_per_turn","val":1},"tier":3},{"id":"item_108","name":"Chrono Shard 2","desc":"Reduces Special cooldown by 1 at turn start","category":"cooldown","rarity":"B","effect":{"type":"cd_per_turn","val":1},"tier":3},{"id":"item_109","name":"Chrono Shard 3","desc":"Reduces Special cooldown by 1 at turn start","category":"cooldown","rarity":"B","effect":{"type":"cd_per_turn","val":1},"tier":3},{"id":"item_110","name":"Chrono Shard 4","desc":"Reduces Special cooldown by 1 at turn start","category":"cooldown","rarity":"B","effect":{"type":"cd_per_turn","val":1},"tier":3},{"id":"item_111","name":"Chrono Shard 5","desc":"Reduces Special cooldown by 1 at turn start","category":"cooldown","rarity":"B","effect":{"type":"cd_per_turn","val":1},"tier":3},{"id":"item_112","name":"Chrono Crystal 1","desc":"Reduces Special cooldown by 2 at turn start","category":"cooldown","rarity":"S","effect":{"type":"cd_per_turn","val":2},"tier":5},{"id":"item_113","name":"Chrono Crystal 2","desc":"Reduces Special cooldown by 2 at turn start","category":"cooldown","rarity":"S","effect":{"type":"cd_per_turn","val":2},"tier":5},{"id":"item_114","name":"Chrono Crystal 3","desc":"Reduces Special cooldown by 2 at turn start","category":"cooldown","rarity":"S","effect":{"type":"cd_per_turn","val":2},"tier":5},{"id":"item_115","name":"Chrono Crystal 4","desc":"Reduces Special cooldown by 2 at turn start","category":"cooldown","rarity":"S","effect":{"type":"cd_per_turn","val":2},"tier":5},{"id":"item_116","name":"Chrono Crystal 5","desc":"Reduces Special cooldown by 2 at turn start","category":"cooldown","rarity":"S","effect":{"type":"cd_per_turn","val":2},"tier":5},{"id":"item_117","name":"Sword Whetstone","desc":"Sword users: ATK+5","category":"weapon_specific","rarity":"B","effect":{"type":"weapon_stat","weapon":"Sword","stat":"atk","val":5},"tier":3},{"id":"item_118","name":"Sword Guard","desc":"Sword users: DEF+5","category":"weapon_specific","rarity":"B","effect":{"type":"weapon_stat","weapon":"Sword","stat":"def","val":5},"tier":3},{"id":"item_119","name":"Sword Swiftblade","desc":"Sword users: SPD+5","category":"weapon_specific","rarity":"A","effect":{"type":"weapon_stat","weapon":"Sword","stat":"spd","val":5},"tier":4},{"id":"item_120","name":"Lance Whetstone","desc":"Lance users: ATK+5","category":"weapon_specific","rarity":"B","effect":{"type":"weapon_stat","weapon":"Lance","stat":"atk","val":5},"tier":3},{"id":"item_121","name":"Lance Guard","desc":"Lance users: DEF+5","category":"weapon_specific","rarity":"B","effect":{"type":"weapon_stat","weapon":"Lance","stat":"def","val":5},"tier":3},{"id":"item_122","name":"Lance Swiftblade","desc":"Lance users: SPD+5","category":"weapon_specific","rarity":"A","effect":{"type":"weapon_stat","weapon":"Lance","stat":"spd","val":5},"tier":4},{"id":"item_123","name":"Axe Whetstone","desc":"Axe users: ATK+5","category":"weapon_specific","rarity":"B","effect":{"type":"weapon_stat","weapon":"Axe","stat":"atk","val":5},"tier":3},{"id":"item_124","name":"Axe Guard","desc":"Axe users: DEF+5","category":"weapon_specific","rarity":"B","effect":{"type":"weapon_stat","weapon":"Axe","stat":"def","val":5},"tier":3},{"id":"item_125","name":"Axe Swiftblade","desc":"Axe users: SPD+5","category":"weapon_specific","rarity":"A","effect":{"type":"weapon_stat","weapon":"Axe","stat":"spd","val":5},"tier":4},{"id":"item_126","name":"Bow Whetstone","desc":"Bow users: ATK+5","category":"weapon_specific","rarity":"B","effect":{"type":"weapon_stat","weapon":"Bow","stat":"atk","val":5},"tier":3},{"id":"item_127","name":"Bow Guard","desc":"Bow users: DEF+5","category":"weapon_specific","rarity":"B","effect":{"type":"weapon_stat","weapon":"Bow","stat":"def","val":5},"tier":3},{"id":"item_128","name":"Bow Swiftblade","desc":"Bow users: SPD+5","category":"weapon_specific","rarity":"A","effect":{"type":"weapon_stat","weapon":"Bow","stat":"spd","val":5},"tier":4},{"id":"item_129","name":"Dagger Whetstone","desc":"Dagger users: ATK+5","category":"weapon_specific","rarity":"B","effect":{"type":"weapon_stat","weapon":"Dagger","stat":"atk","val":5},"tier":3},{"id":"item_130","name":"Dagger Guard","desc":"Dagger users: DEF+5","category":"weapon_specific","rarity":"B","effect":{"type":"weapon_stat","weapon":"Dagger","stat":"def","val":5},"tier":3},{"id":"item_131","name":"Dagger Swiftblade","desc":"Dagger users: SPD+5","category":"weapon_specific","rarity":"A","effect":{"type":"weapon_stat","weapon":"Dagger","stat":"spd","val":5},"tier":4},{"id":"item_132","name":"LightMag Whetstone","desc":"LightMag users: ATK+5","category":"weapon_specific","rarity":"B","effect":{"type":"weapon_stat","weapon":"LightMag","stat":"atk","val":5},"tier":3},{"id":"item_133","name":"LightMag Guard","desc":"LightMag users: DEF+5","category":"weapon_specific","rarity":"B","effect":{"type":"weapon_stat","weapon":"LightMag","stat":"def","val":5},"tier":3},{"id":"item_134","name":"LightMag Swiftblade","desc":"LightMag users: SPD+5","category":"weapon_specific","rarity":"A","effect":{"type":"weapon_stat","weapon":"LightMag","stat":"spd","val":5},"tier":4},{"id":"item_135","name":"DarkMag Whetstone","desc":"DarkMag users: ATK+5","category":"weapon_specific","rarity":"B","effect":{"type":"weapon_stat","weapon":"DarkMag","stat":"atk","val":5},"tier":3},{"id":"item_136","name":"DarkMag Guard","desc":"DarkMag users: DEF+5","category":"weapon_specific","rarity":"B","effect":{"type":"weapon_stat","weapon":"DarkMag","stat":"def","val":5},"tier":3},{"id":"item_137","name":"DarkMag Swiftblade","desc":"DarkMag users: SPD+5","category":"weapon_specific","rarity":"A","effect":{"type":"weapon_stat","weapon":"DarkMag","stat":"spd","val":5},"tier":4},{"id":"item_138","name":"AnimaMag Whetstone","desc":"AnimaMag users: ATK+5","category":"weapon_specific","rarity":"B","effect":{"type":"weapon_stat","weapon":"AnimaMag","stat":"atk","val":5},"tier":3},{"id":"item_139","name":"AnimaMag Guard","desc":"AnimaMag users: DEF+5","category":"weapon_specific","rarity":"B","effect":{"type":"weapon_stat","weapon":"AnimaMag","stat":"def","val":5},"tier":3},{"id":"item_140","name":"AnimaMag Swiftblade","desc":"AnimaMag users: SPD+5","category":"weapon_specific","rarity":"A","effect":{"type":"weapon_stat","weapon":"AnimaMag","stat":"spd","val":5},"tier":4},{"id":"item_141","name":"Infantry Emblem","desc":"Infantry units: ATK+4","category":"move_specific","rarity":"B","effect":{"type":"move_stat","moveType":"Infantry","stat":"atk","val":4},"tier":3},{"id":"item_142","name":"Infantry Sigil","desc":"Infantry units: DEF+4","category":"move_specific","rarity":"B","effect":{"type":"move_stat","moveType":"Infantry","stat":"def","val":4},"tier":3},{"id":"item_143","name":"Infantry Crest","desc":"Infantry units: SPD+4","category":"move_specific","rarity":"A","effect":{"type":"move_stat","moveType":"Infantry","stat":"spd","val":4},"tier":4},{"id":"item_144","name":"Cavalry Emblem","desc":"Cavalry units: ATK+4","category":"move_specific","rarity":"B","effect":{"type":"move_stat","moveType":"Cavalry","stat":"atk","val":4},"tier":3},{"id":"item_145","name":"Cavalry Sigil","desc":"Cavalry units: DEF+4","category":"move_specific","rarity":"B","effect":{"type":"move_stat","moveType":"Cavalry","stat":"def","val":4},"tier":3},{"id":"item_146","name":"Cavalry Crest","desc":"Cavalry units: SPD+4","category":"move_specific","rarity":"A","effect":{"type":"move_stat","moveType":"Cavalry","stat":"spd","val":4},"tier":4},{"id":"item_147","name":"Flying Emblem","desc":"Flying units: ATK+4","category":"move_specific","rarity":"B","effect":{"type":"move_stat","moveType":"Flying","stat":"atk","val":4},"tier":3},{"id":"item_148","name":"Flying Sigil","desc":"Flying units: DEF+4","category":"move_specific","rarity":"B","effect":{"type":"move_stat","moveType":"Flying","stat":"def","val":4},"tier":3},{"id":"item_149","name":"Flying Crest","desc":"Flying units: SPD+4","category":"move_specific","rarity":"A","effect":{"type":"move_stat","moveType":"Flying","stat":"spd","val":4},"tier":4},{"id":"item_150","name":"Armored Emblem","desc":"Armored units: ATK+4","category":"move_specific","rarity":"B","effect":{"type":"move_stat","moveType":"Armored","stat":"atk","val":4},"tier":3},{"id":"item_151","name":"Armored Sigil","desc":"Armored units: DEF+4","category":"move_specific","rarity":"B","effect":{"type":"move_stat","moveType":"Armored","stat":"def","val":4},"tier":3},{"id":"item_152","name":"Armored Crest","desc":"Armored units: SPD+4","category":"move_specific","rarity":"A","effect":{"type":"move_stat","moveType":"Armored","stat":"spd","val":4},"tier":4},{"id":"item_153","name":"Falchion Shard","desc":"Effective vs Dragons; heals 10 HP every 3 turns","category":"legendary","rarity":"S","effect":{"type":"legendary_falchion","val":1},"tier":5},{"id":"item_154","name":"Binding Blade Gem","desc":"Triangle advantage becomes \u00b140%","category":"legendary","rarity":"S","effect":{"type":"legendary_binding","val":1},"tier":5},{"id":"item_155","name":"Armads Fragment","desc":"Guaranteed follow-up when HP>80%","category":"legendary","rarity":"S","effect":{"type":"legendary_armads","val":1},"tier":5},{"id":"item_156","name":"Tyrfing Piece","desc":"DEF+10 when HP<50%","category":"legendary","rarity":"S","effect":{"type":"legendary_tyrfing","val":1},"tier":5},{"id":"item_157","name":"Naga Scale","desc":"Immune to dragon effective damage; RES+5","category":"legendary","rarity":"S","effect":{"type":"legendary_naga","val":1},"tier":5},{"id":"item_158","name":"Book of Naga","desc":"All stats+3; immune to Panic","category":"legendary","rarity":"T0","effect":{"type":"legendary_booknaga","val":1},"tier":6},{"id":"item_159","name":"Ragnell Core","desc":"Can counter at any range; ATK+4","category":"legendary","rarity":"T0","effect":{"type":"legendary_ragnell","val":1},"tier":6},{"id":"item_160","name":"Gradivus Heart","desc":"Can counter at any range; heals 10 after combat","category":"legendary","rarity":"T0","effect":{"type":"legendary_gradivus","val":1},"tier":6},{"id":"item_161","name":"Siegmund Stone","desc":"ATK+6 when HP>90%","category":"legendary","rarity":"S","effect":{"type":"legendary_siegmund","val":1},"tier":5},{"id":"item_162","name":"Durandal Shard","desc":"ATK+8 when initiating","category":"legendary","rarity":"S","effect":{"type":"legendary_durandal","val":1},"tier":5},{"id":"item_163","name":"Sol Katti Edge","desc":"Desperation at HP<75%","category":"legendary","rarity":"S","effect":{"type":"legendary_solkatti","val":1},"tier":5},{"id":"item_164","name":"Aura Orb","desc":"Heals nearby allies 7HP after combat","category":"legendary","rarity":"S","effect":{"type":"legendary_aura","val":1},"tier":5},{"id":"item_165","name":"Excalibur Wind","desc":"Effective vs flying; SPD+5","category":"legendary","rarity":"S","effect":{"type":"legendary_excalibur","val":1},"tier":5},{"id":"item_166","name":"Forseti Gale","desc":"Guaranteed follow-up if SPD>foe+1","category":"legendary","rarity":"T0","effect":{"type":"legendary_forseti","val":1},"tier":6},{"id":"item_167","name":"Mjolnir Spark","desc":"Special cooldown -2; ATK+5","category":"legendary","rarity":"T0","effect":{"type":"legendary_mjolnir","val":1},"tier":6},{"id":"item_168","name":"Loptous Shadow","desc":"Halves all non-effective damage","category":"legendary","rarity":"T0","effect":{"type":"legendary_loptous","val":1},"tier":6},{"id":"item_169","name":"Chaos Manifest","desc":"All stats+5; take 10 after combat recoil","category":"legendary","rarity":"T0","effect":{"type":"legendary_chaos","val":1},"tier":6},{"id":"item_170","name":"Apex Crown","desc":"All stats+7; T0 exclusive item","category":"legendary","rarity":"T0","effect":{"type":"legendary_apex","val":1},"tier":6},{"id":"item_171","name":"Mystic ATK Tonic #171","desc":"Grants ATK+4 for 3 turns","category":"consumable","rarity":"C","effect":{"type":"temp_stat","stat":"atk","val":4,"duration":3},"tier":2},{"id":"item_172","name":"Mystic MAG Tonic #172","desc":"Grants MAG+4 for 3 turns","category":"consumable","rarity":"C","effect":{"type":"temp_stat","stat":"mag","val":4,"duration":3},"tier":2},{"id":"item_173","name":"Mystic MAG Tonic #173","desc":"Grants MAG+2 for 3 turns","category":"consumable","rarity":"C","effect":{"type":"temp_stat","stat":"mag","val":2,"duration":3},"tier":2},{"id":"item_174","name":"Mystic DEF Tonic #174","desc":"Grants DEF+4 for 3 turns","category":"consumable","rarity":"C","effect":{"type":"temp_stat","stat":"def","val":4,"duration":3},"tier":2},{"id":"item_175","name":"Mystic HP Tonic #175","desc":"Grants HP+5 for 3 turns","category":"consumable","rarity":"C","effect":{"type":"temp_stat","stat":"maxHp","val":5,"duration":3},"tier":2},{"id":"item_176","name":"Mystic DEF Tonic #176","desc":"Grants DEF+3 for 3 turns","category":"consumable","rarity":"C","effect":{"type":"temp_stat","stat":"def","val":3,"duration":3},"tier":2},{"id":"item_177","name":"Mystic HP Tonic #177","desc":"Grants HP+3 for 3 turns","category":"consumable","rarity":"C","effect":{"type":"temp_stat","stat":"maxHp","val":3,"duration":3},"tier":2},{"id":"item_178","name":"Mystic ATK Tonic #178","desc":"Grants ATK+2 for 3 turns","category":"consumable","rarity":"C","effect":{"type":"temp_stat","stat":"atk","val":2,"duration":3},"tier":2},{"id":"item_179","name":"Mystic RES Tonic #179","desc":"Grants RES+1 for 3 turns","category":"consumable","rarity":"C","effect":{"type":"temp_stat","stat":"res","val":1,"duration":3},"tier":2},{"id":"item_180","name":"Mystic MAG Tonic #180","desc":"Grants MAG+2 for 3 turns","category":"consumable","rarity":"C","effect":{"type":"temp_stat","stat":"mag","val":2,"duration":3},"tier":2},{"id":"item_181","name":"Mystic HP Tonic #181","desc":"Grants HP+2 for 3 turns","category":"consumable","rarity":"C","effect":{"type":"temp_stat","stat":"maxHp","val":2,"duration":3},"tier":2},{"id":"item_182","name":"Mystic HP Tonic #182","desc":"Grants HP+5 for 3 turns","category":"consumable","rarity":"C","effect":{"type":"temp_stat","stat":"maxHp","val":5,"duration":3},"tier":2},{"id":"item_183","name":"Mystic RES Tonic #183","desc":"Grants RES+3 for 3 turns","category":"consumable","rarity":"C","effect":{"type":"temp_stat","stat":"res","val":3,"duration":3},"tier":2},{"id":"item_184","name":"Mystic ATK Tonic #184","desc":"Grants ATK+4 for 3 turns","category":"consumable","rarity":"C","effect":{"type":"temp_stat","stat":"atk","val":4,"duration":3},"tier":2},{"id":"item_185","name":"Mystic RES Tonic #185","desc":"Grants RES+4 for 3 turns","category":"consumable","rarity":"C","effect":{"type":"temp_stat","stat":"res","val":4,"duration":3},"tier":2},{"id":"item_186","name":"Mystic DEF Tonic #186","desc":"Grants DEF+5 for 3 turns","category":"consumable","rarity":"C","effect":{"type":"temp_stat","stat":"def","val":5,"duration":3},"tier":2},{"id":"item_187","name":"Mystic HP Tonic #187","desc":"Grants HP+2 for 3 turns","category":"consumable","rarity":"C","effect":{"type":"temp_stat","stat":"maxHp","val":2,"duration":3},"tier":2},{"id":"item_188","name":"Mystic MAG Tonic #188","desc":"Grants MAG+4 for 3 turns","category":"consumable","rarity":"C","effect":{"type":"temp_stat","stat":"mag","val":4,"duration":3},"tier":2},{"id":"item_189","name":"Mystic SPD Tonic #189","desc":"Grants SPD+5 for 3 turns","category":"consumable","rarity":"C","effect":{"type":"temp_stat","stat":"spd","val":5,"duration":3},"tier":2},{"id":"item_190","name":"Mystic DEF Tonic #190","desc":"Grants DEF+5 for 3 turns","category":"consumable","rarity":"C","effect":{"type":"temp_stat","stat":"def","val":5,"duration":3},"tier":2},{"id":"item_191","name":"Mystic MAG Tonic #191","desc":"Grants MAG+1 for 3 turns","category":"consumable","rarity":"C","effect":{"type":"temp_stat","stat":"mag","val":1,"duration":3},"tier":2},{"id":"item_192","name":"Mystic MAG Tonic #192","desc":"Grants MAG+1 for 3 turns","category":"consumable","rarity":"C","effect":{"type":"temp_stat","stat":"mag","val":1,"duration":3},"tier":2},{"id":"item_193","name":"Mystic HP Tonic #193","desc":"Grants HP+5 for 3 turns","category":"consumable","rarity":"C","effect":{"type":"temp_stat","stat":"maxHp","val":5,"duration":3},"tier":2},{"id":"item_194","name":"Mystic DEF Tonic #194","desc":"Grants DEF+4 for 3 turns","category":"consumable","rarity":"C","effect":{"type":"temp_stat","stat":"def","val":4,"duration":3},"tier":2},{"id":"item_195","name":"Mystic DEF Tonic #195","desc":"Grants DEF+1 for 3 turns","category":"consumable","rarity":"C","effect":{"type":"temp_stat","stat":"def","val":1,"duration":3},"tier":2},{"id":"item_196","name":"Mystic SPD Tonic #196","desc":"Grants SPD+2 for 3 turns","category":"consumable","rarity":"C","effect":{"type":"temp_stat","stat":"spd","val":2,"duration":3},"tier":2},{"id":"item_197","name":"Mystic SPD Tonic #197","desc":"Grants SPD+3 for 3 turns","category":"consumable","rarity":"C","effect":{"type":"temp_stat","stat":"spd","val":3,"duration":3},"tier":2},{"id":"item_198","name":"Mystic DEF Tonic #198","desc":"Grants DEF+2 for 3 turns","category":"consumable","rarity":"C","effect":{"type":"temp_stat","stat":"def","val":2,"duration":3},"tier":2},{"id":"item_199","name":"Mystic DEF Tonic #199","desc":"Grants DEF+1 for 3 turns","category":"consumable","rarity":"C","effect":{"type":"temp_stat","stat":"def","val":1,"duration":3},"tier":2},{"id":"item_200","name":"Mystic DEF Tonic #200","desc":"Grants DEF+3 for 3 turns","category":"consumable","rarity":"C","effect":{"type":"temp_stat","stat":"def","val":3,"duration":3},"tier":2}];
+
+const ABILITY_DB = [{"id":"ability_1","name":"Mirror Guard","desc":"Reflects 10% damage back to attacker","trigger":"OnDefend","condition":"Always","effect":{"tag":"reflect","val":0.1},"rarity":"C"},{"id":"ability_2","name":"Aegis Reflect","desc":"Reflects 20% damage back to attacker","trigger":"OnDefend","condition":"Always","effect":{"tag":"reflect","val":0.2},"rarity":"B"},{"id":"ability_3","name":"Thorns Aura","desc":"Reflects 30% damage back","trigger":"OnDefend","condition":"Always","effect":{"tag":"reflect","val":0.3},"rarity":"A"},{"id":"ability_4","name":"Divine Retribution","desc":"Reflects 50% damage; costs 5 HP","trigger":"OnDefend","condition":"Always","effect":{"tag":"reflect","val":0.5},"rarity":"S"},{"id":"ability_5","name":"Quick Draw","desc":"10% chance to strike twice","trigger":"OnAttack","condition":"Always","effect":{"tag":"double_chance","val":0.1},"rarity":"C"},{"id":"ability_6","name":"Twin Strike","desc":"20% chance to strike twice","trigger":"OnAttack","condition":"Always","effect":{"tag":"double_chance","val":0.2},"rarity":"B"},{"id":"ability_7","name":"Blade Fury","desc":"35% chance to strike twice","trigger":"OnAttack","condition":"Always","effect":{"tag":"double_chance","val":0.35},"rarity":"A"},{"id":"ability_8","name":"Infinite Edge","desc":"50% chance to strike twice","trigger":"OnAttack","condition":"Always","effect":{"tag":"double_chance","val":0.5},"rarity":"S"},{"id":"ability_9","name":"Last Breath","desc":"Revives once per map at 10% HP","trigger":"OnDeath","condition":"Always","effect":{"tag":"revive","val":0.1},"rarity":"A"},{"id":"ability_10","name":"Phoenix Soul","desc":"Revives once per map at 30% HP","trigger":"OnDeath","condition":"Always","effect":{"tag":"revive","val":0.3},"rarity":"S"},{"id":"ability_11","name":"Undying Will","desc":"Revives once per map at 50% HP; ATK+10 after","trigger":"OnDeath","condition":"Always","effect":{"tag":"revive","val":0.5},"rarity":"T0"},{"id":"ability_12","name":"Defiant Guard","desc":"DEF+8 when HP<50%","trigger":"TurnStart","condition":"HP<50%","effect":{"tag":"buff_def","val":8},"rarity":"B"},{"id":"ability_13","name":"Defiant Wall","desc":"DEF+12 when HP<40%","trigger":"TurnStart","condition":"HP<50%","effect":{"tag":"buff_def","val":12},"rarity":"A"},{"id":"ability_14","name":"Unbreakable","desc":"DEF+20 when HP<25%","trigger":"TurnStart","condition":"HP<50%","effect":{"tag":"buff_def","val":20},"rarity":"S"},{"id":"ability_15","name":"Haste","desc":"SPD+4 every turn (stacks to +12)","trigger":"TurnStart","condition":"Always","effect":{"tag":"stack_spd","val":4},"rarity":"B"},{"id":"ability_16","name":"Overclock","desc":"+1 Special charge per turn","trigger":"TurnStart","condition":"Always","effect":{"tag":"charge_per_turn","val":1},"rarity":"A"},{"id":"ability_17","name":"Time Warp","desc":"20% chance for extra action at turn start","trigger":"TurnStart","condition":"Always","effect":{"tag":"extra_action_chance","val":0.2},"rarity":"S"},{"id":"ability_18","name":"Sharpshooter","desc":"+5 damage vs ranged units","trigger":"OnAttack","condition":"Always","effect":{"tag":"bonus_vs_ranged","val":5},"rarity":"C"},{"id":"ability_19","name":"Giant Slayer","desc":"+8 damage vs Armored","trigger":"OnAttack","condition":"Always","effect":{"tag":"bonus_vs_armored","val":8},"rarity":"B"},{"id":"ability_20","name":"Dragon Hunter","desc":"+10 damage vs high-HP units","trigger":"OnAttack","condition":"Always","effect":{"tag":"bonus_vs_highHP","val":10},"rarity":"A"},{"id":"ability_21","name":"Apex Predator","desc":"+15% damage to all","trigger":"OnAttack","condition":"Always","effect":{"tag":"dmg_amp","val":0.15},"rarity":"S"},{"id":"ability_22","name":"Keen Eye","desc":"+5% crit chance","trigger":"OnAttack","condition":"Always","effect":{"tag":"crit_up","val":0.05},"rarity":"D"},{"id":"ability_23","name":"Sharp Focus","desc":"+10% crit chance","trigger":"OnAttack","condition":"Always","effect":{"tag":"crit_up","val":0.1},"rarity":"C"},{"id":"ability_24","name":"Deadly Precision","desc":"+18% crit chance","trigger":"OnAttack","condition":"Always","effect":{"tag":"crit_up","val":0.18},"rarity":"B"},{"id":"ability_25","name":"Lethal Intent","desc":"+25% crit chance","trigger":"OnAttack","condition":"Always","effect":{"tag":"crit_up","val":0.25},"rarity":"A"},{"id":"ability_26","name":"Fated Strike","desc":"Crits ignore DEF entirely","trigger":"OnAttack","condition":"Always","effect":{"tag":"crit_ignore_def","val":1},"rarity":"S"},{"id":"ability_27","name":"Regenerate 1","desc":"Heal 3 HP per turn","trigger":"TurnStart","condition":"Always","effect":{"tag":"regen","val":3},"rarity":"D"},{"id":"ability_28","name":"Regenerate 2","desc":"Heal 6 HP per turn","trigger":"TurnStart","condition":"Always","effect":{"tag":"regen","val":6},"rarity":"C"},{"id":"ability_29","name":"Regenerate 3","desc":"Heal 10 HP per turn","trigger":"TurnStart","condition":"Always","effect":{"tag":"regen","val":10},"rarity":"B"},{"id":"ability_30","name":"Vampiric Strike","desc":"Heal 15% of damage dealt","trigger":"OnAttack","condition":"Always","effect":{"tag":"lifesteal","val":0.15},"rarity":"A"},{"id":"ability_31","name":"Soul Drain","desc":"Heal 25% of damage dealt","trigger":"OnAttack","condition":"Always","effect":{"tag":"lifesteal","val":0.25},"rarity":"S"},{"id":"ability_32","name":"Solo Power","desc":"ATK+6 when no adjacent allies","trigger":"OnAttack","condition":"IsSolo","effect":{"tag":"buff_atk","val":6},"rarity":"B"},{"id":"ability_33","name":"Bond Strength","desc":"DEF+6 when adjacent to ally","trigger":"OnDefend","condition":"AdjacentAlly","effect":{"tag":"buff_def","val":6},"rarity":"B"},{"id":"ability_34","name":"Wrath Strike","desc":"ATK+10 when HP<50%","trigger":"OnAttack","condition":"HP<50%","effect":{"tag":"buff_atk","val":10},"rarity":"A"},{"id":"ability_35","name":"Desperation Soul","desc":"Follow-up before counter at HP<75%","trigger":"OnAttack","condition":"HP<75%","effect":{"tag":"desperation","val":1},"rarity":"A"},{"id":"ability_36","name":"Vantage Soul","desc":"Counter first when HP<50%","trigger":"OnDefend","condition":"HP<50%","effect":{"tag":"vantage","val":1},"rarity":"A"},{"id":"ability_37","name":"Freeze Ward","desc":"Immune to Freeze","trigger":"Passive","condition":"Always","effect":{"tag":"immune_freeze","val":1},"rarity":"C"},{"id":"ability_38","name":"Poison Ward","desc":"Immune to Poison","trigger":"Passive","condition":"Always","effect":{"tag":"immune_poison","val":1},"rarity":"C"},{"id":"ability_39","name":"Burn Ward","desc":"Immune to Burn","trigger":"Passive","condition":"Always","effect":{"tag":"immune_burn","val":1},"rarity":"C"},{"id":"ability_40","name":"Panic Ward","desc":"Immune to Panic","trigger":"Passive","condition":"Always","effect":{"tag":"immune_panic","val":1},"rarity":"B"},{"id":"ability_41","name":"Full Ward","desc":"Immune to all status effects","trigger":"Passive","condition":"Always","effect":{"tag":"immune_all","val":1},"rarity":"S"},{"id":"ability_42","name":"Inspiring Presence","desc":"Adjacent allies ATK+3","trigger":"Aura","condition":"Always","effect":{"tag":"aura_atk","val":3},"rarity":"B"},{"id":"ability_43","name":"Fortifying Presence","desc":"Adjacent allies DEF+3","trigger":"Aura","condition":"Always","effect":{"tag":"aura_def","val":3},"rarity":"B"},{"id":"ability_44","name":"Swiftening Presence","desc":"Adjacent allies SPD+3","trigger":"Aura","condition":"Always","effect":{"tag":"aura_spd","val":3},"rarity":"B"},{"id":"ability_45","name":"Commanding Presence","desc":"Adjacent allies all stats+2","trigger":"Aura","condition":"Always","effect":{"tag":"aura_all","val":2},"rarity":"A"},{"id":"ability_46","name":"Terrifying Presence","desc":"Adjacent enemies ATK-4","trigger":"Aura","condition":"Always","effect":{"tag":"threat_atk","val":4},"rarity":"A"},{"id":"ability_47","name":"Bloodthirst","desc":"Heal 10 HP on kill","trigger":"OnKill","condition":"Always","effect":{"tag":"kill_heal","val":10},"rarity":"B"},{"id":"ability_48","name":"Momentum","desc":"SPD+4 on kill (stacks)","trigger":"OnKill","condition":"Always","effect":{"tag":"kill_stack_spd","val":4},"rarity":"A"},{"id":"ability_49","name":"Surge","desc":"ATK+5 on kill (stacks)","trigger":"OnKill","condition":"Always","effect":{"tag":"kill_stack_atk","val":5},"rarity":"A"},{"id":"ability_50","name":"Rampage","desc":"Extra action on kill","trigger":"OnKill","condition":"Always","effect":{"tag":"kill_extra_action","val":1},"rarity":"S"},{"id":"ability_51","name":"Soul Harvest","desc":"Gain 1 shard on kill","trigger":"OnKill","condition":"Always","effect":{"tag":"kill_shard","val":1},"rarity":"B"},{"id":"ability_52","name":"Fleet Foot","desc":"+1 movement","trigger":"Passive","condition":"Always","effect":{"tag":"mov_up","val":1},"rarity":"A"},{"id":"ability_53","name":"Pathfinder","desc":"Ignore terrain movement penalties","trigger":"Passive","condition":"Always","effect":{"tag":"ignore_terrain","val":1},"rarity":"B"},{"id":"ability_54","name":"Teleport","desc":"Can warp to any ally at turn start","trigger":"TurnStart","condition":"Always","effect":{"tag":"warp_ally","val":1},"rarity":"S"},{"id":"ability_55","name":"Phase Shift","desc":"Can pass through enemies","trigger":"Passive","condition":"Always","effect":{"tag":"pass_through","val":1},"rarity":"A"},{"id":"ability_56","name":"Tough Skin","desc":"Reduce all damage by 2","trigger":"OnDefend","condition":"Always","effect":{"tag":"flat_reduce","val":2},"rarity":"D"},{"id":"ability_57","name":"Armored Hide","desc":"Reduce all damage by 5","trigger":"OnDefend","condition":"Always","effect":{"tag":"flat_reduce","val":5},"rarity":"C"},{"id":"ability_58","name":"Adamantine Skin","desc":"Reduce all damage by 8","trigger":"OnDefend","condition":"Always","effect":{"tag":"flat_reduce","val":8},"rarity":"B"},{"id":"ability_59","name":"Divine Protection","desc":"Reduce all damage by 15%","trigger":"OnDefend","condition":"Always","effect":{"tag":"pct_reduce","val":0.15},"rarity":"A"},{"id":"ability_60","name":"Absolute Defense","desc":"Reduce all damage by 30%","trigger":"OnDefend","condition":"Always","effect":{"tag":"pct_reduce","val":0.3},"rarity":"S"},{"id":"ability_61","name":"Ethereal Wave","desc":"OnDefend: HP>75% \u2192 DEF+8/SPD+8","trigger":"OnDefend","condition":"HP>75%","effect":{"tag":"dual_def_spd","val":8},"rarity":"A"},{"id":"ability_62","name":"Iron Rage","desc":"OnKill: Always \u2192 DEF+4/SPD+4","trigger":"OnKill","condition":"Always","effect":{"tag":"dual_def_spd","val":4},"rarity":"A"},{"id":"ability_63","name":"Ethereal Guard","desc":"OnAttack: IsSolo \u2192 ATK+7/RES+7","trigger":"OnAttack","condition":"IsSolo","effect":{"tag":"dual_atk_res","val":7},"rarity":"C"},{"id":"ability_64","name":"Ancient Stance","desc":"OnMove: EnemyCount>=3 \u2192 SPD+5/RES+5","trigger":"OnMove","condition":"EnemyCount>=3","effect":{"tag":"dual_spd_res","val":5},"rarity":"S"},{"id":"ability_65","name":"Silver Rage","desc":"OnAttack: AdjacentAlly \u2192 DEF+2/SPD+2","trigger":"OnAttack","condition":"AdjacentAlly","effect":{"tag":"dual_def_spd","val":2},"rarity":"C"},{"id":"ability_66","name":"Gale Seal","desc":"OnKill: EnemyCount>=3 \u2192 SPD+3/RES+3","trigger":"OnKill","condition":"EnemyCount>=3","effect":{"tag":"dual_spd_res","val":3},"rarity":"A"},{"id":"ability_67","name":"Primal Aura","desc":"TurnStart: IsSolo \u2192 MAG+3/RES+3","trigger":"TurnStart","condition":"IsSolo","effect":{"tag":"dual_mag_res","val":3},"rarity":"B"},{"id":"ability_68","name":"Ancient Edge","desc":"OnMove: Always \u2192 ATK+4/RES+4","trigger":"OnMove","condition":"Always","effect":{"tag":"dual_atk_res","val":4},"rarity":"A"},{"id":"ability_69","name":"Thunder Core","desc":"OnKill: InForest \u2192 MAG+8/RES+8","trigger":"OnKill","condition":"InForest","effect":{"tag":"dual_mag_res","val":8},"rarity":"C"},{"id":"ability_70","name":"Void Pulse","desc":"OnKill: Always \u2192 MAG+2/RES+2","trigger":"OnKill","condition":"Always","effect":{"tag":"dual_mag_res","val":2},"rarity":"B"},{"id":"ability_71","name":"Golden Blow","desc":"TurnStart: Always \u2192 SPD+5/RES+5","trigger":"TurnStart","condition":"Always","effect":{"tag":"dual_spd_res","val":5},"rarity":"A"},{"id":"ability_72","name":"Shadow Spirit","desc":"OnKill: HP>75% \u2192 ATK+6/MAG+6","trigger":"OnKill","condition":"HP>75%","effect":{"tag":"dual_atk_mag","val":6},"rarity":"A"},{"id":"ability_73","name":"Astral Ward","desc":"OnMove: InForest \u2192 ATK+4/SPD+4","trigger":"OnMove","condition":"InForest","effect":{"tag":"dual_atk_spd","val":4},"rarity":"B"},{"id":"ability_74","name":"Crystal Force","desc":"OnKill: Always \u2192 SPD+7/RES+7","trigger":"OnKill","condition":"Always","effect":{"tag":"dual_spd_res","val":7},"rarity":"C"},{"id":"ability_75","name":"Divine Force","desc":"OnKill: AdjacentAlly \u2192 MAG+5/RES+5","trigger":"OnKill","condition":"AdjacentAlly","effect":{"tag":"dual_mag_res","val":5},"rarity":"B"},{"id":"ability_76","name":"Crystal Aura","desc":"OnAttack: IsSolo \u2192 DEF+3/SPD+3","trigger":"OnAttack","condition":"IsSolo","effect":{"tag":"dual_def_spd","val":3},"rarity":"B"},{"id":"ability_77","name":"Cursed Force","desc":"OnAttack: AdjacentAlly \u2192 ATK+6/RES+6","trigger":"OnAttack","condition":"AdjacentAlly","effect":{"tag":"dual_atk_res","val":6},"rarity":"C"},{"id":"ability_78","name":"Chaos Stance","desc":"OnDefend: EnemyCount>=3 \u2192 ATK+3/RES+3","trigger":"OnDefend","condition":"EnemyCount>=3","effect":{"tag":"dual_atk_res","val":3},"rarity":"S"},{"id":"ability_79","name":"Arcane Core","desc":"TurnStart: HP>75% \u2192 ATK+7/SPD+7","trigger":"TurnStart","condition":"HP>75%","effect":{"tag":"dual_atk_spd","val":7},"rarity":"B"},{"id":"ability_80","name":"Shadow Aura","desc":"OnMove: IsSolo \u2192 DEF+2/RES+2","trigger":"OnMove","condition":"IsSolo","effect":{"tag":"dual_def_res","val":2},"rarity":"A"},{"id":"ability_81","name":"Silver Pulse","desc":"TurnStart: InForest \u2192 ATK+2/DEF+2","trigger":"TurnStart","condition":"InForest","effect":{"tag":"dual_atk_def","val":2},"rarity":"B"},{"id":"ability_82","name":"Infernal Mark","desc":"OnDefend: HP<50% \u2192 MAG+2/RES+2","trigger":"OnDefend","condition":"HP<50%","effect":{"tag":"dual_mag_res","val":2},"rarity":"A"},{"id":"ability_83","name":"Ethereal Force","desc":"TurnStart: InForest \u2192 ATK+5/SPD+5","trigger":"TurnStart","condition":"InForest","effect":{"tag":"dual_atk_spd","val":5},"rarity":"A"},{"id":"ability_84","name":"Frozen Force","desc":"OnKill: AdjacentAlly \u2192 ATK+5/DEF+5","trigger":"OnKill","condition":"AdjacentAlly","effect":{"tag":"dual_atk_def","val":5},"rarity":"A"},{"id":"ability_85","name":"Chaos Ward","desc":"TurnStart: AdjacentAlly \u2192 MAG+8/RES+8","trigger":"TurnStart","condition":"AdjacentAlly","effect":{"tag":"dual_mag_res","val":8},"rarity":"B"},{"id":"ability_86","name":"Shadow Ward","desc":"TurnStart: InForest \u2192 ATK+2/DEF+2","trigger":"TurnStart","condition":"InForest","effect":{"tag":"dual_atk_def","val":2},"rarity":"C"},{"id":"ability_87","name":"Chaos Wave","desc":"OnDefend: EnemyCount>=3 \u2192 MAG+5/RES+5","trigger":"OnDefend","condition":"EnemyCount>=3","effect":{"tag":"dual_mag_res","val":5},"rarity":"A"},{"id":"ability_88","name":"Ancient Strike","desc":"OnMove: InForest \u2192 ATK+5/RES+5","trigger":"OnMove","condition":"InForest","effect":{"tag":"dual_atk_res","val":5},"rarity":"A"},{"id":"ability_89","name":"Ethereal Calm","desc":"OnAttack: EnemyCount>=3 \u2192 ATK+7/MAG+7","trigger":"OnAttack","condition":"EnemyCount>=3","effect":{"tag":"dual_atk_mag","val":7},"rarity":"A"},{"id":"ability_90","name":"Gale Seal","desc":"TurnStart: AdjacentAlly \u2192 ATK+3/DEF+3","trigger":"TurnStart","condition":"AdjacentAlly","effect":{"tag":"dual_atk_def","val":3},"rarity":"B"},{"id":"ability_91","name":"Terra Edge","desc":"OnAttack: AdjacentAlly \u2192 ATK+5/SPD+5","trigger":"OnAttack","condition":"AdjacentAlly","effect":{"tag":"dual_atk_spd","val":5},"rarity":"B"},{"id":"ability_92","name":"Arcane Edge","desc":"OnMove: Always \u2192 ATK+6/SPD+6","trigger":"OnMove","condition":"Always","effect":{"tag":"dual_atk_spd","val":6},"rarity":"S"},{"id":"ability_93","name":"Iron Blow","desc":"OnAttack: HP>75% \u2192 ATK+5/MAG+5","trigger":"OnAttack","condition":"HP>75%","effect":{"tag":"dual_atk_mag","val":5},"rarity":"C"},{"id":"ability_94","name":"Blessed Spirit","desc":"OnAttack: IsSolo \u2192 ATK+8/SPD+8","trigger":"OnAttack","condition":"IsSolo","effect":{"tag":"dual_atk_spd","val":8},"rarity":"A"},{"id":"ability_95","name":"Terra Rage","desc":"OnKill: HP>75% \u2192 MAG+2/RES+2","trigger":"OnKill","condition":"HP>75%","effect":{"tag":"dual_mag_res","val":2},"rarity":"S"},{"id":"ability_96","name":"Radiant Pulse","desc":"OnKill: HP<50% \u2192 DEF+4/SPD+4","trigger":"OnKill","condition":"HP<50%","effect":{"tag":"dual_def_spd","val":4},"rarity":"C"},{"id":"ability_97","name":"Radiant Seal","desc":"OnKill: Always \u2192 SPD+8/RES+8","trigger":"OnKill","condition":"Always","effect":{"tag":"dual_spd_res","val":8},"rarity":"A"},{"id":"ability_98","name":"Frozen Seal","desc":"OnDefend: EnemyCount>=3 \u2192 MAG+5/RES+5","trigger":"OnDefend","condition":"EnemyCount>=3","effect":{"tag":"dual_mag_res","val":5},"rarity":"B"},{"id":"ability_99","name":"Infernal Mark","desc":"OnMove: HP>75% \u2192 DEF+6/RES+6","trigger":"OnMove","condition":"HP>75%","effect":{"tag":"dual_def_res","val":6},"rarity":"B"},{"id":"ability_100","name":"Storm Edge","desc":"TurnStart: InForest \u2192 MAG+6/RES+6","trigger":"TurnStart","condition":"InForest","effect":{"tag":"dual_mag_res","val":6},"rarity":"S"},{"id":"ability_101","name":"Chaos Edge","desc":"OnAttack: Always \u2192 ATK+2/DEF+2","trigger":"OnAttack","condition":"Always","effect":{"tag":"dual_atk_def","val":2},"rarity":"B"},{"id":"ability_102","name":"Infernal Strike","desc":"TurnStart: IsSolo \u2192 DEF+6/RES+6","trigger":"TurnStart","condition":"IsSolo","effect":{"tag":"dual_def_res","val":6},"rarity":"S"},{"id":"ability_103","name":"Thunder Edge","desc":"OnAttack: HP>75% \u2192 ATK+5/MAG+5","trigger":"OnAttack","condition":"HP>75%","effect":{"tag":"dual_atk_mag","val":5},"rarity":"A"},{"id":"ability_104","name":"Ancient Calm","desc":"TurnStart: EnemyCount>=3 \u2192 DEF+6/SPD+6","trigger":"TurnStart","condition":"EnemyCount>=3","effect":{"tag":"dual_def_spd","val":6},"rarity":"S"},{"id":"ability_105","name":"Ethereal Seal","desc":"OnDefend: HP>75% \u2192 DEF+3/SPD+3","trigger":"OnDefend","condition":"HP>75%","effect":{"tag":"dual_def_spd","val":3},"rarity":"C"},{"id":"ability_106","name":"Mythic Wave","desc":"OnDefend: Always \u2192 ATK+2/SPD+2","trigger":"OnDefend","condition":"Always","effect":{"tag":"dual_atk_spd","val":2},"rarity":"A"},{"id":"ability_107","name":"Divine Aura","desc":"OnKill: Always \u2192 DEF+6/RES+6","trigger":"OnKill","condition":"Always","effect":{"tag":"dual_def_res","val":6},"rarity":"B"},{"id":"ability_108","name":"Mythic Rage","desc":"OnAttack: InForest \u2192 ATK+4/MAG+4","trigger":"OnAttack","condition":"InForest","effect":{"tag":"dual_atk_mag","val":4},"rarity":"S"},{"id":"ability_109","name":"Storm Wave","desc":"OnMove: HP>75% \u2192 DEF+6/SPD+6","trigger":"OnMove","condition":"HP>75%","effect":{"tag":"dual_def_spd","val":6},"rarity":"C"},{"id":"ability_110","name":"Terra Stance","desc":"OnAttack: EnemyCount>=3 \u2192 MAG+7/RES+7","trigger":"OnAttack","condition":"EnemyCount>=3","effect":{"tag":"dual_mag_res","val":7},"rarity":"S"},{"id":"ability_111","name":"Infernal Core","desc":"OnMove: IsSolo \u2192 MAG+7/RES+7","trigger":"OnMove","condition":"IsSolo","effect":{"tag":"dual_mag_res","val":7},"rarity":"B"},{"id":"ability_112","name":"Infernal Strike","desc":"OnAttack: IsSolo \u2192 MAG+7/RES+7","trigger":"OnAttack","condition":"IsSolo","effect":{"tag":"dual_mag_res","val":7},"rarity":"A"},{"id":"ability_113","name":"Mythic Seal","desc":"OnKill: HP>75% \u2192 DEF+3/RES+3","trigger":"OnKill","condition":"HP>75%","effect":{"tag":"dual_def_res","val":3},"rarity":"C"},{"id":"ability_114","name":"Blessed Force","desc":"OnMove: HP>75% \u2192 DEF+8/SPD+8","trigger":"OnMove","condition":"HP>75%","effect":{"tag":"dual_def_spd","val":8},"rarity":"B"},{"id":"ability_115","name":"Divine Calm","desc":"TurnStart: EnemyCount>=3 \u2192 ATK+2/DEF+2","trigger":"TurnStart","condition":"EnemyCount>=3","effect":{"tag":"dual_atk_def","val":2},"rarity":"S"},{"id":"ability_116","name":"Ethereal Force","desc":"OnDefend: HP>75% \u2192 SPD+2/RES+2","trigger":"OnDefend","condition":"HP>75%","effect":{"tag":"dual_spd_res","val":2},"rarity":"S"},{"id":"ability_117","name":"Ancient Ward","desc":"OnKill: HP<50% \u2192 ATK+8/RES+8","trigger":"OnKill","condition":"HP<50%","effect":{"tag":"dual_atk_res","val":8},"rarity":"A"},{"id":"ability_118","name":"Blessed Calm","desc":"TurnStart: HP>75% \u2192 MAG+8/RES+8","trigger":"TurnStart","condition":"HP>75%","effect":{"tag":"dual_mag_res","val":8},"rarity":"S"},{"id":"ability_119","name":"Gale Calm","desc":"TurnStart: HP<50% \u2192 DEF+2/RES+2","trigger":"TurnStart","condition":"HP<50%","effect":{"tag":"dual_def_res","val":2},"rarity":"B"},{"id":"ability_120","name":"Crystal Seal","desc":"OnKill: Always \u2192 ATK+6/DEF+6","trigger":"OnKill","condition":"Always","effect":{"tag":"dual_atk_def","val":6},"rarity":"B"},{"id":"ability_121","name":"Silver Blow","desc":"OnMove: InForest \u2192 DEF+3/SPD+3","trigger":"OnMove","condition":"InForest","effect":{"tag":"dual_def_spd","val":3},"rarity":"B"},{"id":"ability_122","name":"Divine Guard","desc":"OnAttack: InForest \u2192 DEF+4/RES+4","trigger":"OnAttack","condition":"InForest","effect":{"tag":"dual_def_res","val":4},"rarity":"B"},{"id":"ability_123","name":"Frozen Rage","desc":"OnKill: HP>75% \u2192 DEF+5/SPD+5","trigger":"OnKill","condition":"HP>75%","effect":{"tag":"dual_def_spd","val":5},"rarity":"S"},{"id":"ability_124","name":"Mythic Edge","desc":"TurnStart: Always \u2192 MAG+2/RES+2","trigger":"TurnStart","condition":"Always","effect":{"tag":"dual_mag_res","val":2},"rarity":"S"},{"id":"ability_125","name":"Radiant Mark","desc":"OnAttack: AdjacentAlly \u2192 MAG+4/RES+4","trigger":"OnAttack","condition":"AdjacentAlly","effect":{"tag":"dual_mag_res","val":4},"rarity":"B"},{"id":"ability_126","name":"Ethereal Force","desc":"OnAttack: EnemyCount>=3 \u2192 MAG+5/RES+5","trigger":"OnAttack","condition":"EnemyCount>=3","effect":{"tag":"dual_mag_res","val":5},"rarity":"A"},{"id":"ability_127","name":"Ethereal Force","desc":"OnAttack: HP<50% \u2192 MAG+3/RES+3","trigger":"OnAttack","condition":"HP<50%","effect":{"tag":"dual_mag_res","val":3},"rarity":"C"},{"id":"ability_128","name":"Cursed Blow","desc":"TurnStart: InForest \u2192 DEF+7/SPD+7","trigger":"TurnStart","condition":"InForest","effect":{"tag":"dual_def_spd","val":7},"rarity":"B"},{"id":"ability_129","name":"Silver Strike","desc":"OnAttack: AdjacentAlly \u2192 ATK+3/SPD+3","trigger":"OnAttack","condition":"AdjacentAlly","effect":{"tag":"dual_atk_spd","val":3},"rarity":"B"},{"id":"ability_130","name":"Ancient Blow","desc":"TurnStart: EnemyCount>=3 \u2192 ATK+3/RES+3","trigger":"TurnStart","condition":"EnemyCount>=3","effect":{"tag":"dual_atk_res","val":3},"rarity":"B"},{"id":"ability_131","name":"Arcane Blow","desc":"OnMove: IsSolo \u2192 ATK+2/DEF+2","trigger":"OnMove","condition":"IsSolo","effect":{"tag":"dual_atk_def","val":2},"rarity":"B"},{"id":"ability_132","name":"Divine Strike","desc":"OnDefend: Always \u2192 ATK+8/SPD+8","trigger":"OnDefend","condition":"Always","effect":{"tag":"dual_atk_spd","val":8},"rarity":"B"},{"id":"ability_133","name":"Golden Edge","desc":"OnDefend: IsSolo \u2192 MAG+6/RES+6","trigger":"OnDefend","condition":"IsSolo","effect":{"tag":"dual_mag_res","val":6},"rarity":"A"},{"id":"ability_134","name":"Thunder Edge","desc":"OnMove: AdjacentAlly \u2192 ATK+2/RES+2","trigger":"OnMove","condition":"AdjacentAlly","effect":{"tag":"dual_atk_res","val":2},"rarity":"S"},{"id":"ability_135","name":"Blessed Edge","desc":"OnAttack: HP<50% \u2192 MAG+7/RES+7","trigger":"OnAttack","condition":"HP<50%","effect":{"tag":"dual_mag_res","val":7},"rarity":"A"},{"id":"ability_136","name":"Thunder Mark","desc":"OnAttack: EnemyCount>=3 \u2192 ATK+6/MAG+6","trigger":"OnAttack","condition":"EnemyCount>=3","effect":{"tag":"dual_atk_mag","val":6},"rarity":"A"},{"id":"ability_137","name":"Cursed Rage","desc":"OnDefend: InForest \u2192 SPD+7/RES+7","trigger":"OnDefend","condition":"InForest","effect":{"tag":"dual_spd_res","val":7},"rarity":"A"},{"id":"ability_138","name":"Terra Ward","desc":"OnAttack: EnemyCount>=3 \u2192 ATK+2/MAG+2","trigger":"OnAttack","condition":"EnemyCount>=3","effect":{"tag":"dual_atk_mag","val":2},"rarity":"A"},{"id":"ability_139","name":"Blazing Seal","desc":"TurnStart: InForest \u2192 MAG+8/RES+8","trigger":"TurnStart","condition":"InForest","effect":{"tag":"dual_mag_res","val":8},"rarity":"A"},{"id":"ability_140","name":"Arcane Calm","desc":"OnAttack: IsSolo \u2192 ATK+8/MAG+8","trigger":"OnAttack","condition":"IsSolo","effect":{"tag":"dual_atk_mag","val":8},"rarity":"B"},{"id":"ability_141","name":"Primal Wave","desc":"OnAttack: HP>75% \u2192 ATK+6/RES+6","trigger":"OnAttack","condition":"HP>75%","effect":{"tag":"dual_atk_res","val":6},"rarity":"B"},{"id":"ability_142","name":"Astral Strike","desc":"OnMove: HP>75% \u2192 SPD+8/RES+8","trigger":"OnMove","condition":"HP>75%","effect":{"tag":"dual_spd_res","val":8},"rarity":"A"},{"id":"ability_143","name":"Iron Calm","desc":"OnDefend: EnemyCount>=3 \u2192 ATK+6/DEF+6","trigger":"OnDefend","condition":"EnemyCount>=3","effect":{"tag":"dual_atk_def","val":6},"rarity":"B"},{"id":"ability_144","name":"Astral Seal","desc":"TurnStart: Always \u2192 ATK+8/DEF+8","trigger":"TurnStart","condition":"Always","effect":{"tag":"dual_atk_def","val":8},"rarity":"A"},{"id":"ability_145","name":"Iron Spirit","desc":"TurnStart: HP<50% \u2192 DEF+5/SPD+5","trigger":"TurnStart","condition":"HP<50%","effect":{"tag":"dual_def_spd","val":5},"rarity":"B"},{"id":"ability_146","name":"Arcane Calm","desc":"OnKill: AdjacentAlly \u2192 ATK+4/DEF+4","trigger":"OnKill","condition":"AdjacentAlly","effect":{"tag":"dual_atk_def","val":4},"rarity":"A"},{"id":"ability_147","name":"Divine Strike","desc":"OnAttack: Always \u2192 SPD+4/RES+4","trigger":"OnAttack","condition":"Always","effect":{"tag":"dual_spd_res","val":4},"rarity":"A"},{"id":"ability_148","name":"Crystal Spirit","desc":"OnMove: AdjacentAlly \u2192 ATK+5/SPD+5","trigger":"OnMove","condition":"AdjacentAlly","effect":{"tag":"dual_atk_spd","val":5},"rarity":"A"},{"id":"ability_149","name":"Frozen Spirit","desc":"OnAttack: IsSolo \u2192 ATK+6/MAG+6","trigger":"OnAttack","condition":"IsSolo","effect":{"tag":"dual_atk_mag","val":6},"rarity":"B"},{"id":"ability_150","name":"Blessed Aura","desc":"OnAttack: AdjacentAlly \u2192 ATK+5/SPD+5","trigger":"OnAttack","condition":"AdjacentAlly","effect":{"tag":"dual_atk_spd","val":5},"rarity":"B"},{"id":"ability_151","name":"Chaos Core","desc":"OnMove: HP<50% \u2192 ATK+7/MAG+7","trigger":"OnMove","condition":"HP<50%","effect":{"tag":"dual_atk_mag","val":7},"rarity":"B"},{"id":"ability_152","name":"Shadow Aura","desc":"OnAttack: HP<50% \u2192 SPD+4/RES+4","trigger":"OnAttack","condition":"HP<50%","effect":{"tag":"dual_spd_res","val":4},"rarity":"C"},{"id":"ability_153","name":"Blazing Ward","desc":"TurnStart: HP>75% \u2192 SPD+6/RES+6","trigger":"TurnStart","condition":"HP>75%","effect":{"tag":"dual_spd_res","val":6},"rarity":"B"},{"id":"ability_154","name":"Chaos Core","desc":"OnDefend: HP>75% \u2192 DEF+5/SPD+5","trigger":"OnDefend","condition":"HP>75%","effect":{"tag":"dual_def_spd","val":5},"rarity":"A"},{"id":"ability_155","name":"Golden Ward","desc":"OnAttack: Always \u2192 ATK+5/SPD+5","trigger":"OnAttack","condition":"Always","effect":{"tag":"dual_atk_spd","val":5},"rarity":"S"},{"id":"ability_156","name":"Golden Force","desc":"OnKill: EnemyCount>=3 \u2192 ATK+3/SPD+3","trigger":"OnKill","condition":"EnemyCount>=3","effect":{"tag":"dual_atk_spd","val":3},"rarity":"B"},{"id":"ability_157","name":"Frozen Force","desc":"OnAttack: InForest \u2192 ATK+3/DEF+3","trigger":"OnAttack","condition":"InForest","effect":{"tag":"dual_atk_def","val":3},"rarity":"S"},{"id":"ability_158","name":"Storm Wave","desc":"OnDefend: HP<50% \u2192 SPD+6/RES+6","trigger":"OnDefend","condition":"HP<50%","effect":{"tag":"dual_spd_res","val":6},"rarity":"S"},{"id":"ability_159","name":"Storm Mark","desc":"OnDefend: HP>75% \u2192 ATK+4/RES+4","trigger":"OnDefend","condition":"HP>75%","effect":{"tag":"dual_atk_res","val":4},"rarity":"C"},{"id":"ability_160","name":"Cursed Aura","desc":"OnDefend: AdjacentAlly \u2192 SPD+5/RES+5","trigger":"OnDefend","condition":"AdjacentAlly","effect":{"tag":"dual_spd_res","val":5},"rarity":"B"},{"id":"ability_161","name":"Arcane Seal","desc":"OnKill: HP>75% \u2192 ATK+7/MAG+7","trigger":"OnKill","condition":"HP>75%","effect":{"tag":"dual_atk_mag","val":7},"rarity":"B"},{"id":"ability_162","name":"Mythic Mark","desc":"TurnStart: Always \u2192 MAG+3/RES+3","trigger":"TurnStart","condition":"Always","effect":{"tag":"dual_mag_res","val":3},"rarity":"B"},{"id":"ability_163","name":"Blazing Calm","desc":"OnKill: EnemyCount>=3 \u2192 MAG+6/RES+6","trigger":"OnKill","condition":"EnemyCount>=3","effect":{"tag":"dual_mag_res","val":6},"rarity":"S"},{"id":"ability_164","name":"Crystal Edge","desc":"OnKill: HP<50% \u2192 ATK+4/RES+4","trigger":"OnKill","condition":"HP<50%","effect":{"tag":"dual_atk_res","val":4},"rarity":"S"},{"id":"ability_165","name":"Mythic Force","desc":"OnKill: HP>75% \u2192 DEF+6/RES+6","trigger":"OnKill","condition":"HP>75%","effect":{"tag":"dual_def_res","val":6},"rarity":"B"},{"id":"ability_166","name":"Infernal Strike","desc":"OnAttack: EnemyCount>=3 \u2192 DEF+6/RES+6","trigger":"OnAttack","condition":"EnemyCount>=3","effect":{"tag":"dual_def_res","val":6},"rarity":"A"},{"id":"ability_167","name":"Thunder Blow","desc":"OnAttack: Always \u2192 DEF+7/RES+7","trigger":"OnAttack","condition":"Always","effect":{"tag":"dual_def_res","val":7},"rarity":"S"},{"id":"ability_168","name":"Void Ward","desc":"OnDefend: IsSolo \u2192 ATK+3/RES+3","trigger":"OnDefend","condition":"IsSolo","effect":{"tag":"dual_atk_res","val":3},"rarity":"B"},{"id":"ability_169","name":"Ethereal Pulse","desc":"OnMove: IsSolo \u2192 ATK+2/DEF+2","trigger":"OnMove","condition":"IsSolo","effect":{"tag":"dual_atk_def","val":2},"rarity":"A"},{"id":"ability_170","name":"Ancient Mark","desc":"OnMove: HP>75% \u2192 ATK+3/DEF+3","trigger":"OnMove","condition":"HP>75%","effect":{"tag":"dual_atk_def","val":3},"rarity":"S"},{"id":"ability_171","name":"Blessed Spirit","desc":"OnAttack: HP<50% \u2192 SPD+8/RES+8","trigger":"OnAttack","condition":"HP<50%","effect":{"tag":"dual_spd_res","val":8},"rarity":"C"},{"id":"ability_172","name":"Divine Seal","desc":"OnMove: IsSolo \u2192 ATK+7/MAG+7","trigger":"OnMove","condition":"IsSolo","effect":{"tag":"dual_atk_mag","val":7},"rarity":"B"},{"id":"ability_173","name":"Frozen Pulse","desc":"OnMove: AdjacentAlly \u2192 DEF+7/RES+7","trigger":"OnMove","condition":"AdjacentAlly","effect":{"tag":"dual_def_res","val":7},"rarity":"B"},{"id":"ability_174","name":"Crystal Rage","desc":"OnDefend: AdjacentAlly \u2192 DEF+6/RES+6","trigger":"OnDefend","condition":"AdjacentAlly","effect":{"tag":"dual_def_res","val":6},"rarity":"A"},{"id":"ability_175","name":"Infernal Pulse","desc":"OnKill: AdjacentAlly \u2192 SPD+5/RES+5","trigger":"OnKill","condition":"AdjacentAlly","effect":{"tag":"dual_spd_res","val":5},"rarity":"B"},{"id":"ability_176","name":"Gale Guard","desc":"OnKill: HP>75% \u2192 ATK+3/RES+3","trigger":"OnKill","condition":"HP>75%","effect":{"tag":"dual_atk_res","val":3},"rarity":"C"},{"id":"ability_177","name":"Astral Wave","desc":"OnKill: AdjacentAlly \u2192 ATK+4/DEF+4","trigger":"OnKill","condition":"AdjacentAlly","effect":{"tag":"dual_atk_def","val":4},"rarity":"C"},{"id":"ability_178","name":"Infernal Mark","desc":"OnAttack: AdjacentAlly \u2192 DEF+3/RES+3","trigger":"OnAttack","condition":"AdjacentAlly","effect":{"tag":"dual_def_res","val":3},"rarity":"B"},{"id":"ability_179","name":"Void Core","desc":"OnKill: AdjacentAlly \u2192 DEF+4/RES+4","trigger":"OnKill","condition":"AdjacentAlly","effect":{"tag":"dual_def_res","val":4},"rarity":"B"},{"id":"ability_180","name":"Frozen Edge","desc":"OnKill: IsSolo \u2192 ATK+2/DEF+2","trigger":"OnKill","condition":"IsSolo","effect":{"tag":"dual_atk_def","val":2},"rarity":"A"},{"id":"ability_181","name":"Astral Pulse","desc":"TurnStart: HP>75% \u2192 MAG+2/RES+2","trigger":"TurnStart","condition":"HP>75%","effect":{"tag":"dual_mag_res","val":2},"rarity":"C"},{"id":"ability_182","name":"Blessed Edge","desc":"OnKill: Always \u2192 ATK+7/SPD+7","trigger":"OnKill","condition":"Always","effect":{"tag":"dual_atk_spd","val":7},"rarity":"A"},{"id":"ability_183","name":"Radiant Guard","desc":"OnKill: HP<50% \u2192 ATK+2/DEF+2","trigger":"OnKill","condition":"HP<50%","effect":{"tag":"dual_atk_def","val":2},"rarity":"A"},{"id":"ability_184","name":"Blazing Strike","desc":"OnDefend: HP<50% \u2192 DEF+4/SPD+4","trigger":"OnDefend","condition":"HP<50%","effect":{"tag":"dual_def_spd","val":4},"rarity":"A"},{"id":"ability_185","name":"Ethereal Edge","desc":"OnAttack: Always \u2192 ATK+6/DEF+6","trigger":"OnAttack","condition":"Always","effect":{"tag":"dual_atk_def","val":6},"rarity":"S"},{"id":"ability_186","name":"Gale Mark","desc":"OnKill: AdjacentAlly \u2192 SPD+2/RES+2","trigger":"OnKill","condition":"AdjacentAlly","effect":{"tag":"dual_spd_res","val":2},"rarity":"B"},{"id":"ability_187","name":"Iron Blow","desc":"OnDefend: HP<50% \u2192 ATK+7/SPD+7","trigger":"OnDefend","condition":"HP<50%","effect":{"tag":"dual_atk_spd","val":7},"rarity":"A"},{"id":"ability_188","name":"Thunder Edge","desc":"OnAttack: HP>75% \u2192 MAG+7/RES+7","trigger":"OnAttack","condition":"HP>75%","effect":{"tag":"dual_mag_res","val":7},"rarity":"S"},{"id":"ability_189","name":"Terra Guard","desc":"TurnStart: HP>75% \u2192 ATK+5/SPD+5","trigger":"TurnStart","condition":"HP>75%","effect":{"tag":"dual_atk_spd","val":5},"rarity":"S"},{"id":"ability_190","name":"Thunder Core","desc":"OnMove: HP<50% \u2192 ATK+8/MAG+8","trigger":"OnMove","condition":"HP<50%","effect":{"tag":"dual_atk_mag","val":8},"rarity":"B"},{"id":"ability_191","name":"Chaos Edge","desc":"OnKill: HP>75% \u2192 DEF+4/SPD+4","trigger":"OnKill","condition":"HP>75%","effect":{"tag":"dual_def_spd","val":4},"rarity":"B"},{"id":"ability_192","name":"Ethereal Aura","desc":"OnDefend: EnemyCount>=3 \u2192 MAG+4/RES+4","trigger":"OnDefend","condition":"EnemyCount>=3","effect":{"tag":"dual_mag_res","val":4},"rarity":"B"},{"id":"ability_193","name":"Mythic Mark","desc":"OnAttack: Always \u2192 DEF+8/RES+8","trigger":"OnAttack","condition":"Always","effect":{"tag":"dual_def_res","val":8},"rarity":"B"},{"id":"ability_194","name":"Radiant Guard","desc":"OnMove: Always \u2192 DEF+4/SPD+4","trigger":"OnMove","condition":"Always","effect":{"tag":"dual_def_spd","val":4},"rarity":"B"},{"id":"ability_195","name":"Astral Spirit","desc":"OnDefend: IsSolo \u2192 DEF+4/RES+4","trigger":"OnDefend","condition":"IsSolo","effect":{"tag":"dual_def_res","val":4},"rarity":"A"},{"id":"ability_196","name":"Mythic Edge","desc":"OnMove: Always \u2192 ATK+5/SPD+5","trigger":"OnMove","condition":"Always","effect":{"tag":"dual_atk_spd","val":5},"rarity":"A"},{"id":"ability_197","name":"Infernal Wave","desc":"OnDefend: IsSolo \u2192 DEF+7/SPD+7","trigger":"OnDefend","condition":"IsSolo","effect":{"tag":"dual_def_spd","val":7},"rarity":"B"},{"id":"ability_198","name":"Ancient Mark","desc":"OnDefend: AdjacentAlly \u2192 DEF+7/RES+7","trigger":"OnDefend","condition":"AdjacentAlly","effect":{"tag":"dual_def_res","val":7},"rarity":"B"},{"id":"ability_199","name":"Primal Force","desc":"OnKill: EnemyCount>=3 \u2192 DEF+2/RES+2","trigger":"OnKill","condition":"EnemyCount>=3","effect":{"tag":"dual_def_res","val":2},"rarity":"S"},{"id":"ability_200","name":"Ancient Blow","desc":"OnAttack: IsSolo \u2192 DEF+4/RES+4","trigger":"OnAttack","condition":"IsSolo","effect":{"tag":"dual_def_res","val":4},"rarity":"A"}];
+
+const SKILL_DB = [{"id":"skill_1","name":"Double Edge","desc":"Strike twice at 80% power each","effect":"multi_hit","val":2,"cd":3,"rarity":"B","category":"attack"},{"id":"skill_2","name":"Triple Slash","desc":"Strike three times at 60% power","effect":"multi_hit","val":3,"cd":4,"rarity":"A","category":"attack"},{"id":"skill_3","name":"Blade Storm","desc":"Strike four times at 50% power","effect":"multi_hit","val":4,"cd":5,"rarity":"S","category":"attack"},{"id":"skill_4","name":"Omnislash","desc":"Strike five times at 45% power","effect":"multi_hit","val":5,"cd":6,"rarity":"T0","category":"attack"},{"id":"skill_5","name":"Shockwave","desc":"Deals 50% ATK to all enemies in 2 range","effect":"aoe_dmg","val":0.5,"cd":4,"rarity":"B","category":"attack"},{"id":"skill_6","name":"Meteor","desc":"Deals 80% ATK to all enemies in 2 range","effect":"aoe_dmg","val":0.8,"cd":5,"rarity":"A","category":"attack"},{"id":"skill_7","name":"Cataclysm","desc":"Deals 100% ATK to ALL enemies on map","effect":"aoe_dmg","val":1.0,"cd":7,"rarity":"S","category":"attack"},{"id":"skill_8","name":"Apocalypse","desc":"200% ATK to all enemies; self takes 25%","effect":"aoe_dmg","val":2.0,"cd":8,"rarity":"T0","category":"attack"},{"id":"skill_9","name":"Heal","desc":"Restores 15 HP to target ally","effect":"heal_target","val":15,"cd":2,"rarity":"C","category":"support"},{"id":"skill_10","name":"Recover","desc":"Restores 25 HP to target ally","effect":"heal_target","val":25,"cd":3,"rarity":"B","category":"support"},{"id":"skill_11","name":"Mend All","desc":"Heals all allies 12 HP","effect":"heal_all","val":12,"cd":4,"rarity":"A","category":"support"},{"id":"skill_12","name":"Miracle Heal","desc":"Fully heals one ally","effect":"heal_full","val":1,"cd":6,"rarity":"S","category":"support"},{"id":"skill_13","name":"Mass Restore","desc":"Heals all allies to full","effect":"heal_all_full","val":1,"cd":8,"rarity":"T0","category":"support"},{"id":"skill_14","name":"Rally Force","desc":"ATK+6 to all allies for 1 turn","effect":"buff_all_atk","val":6,"cd":3,"rarity":"B","category":"support"},{"id":"skill_15","name":"Rally Guard","desc":"DEF+6 to all allies for 1 turn","effect":"buff_all_def","val":6,"cd":3,"rarity":"B","category":"support"},{"id":"skill_16","name":"Rally Speed","desc":"SPD+6 to all allies for 1 turn","effect":"buff_all_spd","val":6,"cd":3,"rarity":"B","category":"support"},{"id":"skill_17","name":"War Cry","desc":"ATK/SPD+8 to all allies","effect":"buff_all_spectrum","val":8,"cd":5,"rarity":"S","category":"support"},{"id":"skill_18","name":"Divine Blessing","desc":"All stats+5 to all allies","effect":"buff_all_full","val":5,"cd":6,"rarity":"S","category":"support"},{"id":"skill_19","name":"Hex","desc":"ATK-6 to target enemy","effect":"debuff_atk","val":6,"cd":2,"rarity":"C","category":"debuff"},{"id":"skill_20","name":"Enfeeble","desc":"DEF-6 to target enemy","effect":"debuff_def","val":6,"cd":2,"rarity":"C","category":"debuff"},{"id":"skill_21","name":"Slow","desc":"SPD-6 to target enemy","effect":"debuff_spd","val":6,"cd":2,"rarity":"C","category":"debuff"},{"id":"skill_22","name":"Curse","desc":"All stats-4 to target enemy","effect":"debuff_all","val":4,"cd":4,"rarity":"A","category":"debuff"},{"id":"skill_23","name":"Doom","desc":"All stats-7 to all enemies","effect":"debuff_all_aoe","val":7,"cd":6,"rarity":"S","category":"debuff"},{"id":"skill_24","name":"Flash Step","desc":"Teleport to enemy and attack","effect":"teleport_attack","val":1.0,"cd":3,"rarity":"B","category":"attack"},{"id":"skill_25","name":"Shadow Strike","desc":"Teleport behind enemy, ATK+50%","effect":"teleport_attack","val":1.5,"cd":4,"rarity":"A","category":"attack"},{"id":"skill_26","name":"Dimensional Rift","desc":"Teleport anywhere and AoE attack","effect":"teleport_aoe","val":0.8,"cd":6,"rarity":"S","category":"attack"},{"id":"skill_27","name":"Iron Wall","desc":"DEF\u00d72 for this combat","effect":"def_multiply","val":2,"cd":3,"rarity":"B","category":"defense"},{"id":"skill_28","name":"Pavise","desc":"Reduce damage by 50% this combat","effect":"damage_reduce","val":0.5,"cd":3,"rarity":"B","category":"defense"},{"id":"skill_29","name":"Miracle","desc":"Survive with 1 HP if would die","effect":"survive","val":1,"cd":5,"rarity":"S","category":"defense"},{"id":"skill_30","name":"Invincible","desc":"Take 0 damage this combat","effect":"invincible","val":0,"cd":6,"rarity":"T0","category":"defense"},{"id":"skill_31","name":"Counter Surge","desc":"Counter at 2x damage","effect":"counter_boost","val":2.0,"cd":4,"rarity":"A","category":"defense"},{"id":"skill_32","name":"Deep Freeze","desc":"Freeze target for 2 turns","effect":"freeze","val":2,"cd":3,"rarity":"B","category":"status"},{"id":"skill_33","name":"Inferno","desc":"Burn target for 10/turn for 3 turns","effect":"burn","val":10,"cd":3,"rarity":"B","category":"status"},{"id":"skill_34","name":"Venom Strike","desc":"Poison target 8/turn for 3 turns","effect":"poison","val":8,"cd":3,"rarity":"B","category":"status"},{"id":"skill_35","name":"Mass Panic","desc":"Panic all enemies","effect":"panic_all","val":1,"cd":5,"rarity":"S","category":"status"},{"id":"skill_36","name":"Gravity Well","desc":"All enemies cannot move next turn","effect":"gravity_all","val":1,"cd":5,"rarity":"S","category":"status"},{"id":"skill_37","name":"Silence","desc":"Target cannot use Special for 3 turns","effect":"silence","val":3,"cd":4,"rarity":"A","category":"status"},{"id":"skill_38","name":"Earthquake","desc":"10 damage to all units not Flying","effect":"map_quake","val":10,"cd":5,"rarity":"A","category":"map"},{"id":"skill_39","name":"Blizzard","desc":"Freeze all enemies; 5 damage","effect":"map_blizzard","val":5,"cd":6,"rarity":"S","category":"map"},{"id":"skill_40","name":"Firestorm","desc":"15 burn damage to all enemies","effect":"map_fire","val":15,"cd":6,"rarity":"S","category":"map"},{"id":"skill_41","name":"Sanctuary","desc":"All allies heal 20 HP","effect":"map_heal","val":20,"cd":5,"rarity":"A","category":"map"},{"id":"skill_42","name":"Time Stop","desc":"All enemies skip next turn","effect":"map_timestop","val":1,"cd":8,"rarity":"T0","category":"map"},{"id":"skill_43","name":"Dragon Fang+","desc":"+60% damage","effect":"dmg_boost","val":0.6,"cd":4,"rarity":"A","category":"special"},{"id":"skill_44","name":"Moonbow+","desc":"Ignores 40% DEF","effect":"def_pierce","val":0.4,"cd":2,"rarity":"A","category":"special"},{"id":"skill_45","name":"Aether+","desc":"Heals 60% dealt, +40% damage","effect":"lifesteal","val":0.6,"cd":5,"rarity":"S","category":"special"},{"id":"skill_46","name":"Galeforce+","desc":"Extra action; guaranteed","effect":"extra_action","val":1,"cd":4,"rarity":"S","category":"special"},{"id":"skill_47","name":"Black Luna","desc":"Ignores 80% of DEF","effect":"def_ignore","val":0.8,"cd":3,"rarity":"T0","category":"special"},{"id":"skill_48","name":"Ice Mirror","desc":"Adds damage taken as bonus damage","effect":"counter_store","val":1,"cd":3,"rarity":"A","category":"special"},{"id":"skill_49","name":"Radiant Dawn","desc":"Heals all allies 25 HP; self ATK+10","effect":"combo_heal_buff","val":25,"cd":6,"rarity":"T0","category":"special"},{"id":"skill_50","name":"Lethality","desc":"Instantly defeats target (30% chance, else 3x damage)","effect":"instant_kill","val":0.3,"cd":7,"rarity":"T0","category":"special"},{"id":"skill_51","name":"Light Blast","desc":"Light-type blast: 110% power (CD: 2)","effect":"light_blast","val":1.1,"cd":2,"rarity":"B","category":"debuff"},{"id":"skill_52","name":"Dark Barrage","desc":"Dark-type barrage: 70% power (CD: 4)","effect":"dark_barrage","val":0.7,"cd":4,"rarity":"B","category":"support"},{"id":"skill_53","name":"Light Thrust","desc":"Light-type thrust: 119% power (CD: 4)","effect":"light_thrust","val":1.19,"cd":4,"rarity":"A","category":"attack"},{"id":"skill_54","name":"Earth Volley","desc":"Earth-type volley: 133% power (CD: 2)","effect":"earth_volley","val":1.33,"cd":2,"rarity":"A","category":"status"},{"id":"skill_55","name":"Earth Smite","desc":"Earth-type smite: 148% power (CD: 4)","effect":"earth_smite","val":1.48,"cd":4,"rarity":"B","category":"attack"},{"id":"skill_56","name":"Light Slash","desc":"Light-type slash: 42% power (CD: 4)","effect":"light_slash","val":0.42,"cd":4,"rarity":"B","category":"status"},{"id":"skill_57","name":"Light Cleave","desc":"Light-type cleave: 141% power (CD: 6)","effect":"light_cleave","val":1.41,"cd":6,"rarity":"A","category":"status"},{"id":"skill_58","name":"Earth Blast","desc":"Earth-type blast: 105% power (CD: 5)","effect":"earth_blast","val":1.05,"cd":5,"rarity":"S","category":"status"},{"id":"skill_59","name":"Dark Blast","desc":"Dark-type blast: 53% power (CD: 2)","effect":"dark_blast","val":0.53,"cd":2,"rarity":"A","category":"support"},{"id":"skill_60","name":"Fire Cleave","desc":"Fire-type cleave: 133% power (CD: 2)","effect":"fire_cleave","val":1.33,"cd":2,"rarity":"S","category":"status"},{"id":"skill_61","name":"Dark Pierce","desc":"Dark-type pierce: 96% power (CD: 6)","effect":"dark_pierce","val":0.96,"cd":6,"rarity":"B","category":"attack"},{"id":"skill_62","name":"Water Crush","desc":"Water-type crush: 81% power (CD: 5)","effect":"water_crush","val":0.81,"cd":5,"rarity":"S","category":"support"},{"id":"skill_63","name":"Fire Crush","desc":"Fire-type crush: 41% power (CD: 2)","effect":"fire_crush","val":0.41,"cd":2,"rarity":"C","category":"debuff"},{"id":"skill_64","name":"Ice Volley","desc":"Ice-type volley: 84% power (CD: 3)","effect":"ice_volley","val":0.84,"cd":3,"rarity":"B","category":"status"},{"id":"skill_65","name":"Thunder Smite","desc":"Thunder-type smite: 31% power (CD: 3)","effect":"thunder_smite","val":0.31,"cd":3,"rarity":"S","category":"debuff"},{"id":"skill_66","name":"Dark Crush","desc":"Dark-type crush: 139% power (CD: 3)","effect":"dark_crush","val":1.39,"cd":3,"rarity":"S","category":"status"},{"id":"skill_67","name":"Water Cleave","desc":"Water-type cleave: 47% power (CD: 5)","effect":"water_cleave","val":0.47,"cd":5,"rarity":"B","category":"debuff"},{"id":"skill_68","name":"Earth Thrust","desc":"Earth-type thrust: 40% power (CD: 6)","effect":"earth_thrust","val":0.4,"cd":6,"rarity":"C","category":"attack"},{"id":"skill_69","name":"Wind Smite","desc":"Wind-type smite: 133% power (CD: 4)","effect":"wind_smite","val":1.33,"cd":4,"rarity":"A","category":"status"},{"id":"skill_70","name":"Dark Bolt","desc":"Dark-type bolt: 119% power (CD: 2)","effect":"dark_bolt","val":1.19,"cd":2,"rarity":"A","category":"attack"},{"id":"skill_71","name":"Thunder Nova","desc":"Thunder-type nova: 76% power (CD: 2)","effect":"thunder_nova","val":0.76,"cd":2,"rarity":"B","category":"attack"},{"id":"skill_72","name":"Wind Rend","desc":"Wind-type rend: 98% power (CD: 6)","effect":"wind_rend","val":0.98,"cd":6,"rarity":"S","category":"status"},{"id":"skill_73","name":"Ice Slash","desc":"Ice-type slash: 142% power (CD: 4)","effect":"ice_slash","val":1.42,"cd":4,"rarity":"A","category":"attack"},{"id":"skill_74","name":"Water Crush","desc":"Water-type crush: 84% power (CD: 3)","effect":"water_crush","val":0.84,"cd":3,"rarity":"C","category":"status"},{"id":"skill_75","name":"Dark Cleave","desc":"Dark-type cleave: 57% power (CD: 6)","effect":"dark_cleave","val":0.58,"cd":6,"rarity":"C","category":"attack"},{"id":"skill_76","name":"Earth Blast","desc":"Earth-type blast: 79% power (CD: 4)","effect":"earth_blast","val":0.79,"cd":4,"rarity":"C","category":"debuff"},{"id":"skill_77","name":"Fire Cleave","desc":"Fire-type cleave: 71% power (CD: 4)","effect":"fire_cleave","val":0.71,"cd":4,"rarity":"S","category":"attack"},{"id":"skill_78","name":"Fire Pierce","desc":"Fire-type pierce: 121% power (CD: 2)","effect":"fire_pierce","val":1.21,"cd":2,"rarity":"A","category":"status"},{"id":"skill_79","name":"Dark Barrage","desc":"Dark-type barrage: 137% power (CD: 2)","effect":"dark_barrage","val":1.37,"cd":2,"rarity":"C","category":"attack"},{"id":"skill_80","name":"Fire Slash","desc":"Fire-type slash: 144% power (CD: 6)","effect":"fire_slash","val":1.44,"cd":6,"rarity":"B","category":"attack"},{"id":"skill_81","name":"Fire Thrust","desc":"Fire-type thrust: 80% power (CD: 6)","effect":"fire_thrust","val":0.8,"cd":6,"rarity":"B","category":"debuff"},{"id":"skill_82","name":"Light Wave","desc":"Light-type wave: 146% power (CD: 3)","effect":"light_wave","val":1.46,"cd":3,"rarity":"S","category":"support"},{"id":"skill_83","name":"Fire Crush","desc":"Fire-type crush: 80% power (CD: 3)","effect":"fire_crush","val":0.8,"cd":3,"rarity":"S","category":"debuff"},{"id":"skill_84","name":"Dark Strike","desc":"Dark-type strike: 147% power (CD: 4)","effect":"dark_strike","val":1.47,"cd":4,"rarity":"B","category":"attack"},{"id":"skill_85","name":"Ice Slash","desc":"Ice-type slash: 111% power (CD: 5)","effect":"ice_slash","val":1.11,"cd":5,"rarity":"C","category":"status"},{"id":"skill_86","name":"Thunder Rend","desc":"Thunder-type rend: 100% power (CD: 3)","effect":"thunder_rend","val":1.0,"cd":3,"rarity":"A","category":"attack"},{"id":"skill_87","name":"Wind Crush","desc":"Wind-type crush: 66% power (CD: 2)","effect":"wind_crush","val":0.66,"cd":2,"rarity":"C","category":"support"},{"id":"skill_88","name":"Earth Bolt","desc":"Earth-type bolt: 40% power (CD: 3)","effect":"earth_bolt","val":0.4,"cd":3,"rarity":"C","category":"support"},{"id":"skill_89","name":"Fire Volley","desc":"Fire-type volley: 49% power (CD: 5)","effect":"fire_volley","val":0.49,"cd":5,"rarity":"A","category":"debuff"},{"id":"skill_90","name":"Wind Slash","desc":"Wind-type slash: 87% power (CD: 3)","effect":"wind_slash","val":0.87,"cd":3,"rarity":"S","category":"support"},{"id":"skill_91","name":"Ice Bolt","desc":"Ice-type bolt: 131% power (CD: 6)","effect":"ice_bolt","val":1.31,"cd":6,"rarity":"B","category":"attack"},{"id":"skill_92","name":"Thunder Volley","desc":"Thunder-type volley: 68% power (CD: 4)","effect":"thunder_volley","val":0.68,"cd":4,"rarity":"A","category":"attack"},{"id":"skill_93","name":"Wind Crush","desc":"Wind-type crush: 56% power (CD: 4)","effect":"wind_crush","val":0.57,"cd":4,"rarity":"A","category":"debuff"},{"id":"skill_94","name":"Fire Cleave","desc":"Fire-type cleave: 102% power (CD: 3)","effect":"fire_cleave","val":1.02,"cd":3,"rarity":"A","category":"attack"},{"id":"skill_95","name":"Water Barrage","desc":"Water-type barrage: 79% power (CD: 3)","effect":"water_barrage","val":0.79,"cd":3,"rarity":"A","category":"support"},{"id":"skill_96","name":"Water Pierce","desc":"Water-type pierce: 52% power (CD: 4)","effect":"water_pierce","val":0.52,"cd":4,"rarity":"C","category":"status"},{"id":"skill_97","name":"Ice Shatter","desc":"Ice-type shatter: 54% power (CD: 3)","effect":"ice_shatter","val":0.54,"cd":3,"rarity":"B","category":"status"},{"id":"skill_98","name":"Light Strike","desc":"Light-type strike: 125% power (CD: 4)","effect":"light_strike","val":1.25,"cd":4,"rarity":"A","category":"attack"},{"id":"skill_99","name":"Earth Wave","desc":"Earth-type wave: 56% power (CD: 3)","effect":"earth_wave","val":0.57,"cd":3,"rarity":"B","category":"debuff"},{"id":"skill_100","name":"Dark Thrust","desc":"Dark-type thrust: 145% power (CD: 6)","effect":"dark_thrust","val":1.45,"cd":6,"rarity":"B","category":"status"},{"id":"skill_101","name":"Wind Pierce","desc":"Wind-type pierce: 101% power (CD: 4)","effect":"wind_pierce","val":1.01,"cd":4,"rarity":"A","category":"attack"},{"id":"skill_102","name":"Fire Barrage","desc":"Fire-type barrage: 143% power (CD: 6)","effect":"fire_barrage","val":1.43,"cd":6,"rarity":"B","category":"attack"},{"id":"skill_103","name":"Wind Slash","desc":"Wind-type slash: 134% power (CD: 2)","effect":"wind_slash","val":1.34,"cd":2,"rarity":"A","category":"support"},{"id":"skill_104","name":"Dark Blast","desc":"Dark-type blast: 141% power (CD: 4)","effect":"dark_blast","val":1.41,"cd":4,"rarity":"S","category":"support"},{"id":"skill_105","name":"Earth Blast","desc":"Earth-type blast: 63% power (CD: 5)","effect":"earth_blast","val":0.63,"cd":5,"rarity":"B","category":"attack"},{"id":"skill_106","name":"Light Blast","desc":"Light-type blast: 84% power (CD: 5)","effect":"light_blast","val":0.84,"cd":5,"rarity":"A","category":"debuff"},{"id":"skill_107","name":"Earth Rend","desc":"Earth-type rend: 136% power (CD: 4)","effect":"earth_rend","val":1.36,"cd":4,"rarity":"B","category":"attack"},{"id":"skill_108","name":"Ice Barrage","desc":"Ice-type barrage: 111% power (CD: 6)","effect":"ice_barrage","val":1.11,"cd":6,"rarity":"C","category":"attack"},{"id":"skill_109","name":"Light Barrage","desc":"Light-type barrage: 118% power (CD: 3)","effect":"light_barrage","val":1.18,"cd":3,"rarity":"B","category":"attack"},{"id":"skill_110","name":"Dark Nova","desc":"Dark-type nova: 73% power (CD: 2)","effect":"dark_nova","val":0.73,"cd":2,"rarity":"B","category":"attack"},{"id":"skill_111","name":"Light Thrust","desc":"Light-type thrust: 105% power (CD: 3)","effect":"light_thrust","val":1.05,"cd":3,"rarity":"A","category":"attack"},{"id":"skill_112","name":"Fire Blast","desc":"Fire-type blast: 38% power (CD: 3)","effect":"fire_blast","val":0.38,"cd":3,"rarity":"C","category":"attack"},{"id":"skill_113","name":"Water Volley","desc":"Water-type volley: 92% power (CD: 4)","effect":"water_volley","val":0.92,"cd":4,"rarity":"A","category":"debuff"},{"id":"skill_114","name":"Fire Blast","desc":"Fire-type blast: 107% power (CD: 3)","effect":"fire_blast","val":1.07,"cd":3,"rarity":"A","category":"status"},{"id":"skill_115","name":"Fire Barrage","desc":"Fire-type barrage: 102% power (CD: 2)","effect":"fire_barrage","val":1.02,"cd":2,"rarity":"B","category":"attack"},{"id":"skill_116","name":"Dark Thrust","desc":"Dark-type thrust: 110% power (CD: 2)","effect":"dark_thrust","val":1.1,"cd":2,"rarity":"S","category":"attack"},{"id":"skill_117","name":"Ice Barrage","desc":"Ice-type barrage: 77% power (CD: 5)","effect":"ice_barrage","val":0.77,"cd":5,"rarity":"B","category":"attack"},{"id":"skill_118","name":"Light Strike","desc":"Light-type strike: 85% power (CD: 2)","effect":"light_strike","val":0.85,"cd":2,"rarity":"A","category":"attack"},{"id":"skill_119","name":"Dark Nova","desc":"Dark-type nova: 35% power (CD: 4)","effect":"dark_nova","val":0.35,"cd":4,"rarity":"A","category":"attack"},{"id":"skill_120","name":"Light Smite","desc":"Light-type smite: 90% power (CD: 2)","effect":"light_smite","val":0.9,"cd":2,"rarity":"B","category":"support"},{"id":"skill_121","name":"Water Rend","desc":"Water-type rend: 77% power (CD: 2)","effect":"water_rend","val":0.77,"cd":2,"rarity":"B","category":"attack"},{"id":"skill_122","name":"Water Nova","desc":"Water-type nova: 56% power (CD: 5)","effect":"water_nova","val":0.56,"cd":5,"rarity":"A","category":"attack"},{"id":"skill_123","name":"Water Strike","desc":"Water-type strike: 34% power (CD: 4)","effect":"water_strike","val":0.34,"cd":4,"rarity":"B","category":"support"},{"id":"skill_124","name":"Fire Strike","desc":"Fire-type strike: 53% power (CD: 5)","effect":"fire_strike","val":0.53,"cd":5,"rarity":"C","category":"attack"},{"id":"skill_125","name":"Fire Volley","desc":"Fire-type volley: 79% power (CD: 2)","effect":"fire_volley","val":0.79,"cd":2,"rarity":"A","category":"status"},{"id":"skill_126","name":"Light Crush","desc":"Light-type crush: 32% power (CD: 4)","effect":"light_crush","val":0.32,"cd":4,"rarity":"A","category":"attack"},{"id":"skill_127","name":"Thunder Pierce","desc":"Thunder-type pierce: 61% power (CD: 3)","effect":"thunder_pierce","val":0.61,"cd":3,"rarity":"C","category":"support"},{"id":"skill_128","name":"Ice Barrage","desc":"Ice-type barrage: 79% power (CD: 5)","effect":"ice_barrage","val":0.79,"cd":5,"rarity":"C","category":"attack"},{"id":"skill_129","name":"Light Volley","desc":"Light-type volley: 149% power (CD: 6)","effect":"light_volley","val":1.49,"cd":6,"rarity":"A","category":"support"},{"id":"skill_130","name":"Fire Slash","desc":"Fire-type slash: 68% power (CD: 5)","effect":"fire_slash","val":0.68,"cd":5,"rarity":"B","category":"attack"},{"id":"skill_131","name":"Light Wave","desc":"Light-type wave: 30% power (CD: 2)","effect":"light_wave","val":0.3,"cd":2,"rarity":"A","category":"attack"},{"id":"skill_132","name":"Water Pierce","desc":"Water-type pierce: 51% power (CD: 6)","effect":"water_pierce","val":0.51,"cd":6,"rarity":"A","category":"status"},{"id":"skill_133","name":"Light Bolt","desc":"Light-type bolt: 80% power (CD: 5)","effect":"light_bolt","val":0.8,"cd":5,"rarity":"C","category":"attack"},{"id":"skill_134","name":"Wind Shatter","desc":"Wind-type shatter: 63% power (CD: 3)","effect":"wind_shatter","val":0.63,"cd":3,"rarity":"B","category":"support"},{"id":"skill_135","name":"Light Shatter","desc":"Light-type shatter: 137% power (CD: 5)","effect":"light_shatter","val":1.37,"cd":5,"rarity":"S","category":"attack"},{"id":"skill_136","name":"Thunder Strike","desc":"Thunder-type strike: 109% power (CD: 4)","effect":"thunder_strike","val":1.09,"cd":4,"rarity":"S","category":"attack"},{"id":"skill_137","name":"Fire Cleave","desc":"Fire-type cleave: 100% power (CD: 3)","effect":"fire_cleave","val":1.0,"cd":3,"rarity":"C","category":"attack"},{"id":"skill_138","name":"Thunder Nova","desc":"Thunder-type nova: 146% power (CD: 4)","effect":"thunder_nova","val":1.46,"cd":4,"rarity":"A","category":"status"},{"id":"skill_139","name":"Dark Blast","desc":"Dark-type blast: 141% power (CD: 2)","effect":"dark_blast","val":1.41,"cd":2,"rarity":"A","category":"attack"},{"id":"skill_140","name":"Earth Cleave","desc":"Earth-type cleave: 67% power (CD: 2)","effect":"earth_cleave","val":0.67,"cd":2,"rarity":"A","category":"attack"},{"id":"skill_141","name":"Thunder Pierce","desc":"Thunder-type pierce: 149% power (CD: 5)","effect":"thunder_pierce","val":1.49,"cd":5,"rarity":"A","category":"attack"},{"id":"skill_142","name":"Wind Cleave","desc":"Wind-type cleave: 136% power (CD: 3)","effect":"wind_cleave","val":1.36,"cd":3,"rarity":"B","category":"attack"},{"id":"skill_143","name":"Dark Nova","desc":"Dark-type nova: 49% power (CD: 5)","effect":"dark_nova","val":0.49,"cd":5,"rarity":"B","category":"status"},{"id":"skill_144","name":"Wind Thrust","desc":"Wind-type thrust: 33% power (CD: 6)","effect":"wind_thrust","val":0.33,"cd":6,"rarity":"C","category":"attack"},{"id":"skill_145","name":"Fire Pierce","desc":"Fire-type pierce: 60% power (CD: 3)","effect":"fire_pierce","val":0.6,"cd":3,"rarity":"S","category":"support"},{"id":"skill_146","name":"Ice Thrust","desc":"Ice-type thrust: 138% power (CD: 3)","effect":"ice_thrust","val":1.38,"cd":3,"rarity":"C","category":"support"},{"id":"skill_147","name":"Earth Strike","desc":"Earth-type strike: 49% power (CD: 5)","effect":"earth_strike","val":0.49,"cd":5,"rarity":"B","category":"attack"},{"id":"skill_148","name":"Wind Cleave","desc":"Wind-type cleave: 99% power (CD: 5)","effect":"wind_cleave","val":0.99,"cd":5,"rarity":"C","category":"support"},{"id":"skill_149","name":"Thunder Thrust","desc":"Thunder-type thrust: 72% power (CD: 3)","effect":"thunder_thrust","val":0.72,"cd":3,"rarity":"B","category":"debuff"},{"id":"skill_150","name":"Wind Blast","desc":"Wind-type blast: 100% power (CD: 6)","effect":"wind_blast","val":1.0,"cd":6,"rarity":"C","category":"attack"},{"id":"skill_151","name":"Thunder Volley","desc":"Thunder-type volley: 33% power (CD: 4)","effect":"thunder_volley","val":0.33,"cd":4,"rarity":"A","category":"debuff"},{"id":"skill_152","name":"Ice Shatter","desc":"Ice-type shatter: 117% power (CD: 6)","effect":"ice_shatter","val":1.17,"cd":6,"rarity":"S","category":"attack"},{"id":"skill_153","name":"Wind Thrust","desc":"Wind-type thrust: 96% power (CD: 6)","effect":"wind_thrust","val":0.96,"cd":6,"rarity":"B","category":"attack"},{"id":"skill_154","name":"Water Smite","desc":"Water-type smite: 40% power (CD: 3)","effect":"water_smite","val":0.4,"cd":3,"rarity":"B","category":"support"},{"id":"skill_155","name":"Earth Wave","desc":"Earth-type wave: 139% power (CD: 6)","effect":"earth_wave","val":1.39,"cd":6,"rarity":"S","category":"attack"},{"id":"skill_156","name":"Light Pierce","desc":"Light-type pierce: 111% power (CD: 3)","effect":"light_pierce","val":1.11,"cd":3,"rarity":"A","category":"debuff"},{"id":"skill_157","name":"Fire Strike","desc":"Fire-type strike: 145% power (CD: 2)","effect":"fire_strike","val":1.45,"cd":2,"rarity":"B","category":"attack"},{"id":"skill_158","name":"Thunder Strike","desc":"Thunder-type strike: 129% power (CD: 5)","effect":"thunder_strike","val":1.29,"cd":5,"rarity":"B","category":"support"},{"id":"skill_159","name":"Thunder Crush","desc":"Thunder-type crush: 72% power (CD: 5)","effect":"thunder_crush","val":0.72,"cd":5,"rarity":"C","category":"attack"},{"id":"skill_160","name":"Dark Bolt","desc":"Dark-type bolt: 112% power (CD: 6)","effect":"dark_bolt","val":1.13,"cd":6,"rarity":"A","category":"attack"},{"id":"skill_161","name":"Fire Barrage","desc":"Fire-type barrage: 79% power (CD: 5)","effect":"fire_barrage","val":0.79,"cd":5,"rarity":"B","category":"attack"},{"id":"skill_162","name":"Earth Bolt","desc":"Earth-type bolt: 95% power (CD: 2)","effect":"earth_bolt","val":0.95,"cd":2,"rarity":"C","category":"debuff"},{"id":"skill_163","name":"Wind Rend","desc":"Wind-type rend: 79% power (CD: 4)","effect":"wind_rend","val":0.79,"cd":4,"rarity":"A","category":"status"},{"id":"skill_164","name":"Earth Thrust","desc":"Earth-type thrust: 127% power (CD: 4)","effect":"earth_thrust","val":1.27,"cd":4,"rarity":"C","category":"debuff"},{"id":"skill_165","name":"Dark Smite","desc":"Dark-type smite: 35% power (CD: 2)","effect":"dark_smite","val":0.35,"cd":2,"rarity":"A","category":"status"},{"id":"skill_166","name":"Dark Smite","desc":"Dark-type smite: 146% power (CD: 3)","effect":"dark_smite","val":1.46,"cd":3,"rarity":"B","category":"attack"},{"id":"skill_167","name":"Wind Strike","desc":"Wind-type strike: 82% power (CD: 2)","effect":"wind_strike","val":0.82,"cd":2,"rarity":"C","category":"debuff"},{"id":"skill_168","name":"Ice Strike","desc":"Ice-type strike: 50% power (CD: 6)","effect":"ice_strike","val":0.5,"cd":6,"rarity":"B","category":"attack"},{"id":"skill_169","name":"Water Rend","desc":"Water-type rend: 137% power (CD: 2)","effect":"water_rend","val":1.37,"cd":2,"rarity":"C","category":"attack"},{"id":"skill_170","name":"Wind Rend","desc":"Wind-type rend: 68% power (CD: 4)","effect":"wind_rend","val":0.68,"cd":4,"rarity":"B","category":"attack"},{"id":"skill_171","name":"Wind Thrust","desc":"Wind-type thrust: 142% power (CD: 2)","effect":"wind_thrust","val":1.42,"cd":2,"rarity":"C","category":"status"},{"id":"skill_172","name":"Ice Cleave","desc":"Ice-type cleave: 49% power (CD: 5)","effect":"ice_cleave","val":0.49,"cd":5,"rarity":"B","category":"attack"},{"id":"skill_173","name":"Earth Cleave","desc":"Earth-type cleave: 124% power (CD: 6)","effect":"earth_cleave","val":1.24,"cd":6,"rarity":"S","category":"attack"},{"id":"skill_174","name":"Water Wave","desc":"Water-type wave: 127% power (CD: 6)","effect":"water_wave","val":1.27,"cd":6,"rarity":"B","category":"attack"},{"id":"skill_175","name":"Water Cleave","desc":"Water-type cleave: 120% power (CD: 5)","effect":"water_cleave","val":1.2,"cd":5,"rarity":"S","category":"attack"},{"id":"skill_176","name":"Dark Bolt","desc":"Dark-type bolt: 79% power (CD: 3)","effect":"dark_bolt","val":0.79,"cd":3,"rarity":"B","category":"attack"},{"id":"skill_177","name":"Ice Cleave","desc":"Ice-type cleave: 109% power (CD: 3)","effect":"ice_cleave","val":1.09,"cd":3,"rarity":"S","category":"debuff"},{"id":"skill_178","name":"Water Smite","desc":"Water-type smite: 37% power (CD: 6)","effect":"water_smite","val":0.37,"cd":6,"rarity":"B","category":"attack"},{"id":"skill_179","name":"Ice Volley","desc":"Ice-type volley: 50% power (CD: 4)","effect":"ice_volley","val":0.5,"cd":4,"rarity":"A","category":"attack"},{"id":"skill_180","name":"Water Wave","desc":"Water-type wave: 133% power (CD: 5)","effect":"water_wave","val":1.33,"cd":5,"rarity":"C","category":"attack"},{"id":"skill_181","name":"Dark Wave","desc":"Dark-type wave: 62% power (CD: 3)","effect":"dark_wave","val":0.62,"cd":3,"rarity":"A","category":"status"},{"id":"skill_182","name":"Light Strike","desc":"Light-type strike: 56% power (CD: 5)","effect":"light_strike","val":0.56,"cd":5,"rarity":"A","category":"status"},{"id":"skill_183","name":"Water Barrage","desc":"Water-type barrage: 146% power (CD: 2)","effect":"water_barrage","val":1.46,"cd":2,"rarity":"A","category":"debuff"},{"id":"skill_184","name":"Ice Slash","desc":"Ice-type slash: 52% power (CD: 6)","effect":"ice_slash","val":0.52,"cd":6,"rarity":"A","category":"status"},{"id":"skill_185","name":"Ice Crush","desc":"Ice-type crush: 131% power (CD: 6)","effect":"ice_crush","val":1.31,"cd":6,"rarity":"A","category":"status"},{"id":"skill_186","name":"Dark Strike","desc":"Dark-type strike: 32% power (CD: 6)","effect":"dark_strike","val":0.32,"cd":6,"rarity":"A","category":"status"},{"id":"skill_187","name":"Ice Nova","desc":"Ice-type nova: 39% power (CD: 2)","effect":"ice_nova","val":0.39,"cd":2,"rarity":"A","category":"attack"},{"id":"skill_188","name":"Earth Nova","desc":"Earth-type nova: 82% power (CD: 6)","effect":"earth_nova","val":0.82,"cd":6,"rarity":"A","category":"debuff"},{"id":"skill_189","name":"Earth Cleave","desc":"Earth-type cleave: 72% power (CD: 4)","effect":"earth_cleave","val":0.72,"cd":4,"rarity":"S","category":"attack"},{"id":"skill_190","name":"Earth Crush","desc":"Earth-type crush: 46% power (CD: 5)","effect":"earth_crush","val":0.46,"cd":5,"rarity":"A","category":"attack"},{"id":"skill_191","name":"Light Crush","desc":"Light-type crush: 56% power (CD: 5)","effect":"light_crush","val":0.56,"cd":5,"rarity":"C","category":"attack"},{"id":"skill_192","name":"Water Crush","desc":"Water-type crush: 53% power (CD: 6)","effect":"water_crush","val":0.53,"cd":6,"rarity":"B","category":"attack"},{"id":"skill_193","name":"Dark Barrage","desc":"Dark-type barrage: 136% power (CD: 3)","effect":"dark_barrage","val":1.36,"cd":3,"rarity":"B","category":"support"},{"id":"skill_194","name":"Wind Slash","desc":"Wind-type slash: 83% power (CD: 3)","effect":"wind_slash","val":0.83,"cd":3,"rarity":"A","category":"attack"},{"id":"skill_195","name":"Earth Smite","desc":"Earth-type smite: 64% power (CD: 6)","effect":"earth_smite","val":0.64,"cd":6,"rarity":"C","category":"support"},{"id":"skill_196","name":"Dark Blast","desc":"Dark-type blast: 66% power (CD: 2)","effect":"dark_blast","val":0.66,"cd":2,"rarity":"A","category":"attack"},{"id":"skill_197","name":"Earth Strike","desc":"Earth-type strike: 53% power (CD: 2)","effect":"earth_strike","val":0.53,"cd":2,"rarity":"A","category":"attack"},{"id":"skill_198","name":"Light Pierce","desc":"Light-type pierce: 56% power (CD: 5)","effect":"light_pierce","val":0.56,"cd":5,"rarity":"B","category":"attack"},{"id":"skill_199","name":"Dark Nova","desc":"Dark-type nova: 61% power (CD: 3)","effect":"dark_nova","val":0.61,"cd":3,"rarity":"A","category":"support"},{"id":"skill_200","name":"Fire Blast","desc":"Fire-type blast: 45% power (CD: 6)","effect":"fire_blast","val":0.45,"cd":6,"rarity":"S","category":"status"}];
+
+const CAMPAIGN_EXPANDED = [{"id":101,"name":"Echoes of a Broken World","desc":"Strange portals open across the land. You are summoned as a Tactician to lead the Order of Apex.","enemyCount":2,"enemyMult":0.5,"mapW":6,"mapH":6,"terrain":"grassland","dialog":[{"name":"???","text":"You... you can see me? The gates are opening. Heroes from across time are being pulled through. We need someone to lead them."},{"name":"Archivist Lena","text":"I am Lena, keeper of the Nexus Archive. The multiverse is fracturing. You must gather heroes from the echo-realms and stop the Collapse."},{"name":"Archivist Lena","text":"Your first allies await. They seem... confused. One of them thinks they are a legendary dragon slayer. The other insists they are a famous pastry chef."},{"name":"Archivist Lena","text":"Regardless of who they think they are, they can fight. Lead them well, Tactician."}],"arc":"The Shattered Gate"},{"id":102,"name":"The Village Ablaze","desc":"Bandits attack a border village. Your new recruits must prove themselves.","enemyCount":3,"enemyMult":0.6,"mapW":7,"mapH":7,"terrain":"grassland","dialog":[{"name":"Village Elder","text":"Please, strangers! Raiders from the Rift are burning our homes! They appeared from a glowing crack in the sky!"},{"name":"[RANDOM_UNIT_0]","text":"Fear not, old one! I shall defeat them with my legendary technique: running directly at them while screaming!"},{"name":"[RANDOM_UNIT_1]","text":"That is... not a technique. But I suppose it will have to do. Tactician, give us orders!"}],"arc":"The Shattered Gate"},{"id":103,"name":"Forest of Echoes","desc":"The forest is alive with displaced wildlife and temporal anomalies.","enemyCount":3,"enemyMult":0.7,"mapW":8,"mapH":7,"terrain":"forest","dialog":[{"name":"Archivist Lena","text":"These woods are from three different timelines overlapping. You might see trees that havent been planted yet growing next to trees that were cut down centuries ago."},{"name":"[RANDOM_UNIT_0]","text":"I just saw myself walk past. A different me. They were wearing a hat. I dont own a hat."},{"name":"[RANDOM_UNIT_1]","text":"Focus! Enemies ahead. They look like... well, they look confused too. But hostile."}],"arc":"The Shattered Gate"},{"id":104,"name":"The Ruined Bridge","desc":"Cross the shattered bridge while enemies attack from both sides.","enemyCount":4,"enemyMult":0.8,"mapW":8,"mapH":6,"terrain":"bridge","dialog":[{"name":"Scout","text":"The bridge is unstable! Enemy cavalry approach from the north, and archers hold the southern cliff!"},{"name":"[RANDOM_UNIT_0]","text":"I have a plan. It involves the bridge, some fire, and a lot of hope."},{"name":"Archivist Lena","text":"Please do NOT burn the bridge. We need to cross it."}],"arc":"The Shattered Gate"},{"id":105,"name":"Sanctuary of the First Gate","desc":"Reach the first Gate Fragment before the Rift Walkers claim it.","enemyCount":4,"enemyMult":0.9,"mapW":8,"mapH":8,"terrain":"ruins","dialog":[{"name":"Archivist Lena","text":"The first Gate Fragment is here. If the Rift Walkers reach it first, they can tear this world apart permanently."},{"name":"Rift Commander","text":"Too late, Tactician. The fragment belongs to the Collapse now."},{"name":"[RANDOM_UNIT_0]","text":"Over my dramatically posed body!"}],"arc":"The Shattered Gate"},{"id":106,"name":"The Rift Commanders Gambit","desc":"The enemy commander reveals their trap. Fight through the ambush.","enemyCount":5,"enemyMult":1.0,"mapW":9,"mapH":8,"terrain":"ruins","dialog":[{"name":"Rift Commander","text":"You thought this was about the fragment? I needed you HERE while my forces took your base. Amusing, isnt it?"},{"name":"[RANDOM_UNIT_1]","text":"Not really. Because WE left a trap at our base too. Its called [RANDOM_UNIT_2]."},{"name":"Rift Commander","text":"...that one? They fell asleep during your last strategy meeting."},{"name":"[RANDOM_UNIT_1]","text":"Yes. And they fight in their sleep. Its terrifying."}],"arc":"The Shattered Gate"},{"id":107,"name":"Reclaiming the Base","desc":"Rush back to defend your headquarters from the Rift ambush.","enemyCount":4,"enemyMult":1.0,"mapW":8,"mapH":8,"terrain":"castle","dialog":[{"name":"[RANDOM_UNIT_2]","text":"Oh, you are back! I had the most wonderful nap. Also I defeated twelve soldiers. Somehow."},{"name":"Archivist Lena","text":"The base is secure but damaged. We need to push into the Rift itself to stop more invasions."}],"arc":"The Shattered Gate"},{"id":108,"name":"Into the Rift","desc":"Enter the dimensional rift for the first time. Reality is unstable.","enemyCount":5,"enemyMult":1.1,"mapW":9,"mapH":9,"terrain":"void","dialog":[{"name":"Archivist Lena","text":"Inside the Rift, the rules change. Terrain shifts. Enemies appear from nowhere. Time... skips."},{"name":"[RANDOM_UNIT_0]","text":"I just experienced next Tuesday. It was uneventful."},{"name":"[RANDOM_UNIT_1]","text":"FOCUS. Enemies are materializing!"}],"arc":"The Shattered Gate"},{"id":109,"name":"The First Seal","desc":"Find and activate the First Seal to stabilize this sector of the Rift.","enemyCount":5,"enemyMult":1.2,"mapW":9,"mapH":8,"terrain":"void","dialog":[{"name":"Archivist Lena","text":"The Seal is up ahead. But it is guarded by an Echo \u2014 a twisted copy of one of your heroes."},{"name":"[RANDOM_UNIT_0]","text":"Wait... thats ME. Evil me. Evil me has better hair."}],"arc":"The Shattered Gate"},{"id":110,"name":"The Shattered Gate","desc":"Boss battle: Defeat the Gate Guardian to seal the first breach.","enemyCount":4,"enemyMult":1.5,"mapW":10,"mapH":10,"terrain":"void","boss":true,"dialog":[{"name":"Gate Guardian","text":"I have existed between worlds for millennia. You cannot seal what was never truly closed."},{"name":"Archivist Lena","text":"The Guardian is powerful but bound to this gate. Destroy the gate anchors on the map to weaken it!"},{"name":"[RANDOM_UNIT_0]","text":"So the plan is... break things? FINALLY a plan I understand!"}],"arc":"The Shattered Gate"},{"id":201,"name":"Scorched Earth","desc":"Cross the volcanic borderlands into the Flame Kingdom echo-realm.","enemyCount":3,"enemyMult":1.0,"mapW":8,"mapH":8,"terrain":"volcanic","dialog":[{"name":"Archivist Lena","text":"This echo-realm is stuck in an eternal volcanic eruption. The original kingdom fell to a mad king who wielded the Emblem of Flame."},{"name":"[RANDOM_UNIT_0]","text":"Its really hot here. I know thats obvious but I felt it needed to be said."}],"arc":"The Flame Kingdoms"},{"id":202,"name":"The Lava Crossing","desc":"Navigate treacherous lava flows while enemy fire mages attack.","enemyCount":4,"enemyMult":1.1,"mapW":9,"mapH":8,"terrain":"volcanic","dialog":[{"name":"[RANDOM_UNIT_1]","text":"The floor is literally lava. Every childs nightmare realized."}],"arc":"The Flame Kingdoms"},{"id":203,"name":"Fortress Ignis","desc":"Storm the outer walls of the flame fortress.","enemyCount":4,"enemyMult":1.2,"mapW":9,"mapH":9,"terrain":"castle","dialog":[{"name":"Flame General","text":"You dare approach Ignis? Our walls have never fallen!"},{"name":"[RANDOM_UNIT_0]","text":"First time for everything, hot stuff."}],"arc":"The Flame Kingdoms"},{"id":204,"name":"The Ember Court","desc":"Navigate the political intrigue of the flame court to find allies.","enemyCount":3,"enemyMult":1.0,"mapW":8,"mapH":8,"terrain":"castle","dialog":[{"name":"Flame Princess","text":"Not all of us follow the Mad King. Help me reclaim the throne and I will give you the Emblem of Flame."}],"arc":"The Flame Kingdoms"},{"id":205,"name":"Rebellion","desc":"Fight alongside the Flame Princess against loyalist forces.","enemyCount":5,"enemyMult":1.2,"mapW":10,"mapH":9,"terrain":"volcanic","dialog":[{"name":"Flame Princess","text":"For freedom! For a kingdom that doesnt constantly smell like sulfur!"}],"arc":"The Flame Kingdoms"},{"id":206,"name":"The Obsidian Mines","desc":"Descend into dark mines where the Mad King draws his power.","enemyCount":4,"enemyMult":1.3,"mapW":8,"mapH":10,"terrain":"void","dialog":[{"name":"[RANDOM_UNIT_2]","text":"Its dark in here and I keep hearing screaming. Is that normal for mines?"},{"name":"[RANDOM_UNIT_0]","text":"No."}],"arc":"The Flame Kingdoms"},{"id":207,"name":"Heart of the Volcano","desc":"The path leads through an active volcanic chamber.","enemyCount":5,"enemyMult":1.3,"mapW":9,"mapH":9,"terrain":"volcanic","dialog":[{"name":"Archivist Lena","text":"The volcano is alive. It IS the Mad Kings weapon. He merged with the mountain itself."}],"arc":"The Flame Kingdoms"},{"id":208,"name":"The Kings Guard","desc":"Face the Mad Kings elite guard before the throne room.","enemyCount":5,"enemyMult":1.4,"mapW":10,"mapH":9,"terrain":"castle","dialog":[{"name":"Guard Captain","text":"None pass. The King has foreseen your every move."},{"name":"[RANDOM_UNIT_1]","text":"Did he foresee THIS? *trips over own weapon*"},{"name":"Guard Captain","text":"...actually, yes. He said that would happen."}],"arc":"The Flame Kingdoms"},{"id":209,"name":"Throne of Cinders","desc":"Confront the Mad King in his volcanic throne room.","enemyCount":4,"enemyMult":1.5,"mapW":10,"mapH":10,"terrain":"volcanic","boss":true,"dialog":[{"name":"Mad King Pyrrhus","text":"I burned my kingdom to save it. You will burn too. EVERYTHING burns."},{"name":"Flame Princess","text":"Father... please. This doesnt have to end in fire."},{"name":"Mad King Pyrrhus","text":"It ALWAYS ends in fire, child."}],"arc":"The Flame Kingdoms"},{"id":210,"name":"Embers to Ashes","desc":"The volcano erupts. Escape with the Emblem of Flame before the realm collapses.","enemyCount":3,"enemyMult":1.2,"mapW":10,"mapH":10,"terrain":"volcanic","dialog":[{"name":"Archivist Lena","text":"The realm is collapsing! Grab the Emblem and RUN!"},{"name":"[RANDOM_UNIT_0]","text":"Running away from an exploding volcano was NOT in the recruitment brochure."}],"arc":"The Flame Kingdoms"},{"id":301,"name":"Winter Arrives","desc":"Enter the frozen echo-realm where time itself has frozen.","enemyCount":3,"enemyMult":1.2,"mapW":8,"mapH":8,"terrain":"winter","dialog":[{"name":"Archivist Lena","text":"This realm froze mid-battle. The warriors here have been fighting the same fight for a thousand years, trapped in an ice loop."}],"arc":"The Frozen Depths"},{"id":302,"name":"The Ice Wall","desc":"Scale the massive ice wall that divides the realm.","enemyCount":4,"enemyMult":1.3,"mapW":9,"mapH":9,"terrain":"winter","dialog":[],"arc":"The Frozen Depths"},{"id":303,"name":"Frozen Legion","desc":"An entire army stands frozen. Then they thaw. All at once.","enemyCount":5,"enemyMult":1.3,"mapW":10,"mapH":9,"terrain":"winter","dialog":[],"arc":"The Frozen Depths"},{"id":304,"name":"The Thaw","desc":"Melt the ice prisons to free ancient heroes trapped within.","enemyCount":4,"enemyMult":1.2,"mapW":9,"mapH":8,"terrain":"winter","dialog":[],"arc":"The Frozen Depths"},{"id":305,"name":"Glacier Falls","desc":"Cross the collapsing glaciers while enemies attack from ice platforms.","enemyCount":5,"enemyMult":1.4,"mapW":10,"mapH":10,"terrain":"winter","dialog":[],"arc":"The Frozen Depths"},{"id":306,"name":"The Ice Queens Court","desc":"Navigate the court of the immortal Ice Queen.","enemyCount":4,"enemyMult":1.3,"mapW":9,"mapH":9,"terrain":"castle","dialog":[],"arc":"The Frozen Depths"},{"id":307,"name":"Blizzard Assault","desc":"Fight through an endless blizzard that reduces visibility.","enemyCount":5,"enemyMult":1.4,"mapW":10,"mapH":10,"terrain":"winter","dialog":[],"arc":"The Frozen Depths"},{"id":308,"name":"Heart of Winter","desc":"Reach the core where the Emblem of Ice lies dormant.","enemyCount":5,"enemyMult":1.5,"mapW":10,"mapH":10,"terrain":"winter","dialog":[],"arc":"The Frozen Depths"},{"id":309,"name":"The Eternal Knight","desc":"Face the guardian who has waited a thousand years.","enemyCount":4,"enemyMult":1.6,"mapW":10,"mapH":10,"terrain":"winter","boss":true,"dialog":[],"arc":"The Frozen Depths"},{"id":310,"name":"Spring Returns","desc":"With the Emblem claimed, the realm thaws. But something dark awakens beneath.","enemyCount":3,"enemyMult":1.2,"mapW":9,"mapH":9,"terrain":"grassland","dialog":[],"arc":"The Frozen Depths"},{"id":401,"name":"Dark Portents","desc":"Shadows spread across all realms. The Collapse accelerates.","enemyCount":4,"enemyMult":1.4,"mapW":9,"mapH":9,"terrain":"void","dialog":[],"arc":"The Shadow Convergence"},{"id":402,"name":"The Mirror World","desc":"Enter a realm where everything is reversed. Allies become enemies.","enemyCount":4,"enemyMult":1.5,"mapW":10,"mapH":10,"terrain":"ruins","dialog":[],"arc":"The Shadow Convergence"},{"id":403,"name":"Shadows of Yourself","desc":"Face dark copies of your own team.","enemyCount":4,"enemyMult":1.5,"mapW":10,"mapH":10,"terrain":"void","boss":true,"dialog":[],"arc":"The Shadow Convergence"},{"id":404,"name":"The Nexus Breach","desc":"The Archive itself is under attack. Defend Lenas knowledge.","enemyCount":5,"enemyMult":1.5,"mapW":10,"mapH":10,"terrain":"castle","dialog":[],"arc":"The Shadow Convergence"},{"id":405,"name":"Gathering Storm","desc":"Unite forces from all three reclaimed realms.","enemyCount":4,"enemyMult":1.3,"mapW":9,"mapH":9,"terrain":"grassland","dialog":[],"arc":"The Shadow Convergence"},{"id":406,"name":"The War Council","desc":"Political tensions between realm leaders explode into battle.","enemyCount":5,"enemyMult":1.4,"mapW":10,"mapH":9,"terrain":"castle","dialog":[],"arc":"The Shadow Convergence"},{"id":407,"name":"March to the Abyss","desc":"The combined army advances toward the source of the Collapse.","enemyCount":5,"enemyMult":1.5,"mapW":10,"mapH":10,"terrain":"void","dialog":[],"arc":"The Shadow Convergence"},{"id":408,"name":"The Abyssal Gate","desc":"Massive battle at the gate between realms.","enemyCount":6,"enemyMult":1.6,"mapW":11,"mapH":10,"terrain":"void","dialog":[],"arc":"The Shadow Convergence"},{"id":409,"name":"Betrayal","desc":"An ally reveals themselves as a Rift Walker agent.","enemyCount":5,"enemyMult":1.6,"mapW":10,"mapH":10,"terrain":"void","boss":true,"dialog":[],"arc":"The Shadow Convergence"},{"id":410,"name":"Into the Abyss","desc":"Descend into the source of all Rifts.","enemyCount":5,"enemyMult":1.7,"mapW":11,"mapH":11,"terrain":"void","dialog":[],"arc":"The Shadow Convergence"},{"id":501,"name":"The Origin Point","desc":"Reach the place where all timelines converge.","enemyCount":5,"enemyMult":1.6,"mapW":10,"mapH":10,"terrain":"void","dialog":[],"arc":"The Apex"},{"id":502,"name":"Echoes of Every World","desc":"Face champions from every echo-realm simultaneously.","enemyCount":6,"enemyMult":1.7,"mapW":11,"mapH":11,"terrain":"void","dialog":[],"arc":"The Apex"},{"id":503,"name":"The Three Emblems","desc":"Unite the Emblems to forge the key to the Apex.","enemyCount":5,"enemyMult":1.5,"mapW":10,"mapH":10,"terrain":"ruins","dialog":[],"arc":"The Apex"},{"id":504,"name":"Lenas Secret","desc":"The Archivist reveals the truth about the Collapse \u2014 and her role in it.","enemyCount":5,"enemyMult":1.6,"mapW":10,"mapH":10,"terrain":"void","boss":true,"dialog":[],"arc":"The Apex"},{"id":505,"name":"Forgiveness","desc":"Choose to fight or spare Lena. Either way, the Apex awaits.","enemyCount":4,"enemyMult":1.5,"mapW":9,"mapH":9,"terrain":"castle","dialog":[],"arc":"The Apex"},{"id":506,"name":"The Apex Tower: Floor 1","desc":"Climb the infinite tower. Each floor is a different timeline.","enemyCount":5,"enemyMult":1.7,"mapW":10,"mapH":10,"terrain":"ruins","dialog":[],"arc":"The Apex"},{"id":507,"name":"The Apex Tower: Floor 2","desc":"The tower shifts. Your strongest memories become your enemies.","enemyCount":5,"enemyMult":1.8,"mapW":11,"mapH":10,"terrain":"void","dialog":[],"arc":"The Apex"},{"id":508,"name":"The Apex Tower: Floor 3","desc":"Near the top. The Architect of the Collapse awaits.","enemyCount":6,"enemyMult":1.9,"mapW":11,"mapH":11,"terrain":"void","dialog":[],"arc":"The Apex"},{"id":509,"name":"The Architect","desc":"Face the being who designed the Collapse of all realities.","enemyCount":5,"enemyMult":2.0,"mapW":12,"mapH":12,"terrain":"void","boss":true,"dialog":[],"arc":"The Apex"},{"id":510,"name":"Tier 0","desc":"The final battle. Prove you are truly APEX. TIER 0.","enemyCount":6,"enemyMult":2.5,"mapW":12,"mapH":12,"terrain":"void","boss":true,"dialog":[{"name":"The Architect","text":"You have crossed every world. Defeated every echo. But I AM the multiverse. Can you defeat reality itself?"},{"name":"[RANDOM_UNIT_0]","text":"We have been through fire, ice, shadow, and about forty conversations where someone said something dramatic. Were ready."},{"name":"[RANDOM_UNIT_1]","text":"For every world. For every hero. For every timeline that deserves to exist."},{"name":"Archivist Lena","text":"For the Apex."}],"arc":"The Apex"}];
+
+// Each unit can equip 1 item. Items are stored in S.itemInventory.
+if(!S.itemInventory) S.itemInventory = [];
+if(!S.unlockedAbilities) S.unlockedAbilities = [];
+
+function grantRandomItem(rarity) {
+    const pool = ITEM_DB.filter(i => i.rarity === (rarity||'C'));
+    if(!pool.length) return null;
+    const item = {...pool[~~(Math.random()*pool.length)]};
+    item.instanceId = 'itm_' + Date.now() + '_' + ~~(Math.random()*9999);
+    S.itemInventory.push(item);
+    return item;
+}
+
+function equipItem(unitIdx, itemInstanceId) {
+    const u = S.roster[unitIdx]; if(!u) return;
+    const itemIdx = S.itemInventory.findIndex(i => i.instanceId === itemInstanceId);
+    if(itemIdx < 0) return;
+    // Unequip old item
+    if(u.equippedItem) S.itemInventory.push(u.equippedItem);
+    u.equippedItem = S.itemInventory.splice(itemIdx, 1)[0];
+    toast(u.name + ' equipped ' + u.equippedItem.name, 'ok');
+    save(true);
+}
+
+function unequipItem(unitIdx) {
+    const u = S.roster[unitIdx]; if(!u || !u.equippedItem) return;
+    S.itemInventory.push(u.equippedItem);
+    u.equippedItem = null;
+    save(true);
+}
+
+// Apply item effects to a battle unit
+function applyItemEffects(bu) {
+    const item = bu.equippedItem; if(!item) return;
+    const e = item.effect; if(!e) return;
+    if(e.type === 'stat_boost') bu[e.stat] = (bu[e.stat]||0) + e.val;
+    if(e.type === 'lifesteal') bu._itemLifesteal = (bu._itemLifesteal||0) + e.val;
+    if(e.type === 'reflect') bu._itemReflect = (bu._itemReflect||0) + e.val;
+    if(e.type === 'mov_boost') bu.mov = (bu.mov||2) + e.val;
+    if(e.type === 'revive') bu._itemRevive = e.val;
+    if(e.type === 'crit_chance') bu._itemCritBonus = (bu._itemCritBonus||0) + e.val;
+    if(e.type === 'crit_mult') bu._itemCritMult = e.val;
+    if(e.type === 'miracle') bu._itemMiracle = true;
+    if(e.type === 'regen') bu._itemRegen = (bu._itemRegen||0) + e.val;
+    if(e.type === 'first_hit_shield') bu._itemFirstHitShield = e.val;
+    if(e.type === 'immune_freeze') bu._immuneFreeze = true;
+    if(e.type === 'immune_dot') { bu._immunePoison = true; bu._immuneBurn = true; }
+    if(e.type === 'immune_panic') bu._antiPanic = true;
+    if(e.type === 'on_hit_burn') bu._itemOnHitBurn = e.val;
+    if(e.type === 'on_hit_freeze') bu._itemOnHitFreeze = e.val;
+    if(e.type === 'on_hit_poison') bu._itemOnHitPoison = e.val;
+    if(e.type === 'always_double') bu._itemAlwaysDouble = true;
+    if(e.type === 'anti_double') bu._itemAntiDouble = true;
+    if(e.type === 'close_counter') bu._distantCounter = true;
+    if(e.type === 'distant_counter') bu._distantCounter = true;
+    if(e.type === 'range_boost') bu._rangeBoost = (bu._rangeBoost||0) + e.val;
+    if(e.type === 'def_pierce') bu._itemDefPierce = (bu._itemDefPierce||0) + e.val;
+    if(e.type === 'cd_reduce') bu.specialCharges = Math.max(0, (bu.specialCharges||0) - e.val);
+    if(e.type === 'spec_boost') bu._itemSpecBoost = (bu._itemSpecBoost||0) + e.val;
+    if(e.type === 'bond_boost') bu._itemBondBoost = e.val;
+    if(e.type === 'solo_boost') bu._itemSoloBoost = e.val;
+    if(e.type === 'null_bonuses') bu._itemNullBonuses = true;
+    // Weapon/move specific
+    if(e.type === 'weapon_stat' && bu.weapon === e.weapon) bu[e.stat] = (bu[e.stat]||0) + e.val;
+    if(e.type === 'move_stat' && bu.moveType === e.moveType) bu[e.stat] = (bu[e.stat]||0) + e.val;
+        /* reuse */ item = bu.equippedItem; if(!item) return;
+        /* reuse */ e = item.effect; if(!e) return;
+        const H = {
+            legendary_binding:   ()=> bu.passives.push({name:'Binding Blade',desc:'Triangle \u00b140%',trigger:'OnAttack',condition:'Always',effect:{tag:'triangle_adept',val:0}}),
+            legendary_falchion:  ()=> bu.passives.push({name:'Falchion',desc:'Heal 10/turn',trigger:'TurnStart',condition:'Always',effect:{tag:'heal',val:10}}),
+            legendary_armads:    ()=> bu.passives.push({name:'Armads',desc:'QR when HP>80%',trigger:'OnDefend',condition:'HP>75%',effect:{tag:'brave',val:2}}),
+            legendary_tyrfing:   ()=> bu.passives.push({name:'Tyrfing',desc:'DEF+10 <50%',trigger:'OnDefend',condition:'HP<50%',effect:{tag:'buff_def',val:10}}),
+            legendary_naga:      ()=> { bu.res=(bu.res||0)+5; },
+            legendary_booknaga:  ()=> { ['atk','def','mag','res','spd'].forEach(s=>bu[s]=(bu[s]||0)+3); bu._antiPanic=true; },
+            legendary_ragnell:   ()=> { bu._distantCounter=true; bu.atk=(bu.atk||0)+4; },
+            legendary_gradivus:  ()=> { bu._distantCounter=true; bu.passives.push({name:'Gradivus',desc:'Heal 10 post-combat',trigger:'OnAttack',condition:'Always',effect:{tag:'heal',val:10}}); },
+            legendary_siegmund:  ()=> bu.passives.push({name:'Siegmund',desc:'ATK+6 >90%',trigger:'OnAttack',condition:'HP>75%',effect:{tag:'buff_atk',val:6}}),
+            legendary_durandal:  ()=> bu.passives.push({name:'Durandal',desc:'ATK+8 initiate',trigger:'OnAttack',condition:'Always',effect:{tag:'buff_atk',val:8}}),
+            legendary_solkatti:  ()=> bu.passives.push({name:'Sol Katti',desc:'Desperation <75%',trigger:'OnAttack',condition:'HP<75%',effect:{tag:'desperation',val:0}}),
+            legendary_aura:      ()=> bu.passives.push({name:'Aura',desc:'Heal allies 7',trigger:'OnAttack',condition:'Always',effect:{tag:'heal',val:7}}),
+            legendary_excalibur: ()=> { bu.spd=(bu.spd||0)+5; },
+            legendary_forseti:   ()=> bu.passives.push({name:'Forseti',desc:'Follow-up if faster',trigger:'OnAttack',condition:'Speed>Target',effect:{tag:'brave',val:2}}),
+            legendary_mjolnir:   ()=> { bu.atk=(bu.atk||0)+5; bu.specialCharges=Math.max(0,(bu.specialCharges||0)-2); },
+            legendary_loptous:   ()=> { bu._shieldPct=Math.min(0.6,(bu._shieldPct||0)+0.5); },
+            legendary_chaos:     ()=> { ['atk','def','mag','res','spd'].forEach(s=>bu[s]=(bu[s]||0)+5); },
+            legendary_apex:      ()=> { ['atk','def','mag','res','spd'].forEach(s=>bu[s]=(bu[s]||0)+7); },
+        };
+        if(H[e.type]) H[e.type]();
+}
+
+// Units can have up to 2 equipped abilities (in addition to passives)
+function equipAbility(unitIdx, abilityId, slot) {
+    const u = S.roster[unitIdx]; if(!u) return;
+    if(!u.equippedAbilities) u.equippedAbilities = [null, null];
+    const ab = ABILITY_DB.find(a => a.id === abilityId);
+    if(!ab) return;
+    u.equippedAbilities[slot||0] = {...ab};
+    // Rebuild passives to include abilities
+    rebuildPassives(u);
+    toast(u.name + ' learned ' + ab.name, 'ok');
+    save(true);
+}
+
+function rebuildPassives(u) {
+    u.passives = [u.skillA, u.skillB, u.skillC, u.skillS].filter(Boolean);
+    if(u.equippedAbilities) {
+        u.equippedAbilities.filter(Boolean).forEach(ab => {
+            u.passives.push({
+                name: ab.name, desc: ab.desc,
+                trigger: ab.trigger, condition: ab.condition,
+                effect: ab.effect
+            });
+        });
+    }
+}
+
+// Pokémon Showdown-style full unit inspection
+
+// Add CSS for inspection modal
+
+function openInspect(unit) {
+    if(!unit) return;
+    const u = unit;
+    const modal = document.getElementById('inspectModal');
+    const content = document.getElementById('inspectContent');
+    
+    const hpPct = Math.round((u.hp/u.maxHp)*100);
+    const hpColor = hpPct > 60 ? '#22c55e' : hpPct > 30 ? '#f59e0b' : '#ef4444';
+    const gradeColor = GRADE_COLOR[u.grade] || '#8e99a4';
+    
+    // Status effects
+    const statuses = [];
+    if(u.frozen) statuses.push({name:'FROZEN',color:'#00e5ff'});
+    if(u.shielded) statuses.push({name:'SHIELDED',color:'#fbbf24'});
+    if(u.poisoned > 0) statuses.push({name:'POISON '+u.poisoned,color:'#a855f7'});
+    if(u.burned > 0) statuses.push({name:'BURN '+u.burned,color:'#f97316'});
+    if(u._panicked) statuses.push({name:'PANICKED',color:'#ef4444'});
+    if(u.gravityApplied) statuses.push({name:'GRAVITY',color:'#6366f1'});
+    if(u._immuneFreeze) statuses.push({name:'Freeze Immune',color:'#22d3ee'});
+    if(u._distantCounter) statuses.push({name:'Distant Counter',color:'#3b82f6'});
+    
+    const statusHTML = statuses.map(s =>
+        `<span class="inspect-status" style="background:${s.color}22;color:${s.color};border:1px solid ${s.color}44">${s.name}</span>`
+    ).join('');
+    
+    // Skills list
+    const allSkills = [
+        {label:'A SKILL', skill:u.skillA},
+        {label:'B SKILL', skill:u.skillB},
+        {label:'C SKILL', skill:u.skillC},
+        {label:'SEAL', skill:u.skillS},
+        {label:'SPECIAL', skill:u.special},
+        {label:'ASSIST', skill:u.assist},
+    ];
+    const skillsHTML = allSkills.filter(s => s.skill).map(s =>
+        `<div class="inspect-skill">
+            <div class="inspect-skill-name">${s.label}: ${s.skill.name||'—'}</div>
+            <div class="inspect-skill-desc">${s.skill.desc||''}</div>
+            ${s.skill.cd ? '<div style="font-size:.55rem;color:var(--gold);margin-top:2px">CD: '+s.skill.cd+' | Charges: '+(u.specialCharges||0)+'</div>' : ''}
+        </div>`
+    ).join('');
+    
+    // Passives
+    const passivesHTML = (u.passives||[]).map(p =>
+        `<div class="inspect-skill"><div class="inspect-skill-name">${p.name||'Unknown'}</div>
+        <div class="inspect-skill-desc">${p.desc||''}</div></div>`
+    ).join('');
+    
+    // Equipped abilities
+    const abilitiesHTML = (u.equippedAbilities||[]).filter(Boolean).map(ab =>
+        `<div class="inspect-skill" style="border-color:rgba(124,77,255,.3)">
+        <div class="inspect-skill-name" style="color:#7c4dff">ABILITY: ${ab.name}</div>
+        <div class="inspect-skill-desc">${ab.desc}</div></div>`
+    ).join('');
+    
+    // Item
+    const itemHTML = u.equippedItem ?
+        `<div class="inspect-item"><div class="inspect-item-name">${u.equippedItem.name} <span style="font-size:.5rem;color:var(--text2)">${u.equippedItem.rarity}</span></div>
+        <div class="inspect-item-desc">${u.equippedItem.desc}</div></div>` :
+        '<div style="font-size:.6rem;color:var(--text3);font-style:italic">No item equipped</div>';
+    
+    // Synergy info
+    const synergyHTML = (u.faction || u.unitClass) ?
+        `<div class="inspect-synergy">Faction: ${u.faction||'None'} | Class: ${u.unitClass||'None'}</div>` : '';
+    
+    // Weapon effect
+    const weaponEffHTML = u.weaponEffectName ?
+        `<div style="font-size:.6rem;color:var(--gold);margin-top:4px">Weapon: ${u.weaponEffectName}</div>` : '';
+    
+    // IVs
+    const ivHTML = (u.boon||u.bane) ?
+        `<div style="font-size:.55rem;color:var(--text2);margin-top:4px">
+        ${u.boon?'<span style="color:#22c55e">↑'+u.boon.toUpperCase()+'</span> ':''}
+        ${u.bane?'<span style="color:#ef4444">↓'+u.bane.toUpperCase()+'</span>':''}</div>` : '';
+
+    // Portrait
+    let portraitHTML = '';
+    if(u.src) {
+        if(u.isAnimated) {
+            portraitHTML = `<img class="inspect-portrait" src="${u.src}">`;
+        } else {
+            portraitHTML = `<canvas id="_inspPortrait" width="112" height="112" class="inspect-portrait" style="width:56px;height:56px"></canvas>`;
+        }
+    }
+
+    content.innerHTML = `
+    <button class="inspect-close" onclick="document.getElementById('inspectModal').classList.remove('show')">✕</button>
+    <div style="display:flex;gap:12px;align-items:center;margin-bottom:12px;padding-right:40px">
+        ${portraitHTML}
+        <div style="flex:1;min-width:0">
+            <div style="font-family:var(--display);font-size:1rem;font-weight:900;letter-spacing:2px" class="grade-${u.grade}">${esc(u.name)}</div>
+            <div style="font-size:.7rem;color:var(--text2)">${u.role} | ${u.weapon} | ${MOVE_STATS[u.moveType]?.label||'INF'} | Lv.${u.level||1}${u.plus>0?' +'+u.plus:''}</div>
+            <div class="grade-${u.grade}" style="font-family:var(--display);font-size:.65rem">${GRADE_LABEL[u.grade]}</div>
+            ${ivHTML}${weaponEffHTML}${synergyHTML}
+        </div>
+    </div>
+    
+    <div class="inspect-section">
+        <h3>COMBAT STATS</h3>
+        <div class="inspect-stat-grid">
+            <div class="inspect-stat"><div class="label">HP</div><div class="value" style="color:${hpColor}">${u.hp}/${u.maxHp}</div></div>
+            <div class="inspect-stat"><div class="label">ATK</div><div class="value" style="color:#ef4444">${u.atk}</div></div>
+            <div class="inspect-stat"><div class="label">DEF</div><div class="value" style="color:#3b82f6">${u.def}</div></div>
+            <div class="inspect-stat"><div class="label">MAG</div><div class="value" style="color:#8b5cf6">${u.mag}</div></div>
+            <div class="inspect-stat"><div class="label">RES</div><div class="value" style="color:#06b6d4">${u.res}</div></div>
+            <div class="inspect-stat"><div class="label">SPD</div><div class="value" style="color:#f97316">${u.spd}</div></div>
+        </div>
+        <div class="inspect-hp-bar"><div class="inspect-hp-fill" style="width:${hpPct}%;background:${hpColor}"></div></div>
+        <div style="margin-top:6px;font-size:.6rem;color:var(--text2);font-family:var(--mono)">
+            MOV: ${u.mov} | WPN Range: ${getWeaponRange(u.weapon)} | Personality: ${u.personality||'—'}
+        </div>
+    </div>
+    
+    ${statuses.length ? '<div class="inspect-section"><h3>STATUS EFFECTS</h3>'+statusHTML+'</div>' : ''}
+    
+    <div class="inspect-section"><h3>SKILLS & SPECIALS</h3>${skillsHTML}</div>
+    
+    ${passivesHTML ? '<div class="inspect-section"><h3>PASSIVES ('+((u.passives||[]).length)+')</h3>'+passivesHTML+'</div>' : ''}
+    
+    ${abilitiesHTML ? '<div class="inspect-section"><h3>EQUIPPED ABILITIES</h3>'+abilitiesHTML+'</div>' : ''}
+    
+    <div class="inspect-section"><h3>EQUIPPED ITEM</h3>${itemHTML}</div>
+    `;
+    
+    modal.classList.add('show');
+
+    // Draw portrait on canvas after DOM update
+    if(u.src && !u.isAnimated) {
+        const pc = document.getElementById('_inspPortrait');
+        if(pc) {
+            if(u.img) { drawUnitPortrait(pc, u, 112); }
+            else { const ti = new Image(); ti.onload = () => { u.img = ti; drawUnitPortrait(pc, u, 112); }; ti.src = u.src; drawUnitPortrait(pc, u, 112); }
+        }
+    }
+}
+
+// Hook into battle click — right-click or long-press on any unit opens inspection
+
+// Also allow inspection from the enemy list sidebar
+
+// Override the difficulty modal to include MAX
+
+
+window.claimMaxReward = function(idx) {
+    awardVictoryXPAndQuests();
+    const choices = window._maxRewardChoices;
+    if(!choices || !choices[idx]) return;
+    const img = choices[idx];
+    const unit = createUnit(img.src, img.name, 'T0');
+    unit.hue = img.hue || 0;
+    unit.level = 40;
+    unit.plus = 10;
+    unit.prestige = 3;
+    // FIX #3C: Actually apply the stat boosts for +10 and Prestige 3
+    ['hp','atk','def','mag','res','spd'].forEach(s => {
+        if(unit.baseStat) { unit.baseStat[s] += 10; unit.baseStat[s] += 9; }
+    });
+    applyLevel(unit);
+    unit.hp = unit.maxHp;
+    // Give it a legendary item
+    const legendaryItems = ITEM_DB.filter(i => i.rarity === 'T0');
+    if(legendaryItems.length) unit.equippedItem = {...legendaryItems[~~(Math.random()*legendaryItems.length)]};
+    S.roster.push(unit);
+    toast('You obtained ' + unit.name + ' as a TIER 0 hero!', 'gold');
+    save(true);
+    closeResult();
+    nav('barracks');
+    refreshBarracks();
+};
+
+// Replace the old 5-chapter campaign with the 50-chapter epic
+
+
+function startExpandedCampaign(id) {
+    const c = CAMPAIGN_EXPANDED.find(x => x.id === id);
+    if(!c) return;
+    
+    // Replace [RANDOM_UNIT_X] placeholders with actual unit names
+    const dialog = (c.dialog||[]).map(d => {
+        let text = d.text;
+        let name = d.name;
+        for(let i = 0; i < 5; i++) {
+            const rosterUnit = S.roster[i % Math.max(1, S.roster.length)];
+            const unitName = rosterUnit ? rosterUnit.name : 'Hero ' + i;
+            text = text.replace(`[RANDOM_UNIT_${i}]`, unitName);
+            name = name.replace(`[RANDOM_UNIT_${i}]`, unitName);
+        }
+        return {name, text};
+    });
+    
+    currentCampaign = {
+        ...c,
+        dialog: dialog,
+        enemyCount: c.enemyCount || 3,
+        enemyMult: c.enemyMult || 1.0,
+    };
+    dialogQueue = [...dialog];
+    isDialogAnimating = false;
+    if(dialog.length) showDialog();
+    else launchCampaignBattle();
+}
+
+
+// Cap maximum stats to prevent invincible combos
+const MAX_STAT_CAP = 99;
+
+
+// Allow right-clicking barracks cards to inspect full stats
+document.addEventListener('contextmenu', function(e) {
+    const card = e.target.closest('.ucard');
+    if(card && (!B.phase || B.phase === 'over')) {
+        e.preventDefault();
+        const idx = [...card.parentNode.children].indexOf(card);
+        const sorted = getSorted();
+        if(sorted[idx]) {
+            const u = sorted[idx].u;
+            const inspectUnit = {...u, hp: u.maxHp, specialCharges: u.special?.cd || 0};
+            openInspect(inspectUnit);
+        }
+    }
+});
+
+// Long-press barracks cards to inspect on mobile (same as right-click)
+
+console.log('APEX TIER 0 Expansion loaded: 200 items, 200 abilities, 200 skills, 50 campaign chapters, MAX difficulty');
+toast('Content Expansion loaded!', 'gold');
+
+
+// ======================================================================
+// ======================================================================
+
+// === FIX #3B: Map Specials castable without enemy target =====
+
+// === FIX #3D+: Hook ALL legendary item effects properly =====
+
+// === FIX #4: Hook phantom ability/item tags ==================
+
+
+// FIX #0: CREDIT — "Game made by Sincere Smith, ShadenXa"
+
+// FIX #1: IMAGE PAGINATION — Render 100 images per page
+let _imgPage = 0;
+const _IMG_PER_PAGE = 100;
+
+renderSettingsImages = function(body) {
+  const custom = S.images.filter(i => !i.isDefault);
+  const totalPages = Math.max(1, Math.ceil(custom.length / _IMG_PER_PAGE));
+  _imgPage = Math.min(_imgPage, totalPages - 1);
+  _imgPage = Math.max(0, _imgPage);
+
+  const start = _imgPage * _IMG_PER_PAGE;
+  const end = Math.min(start + _IMG_PER_PAGE, custom.length);
+  const pageImages = custom.slice(start, end);
+
+  body.innerHTML = `
+  <div class="settings-section" style="flex-shrink:0">
+    <h2>UPLOAD IMAGES</h2>
+    <div class="drop-zone-v2" id="dropZone" onclick="document.getElementById('fileIn').click()"
+      ondragover="event.preventDefault();this.classList.add('drag-over')"
+      ondragleave="this.classList.remove('drag-over')"
+      ondrop="event.preventDefault();this.classList.remove('drag-over');loadFiles(Array.from(event.dataTransfer.files))">
+      <div class="dz-icon">⬆</div>
+      <div class="dz-title">DROP IMAGES HERE</div>
+      <div class="dz-sub">Click or drag any image format to create heroes.<br>Each image becomes a unique summonable unit.</div>
+      <div class="dz-formats">
+        <span class="dz-fmt-chip animated">GIF ✦</span>
+        <span class="dz-fmt-chip animated">APNG ✦</span>
+        <span class="dz-fmt-chip">PNG</span>
+        <span class="dz-fmt-chip">JPG</span>
+        <span class="dz-fmt-chip">SVG</span>
+        <span class="dz-fmt-chip">WEBP</span>
+        <span class="dz-fmt-chip">BMP</span>
+        <span class="dz-fmt-chip">AVIF</span>
+        <span class="dz-fmt-chip">ICO</span>
+      </div>
+    </div>
+    <div class="img-count-badge">
+      <span style="color:var(--t0);font-weight:700">${custom.length}</span> custom images
+      ${S.images.filter(i => !i.isDefault && i.isAnimated).length > 0
+        ? `<span style="color:var(--t0);margin-left:6px">/ ${S.images.filter(i => !i.isDefault && i.isAnimated).length} animated ✦</span>` : ''}
+    </div>
+  </div>
+  <div class="settings-section" style="min-height:0;flex:1;display:flex;flex-direction:column;overflow:hidden">
+    <h2>YOUR IMAGES ${custom.length > _IMG_PER_PAGE ? `<span style="font-size:.55rem;color:var(--text2);font-weight:400;margin-left:8px">Showing ${start + 1}–${end} of ${custom.length}</span>` : ''}</h2>
+    ${custom.length === 0
+      ? `<div style="text-align:center;padding:30px;color:var(--text3);font-size:.75rem">No images uploaded yet.<br><span style="font-size:.65rem">Upload images above to create units!</span></div>`
+      : ''}
+    <div class="img-grid" id="imgGrid" style="overflow-y:auto;flex:1;min-height:0"></div>
+    ${totalPages > 1 ? `
+    <div class="img-page-controls">
+      <button class="img-page-btn" onclick="_imgPage=0;renderSettingsTab('images')" ${_imgPage === 0 ? 'disabled' : ''}>⟪</button>
+      <button class="img-page-btn" onclick="_imgPage--;renderSettingsTab('images')" ${_imgPage === 0 ? 'disabled' : ''}>◀ PREV</button>
+      <span class="img-page-info">Page ${_imgPage + 1} / ${totalPages}</span>
+      <button class="img-page-btn" onclick="_imgPage++;renderSettingsTab('images')" ${_imgPage >= totalPages - 1 ? 'disabled' : ''}>NEXT ▶</button>
+      <button class="img-page-btn" onclick="_imgPage=${totalPages - 1};renderSettingsTab('images')" ${_imgPage >= totalPages - 1 ? 'disabled' : ''}>⟫</button>
+    </div>` : ''}
+  </div>`;
+
+  // Render only this page's images
+  const grid = document.getElementById('imgGrid');
+  if (grid) {
+    pageImages.forEach((img) => {
+      const actualIdx = S.images.indexOf(img);
+      const card = document.createElement('div');
+      card.className = 'img-card';
+      const safeSrc=img.src&&img.src.startsWith('data:image/')?img.src:'';
+      card.innerHTML = `<img src="${safeSrc}" title="${esc(img.name)}" draggable="false" style="width:100%;height:100%;object-fit:cover;pointer-events:none;">`
+        + `${img.isAnimated ? `<div class="img-card-anim-badge">GIF</div>` : ''}<div class="img-card-name">${esc(img.name)}</div>
+        <button class="img-card-del" onclick="event.stopPropagation();removeImage(${actualIdx})" title="Remove">✕</button>`;
+      grid.appendChild(card);
+    });
+  }
+};
+
+
+// FIX #2A: AUDIO — Default soundOn=true + first-click autoplay
+
+
+// FIX #2B: AUDIO — Upgraded Maestro (reverb, delay, bass, ADSR)
+
+// Replace the global bgm instance
+
+
+// FIX #2C: AUDIO — UI Click sounds on all menu buttons
+
+
+// FIX #3: TEAM PRESETS — Reliable save/load with explicit Save button
+savePreset = function (slot) {
+  if (slot < 0 || slot > 4) return;
+  if (!S.teamPresets) S.teamPresets = [null, null, null, null, null];
+  const name = prompt(`Name for Team ${slot + 1}:`, S.teamPresets[slot]?.name || `Team ${slot + 1}`);
+  if (name === null) return;
+  // Deep copy: store unit IDs instead of indices for robustness
+  const teamIds = S.team.map(i => S.roster[i]?.id).filter(Boolean);
+  S.teamPresets[slot] = { name, team: [...S.team], teamIds };
+  S.activePreset = slot;
+  toast(`Saved "${name}" (${S.team.length} units)`, 'ok');
+  save(true);
+  refreshPresets();
+};
+
+loadPreset = function (slot) {
+  if (!S.teamPresets || !S.teamPresets[slot]) {
+    toast('Empty preset slot', 'err');
+    return;
+  }
+  const preset = S.teamPresets[slot];
+  // Try loading by stored unit IDs first (robust against deletions)
+  if (preset.teamIds && preset.teamIds.length) {
+    const resolved = preset.teamIds
+      .map(id => S.roster.findIndex(u => u.id === id))
+      .filter(i => i >= 0);
+    if (resolved.length > 0) {
+      S.team = resolved;
+      S.activePreset = slot;
+      refreshBarracks();
+      toast(`Loaded "${preset.name}" (${resolved.length} units)`, 'ok');
+      return;
+    }
+  }
+  // Fallback: load by raw indices (validate they exist)
+  if (preset.team && preset.team.length) {
+    const valid = preset.team.filter(i => i >= 0 && i < S.roster.length);
+    if (valid.length > 0) {
+      S.team = [...valid];
+      S.activePreset = slot;
+      refreshBarracks();
+      toast(`Loaded "${preset.name}" (${valid.length} units)`, 'ok');
+      return;
+    }
+  }
+  toast('Preset units no longer exist', 'err');
+};
+
+refreshPresets = function () {
+  const el = document.getElementById('presetBar');
+  if (!el) return;
+  el.innerHTML = '';
+  for (let i = 0; i < 5; i++) {
+    const p = S.teamPresets?.[i];
+    const isActive = S.activePreset === i && p;
+
+    // Container for each preset slot
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'display:inline-flex;align-items:center;gap:2px';
+
+    // Load button
+    const btn = document.createElement('button');
+    btn.className = 'btn2 btn-sm' + (isActive ? ' active' : '');
+    btn.style.cssText = `font-size:.55rem;padding:4px 8px;min-width:44px;${isActive ? 'border-color:var(--gold);color:var(--gold)' : ''}`;
+    btn.textContent = p ? p.name.substring(0, 8) : `Slot ${i + 1}`;
+    btn.title = p ? `Click to load "${p.name}"` : `Empty slot — click Save to store current team`;
+    btn.onclick = () => loadPreset(i);
+    wrap.appendChild(btn);
+
+    // Save icon button (always visible)
+    const saveBtn = document.createElement('button');
+    saveBtn.className = 'preset-save-icon';
+    saveBtn.textContent = '💾';
+    saveBtn.title = `Save current team to Slot ${i + 1}`;
+    saveBtn.onclick = (e) => { e.stopPropagation(); savePreset(i); };
+    wrap.appendChild(saveBtn);
+
+    el.appendChild(wrap);
+  }
+};
+
+
+// FIX #4: 10 ROTATING BANNERS WITH MANDATORY T0 FOCUS
+getAvailableBanners = function () {
+  const banners = [];
+  const pool = S.images.filter(i => !i.isDefault);
+  const roster = S.roster;
+
+  // 1. Standard pool (always first)
+  banners.push({
+    id: 'standard', name: 'Standard Pool', heroNames: [],
+    isAuto: true, isStandard: true,
+    t0Rate: 2, sRate: 7, aRate: 14
+  });
+
+  // 2. User-created custom banners
+  S.banners.forEach(b => banners.push(b));
+
+  // 3. Generate exactly 10 procedural weekly banners
+  if (roster.length >= 2 && pool.length >= 2) {
+    const seed = getWeekSeed();
+    const rng = (i) => {
+      let s = (seed * 2654435761 + i * 40503) & 0x7fffffff;
+      s = ((s >> 16) ^ s) * 45679;
+      return Math.abs(s % 10000) / 10000;
+    };
+
+    // Find all T0 units in roster
+    const t0Units = roster.filter(u => u.grade === 'T0');
+    // If no T0 units, use S-grade as fallback
+    const eliteUnits = t0Units.length > 0 ? t0Units : roster.filter(u => u.grade === 'S');
+    // If still none, use A-grade
+    const fallbackElites = eliteUnits.length > 0 ? eliteUnits : roster.filter(u => ['A', 'B'].includes(u.grade));
+
+    const BANNER_THEMES = [
+      { name: 'Crimson Blades', filter: u => u.weapon === 'Sword' || u.weapon === 'Axe', icon: '⚔' },
+      { name: 'Sky Knights', filter: u => u.moveType === 'Flying', icon: '🦅' },
+      { name: 'Iron Fortress', filter: u => u.moveType === 'Armored' || u.def >= 25, icon: '🛡' },
+      { name: 'Arcane Storm', filter: u => ['LightMag', 'DarkMag', 'AnimaMag'].includes(u.weapon), icon: '✨' },
+      { name: 'Swift Strike', filter: u => u.spd >= 28, icon: '⚡' },
+      { name: 'Cavalry Charge', filter: u => u.moveType === 'Cavalry', icon: '🐎' },
+      { name: 'Shadow Ops', filter: u => u.weapon === 'Dagger' || u.weapon === 'Bow', icon: '🎯' },
+      { name: 'Holy Light', filter: u => u.weapon === 'LightMag' || u.faction === 'Celestial', icon: '☀' },
+      { name: 'Abyssal Dark', filter: u => u.weapon === 'DarkMag' || u.faction === 'Abyssal', icon: '🌑' },
+      { name: 'Power Surge', filter: u => u.atk >= 30 || u.mag >= 30, icon: '💥' },
+      { name: 'Verdant Guard', filter: u => u.faction === 'Verdant' || u.weapon === 'Axe', icon: '🌿' },
+      { name: 'Infernal Blaze', filter: u => u.faction === 'Infernal' || u.weapon === 'Sword', icon: '🔥' },
+      { name: 'Cyber Elite', filter: u => u.faction === 'Cyber' || u.spd >= 26, icon: '🤖' },
+      { name: 'Mystic Oracle', filter: u => u.faction === 'Mystic' || u.unitClass === 'Oracle', icon: '🔮' },
+      { name: 'Lance Masters', filter: u => u.weapon === 'Lance', icon: '🔱' },
+    ];
+
+    for (let b = 0; b < 10; b++) {
+      const themeIdx = Math.floor(rng(b * 7) * BANNER_THEMES.length);
+      const theme = BANNER_THEMES[(themeIdx + b) % BANNER_THEMES.length];
+
+      // Pick a T0 focus unit (mandatory)
+      const elitePool = fallbackElites.length > 0 ? fallbackElites : roster;
+      const t0Focus = elitePool[Math.floor(rng(b * 13 + 1) * elitePool.length)];
+
+      // Pick 3-4 normal focus units matching the theme
+      let themeMatches = roster.filter(u => theme.filter(u) && u.id !== t0Focus.id);
+      if (themeMatches.length < 3) {
+        // Pad with random roster units
+        const others = roster.filter(u => u.id !== t0Focus.id && !themeMatches.find(m => m.id === u.id));
+        while (themeMatches.length < 3 && others.length) {
+          const idx = Math.floor(rng(b * 31 + themeMatches.length) * others.length);
+          themeMatches.push(others.splice(idx, 1)[0]);
+        }
+      }
+      // Shuffle and take 3-4
+      themeMatches.sort((a, c) => rng(a.id + b) - rng(c.id + b));
+      const focusCount = 3 + (rng(b * 41) > 0.5 ? 1 : 0);
+      const normalFocus = themeMatches.slice(0, focusCount);
+
+      // Get image names for all focus units
+      const allFocusNames = [t0Focus, ...normalFocus].map(u => {
+        const img = S.images.find(im => im.src === u.src);
+        return img ? img.name : u.name;
+      }).filter(Boolean);
+
+      // Calculate rates
+      const baseT0 = 2.0 + (S.pullCount > 30 ? (S.pullCount - 30) * 0.1 : 0);
+      const baseSRate = 7.0 + (S.pullCount > 30 ? (S.pullCount - 30) * 0.5 : 0);
+
+      banners.push({
+        id: `auto_weekly_${b}_${seed}`,
+        name: `${theme.icon} ${theme.name}`,
+        heroNames: allFocusNames,
+        t0FocusName: t0Focus.name,
+        t0FocusGrade: t0Focus.grade,
+        isAuto: true,
+        t0Rate: Math.round(baseT0 * 10) / 10,
+        sRate: Math.round(baseSRate * 10) / 10,
+        aRate: 14,
+        bRate: 22,
+        cRate: 30,
+        dRate: 25 - Math.max(0, baseT0 - 2 + baseSRate - 7),
+        focusBoost: '4×',
+      });
+    }
+  }
+
+  return banners;
+};
+
+// FIX #4B: refreshGacha — Show exact rates on each banner card
+
+
+// FIX #5: EXPANDED TUTORIAL (remove blur done in CSS above)
+// Completely replace TUTORIAL_STEPS with expanded version
+TUTORIAL_STEPS.length = 0;
+TUTORIAL_STEPS.push(
+  {
+    title: 'Welcome to APEX TIER 0',
+    text: 'This is a tactical gacha RPG where you upload your own images to create unique heroes. Let\'s walk through the core systems!',
+    tip: 'Game made by Sincere Smith, ShadenXa. You can skip this tutorial anytime.',
+    screen: 'home', spotlight: '.home-btns', pos: 'center',
+  },
+  {
+    title: 'Upload Your Images',
+    text: 'Go to Settings → Images to upload pictures. Every image becomes a unique summonable hero with randomized stats, skills, and a role.\n\nGIF/APNG files become animated heroes with a glowing rainbow border!',
+    tip: 'Supports GIF, PNG, JPG, SVG, WEBP, BMP, AVIF, ICO and more.',
+    screen: 'settings', spotlight: '#dropZone', pos: 'bottom',
+    action: () => { nav('settings'); setSettingsTab('images'); },
+  },
+  {
+    title: 'Summon Heroes',
+    text: 'At the Summon Gate, spend AP to pull heroes from your image pool.\n\n• 1-PULL: 5 AP for one hero\n• 10-PULL: 40 AP for 10 (last guaranteed A+)\n• SESSION: 5 orbs, pick the colors you want',
+    tip: 'Pity counter guarantees A+ every 50 pulls. Duplicates power up existing heroes.',
+    screen: 'gacha', spotlight: '#fehBannerList', pos: 'top',
+    action: () => nav('gacha'),
+  },
+  {
+    title: 'Focus Banners & Rates',
+    text: 'The Summon screen shows 10+ rotating banners each week, plus your custom ones. Each banner has:\n\n• A featured T0 chase unit (★)\n• 3-4 normal focus units at 4× pull rate\n• Exact pull rates displayed on every card',
+    tip: 'Create your own custom banners in Settings → Banners!',
+    screen: 'gacha', spotlight: '#fehBannerList', pos: 'center',
+  },
+  {
+    title: 'Hero Grades',
+    text: 'Heroes come in 6 grades:\n\n▸ D (grey) → C (cyan) → B (purple)\n▸ A (orange) → S (gold) → TIER 0 (rainbow)\n\nHigher grades = better base stats and growth rates.',
+    tip: 'T0 heroes have animated rainbow borders and trigger a cinematic on summon!',
+    screen: 'gacha', spotlight: '.pity-trk', pos: 'bottom',
+  },
+  {
+    title: 'Barracks & Team Building',
+    text: 'All summoned heroes live in Barracks. Tap a card to inspect; tap again to add to your team.\n\nUse the search bar and sort buttons (Grade/ATK/SPD/+Lvl) to find who you need.',
+    tip: 'Sort by Grade to see your strongest heroes first.',
+    screen: 'barracks', spotlight: '.brk-toolbar', pos: 'bottom',
+    action: () => nav('barracks'),
+  },
+  {
+    title: 'Team Presets',
+    text: 'Save up to 5 team presets! Each slot has a 💾 icon to save your current team, and clicking the slot name loads it instantly.\n\nPresets remember units by ID, so they survive even if you reorder your roster.',
+    tip: 'Great for switching between PvP, training, and campaign teams.',
+    screen: 'barracks', spotlight: '#presetBar', pos: 'bottom',
+  },
+  {
+    title: '📦 The Inventory System',
+    text: 'Items drop from battles (40% chance on victory)! Each unit can equip ONE item for bonus stats, lifesteal, status immunity, or legendary weapon effects.\n\nOpen a hero\'s detail page to see their Equipped Item section and swap gear from your inventory.',
+    tip: 'Higher difficulty battles drop rarer items (S and T0 grade).',
+    screen: 'barracks', spotlight: '.brk-grid', pos: 'top',
+  },
+  {
+    title: '⚡ Custom Abilities',
+    text: 'Abilities unlock randomly after battles (20% chance). Each unit can equip up to 2 abilities on top of their normal skill slots.\n\nAbilities range from "Regenerate 3 HP/turn" to "Phoenix Soul: revive at 30% HP" — there are 200 unique abilities to collect!',
+    tip: 'Check the Equipped Abilities section in hero detail to assign your unlocked abilities.',
+    screen: 'barracks', spotlight: '.brk-grid', pos: 'center',
+  },
+  {
+    title: '🔍 Deep Inspection',
+    text: 'Right-Click (desktop) or Long-Press (mobile) ANY unit — in battle OR in the barracks — to see their complete stat sheet.\n\nThis shows exact HP, all 6 stats, every equipped skill, passives, items, abilities, status effects, IVs, synergies, and personality.',
+    tip: 'Works on enemy units too! Scout them before attacking.',
+    screen: 'home', spotlight: '.home-btns', pos: 'center',
+  },
+  {
+    title: 'Battle Basics',
+    text: 'Battles are grid-based tactical RPG fights:\n\n1. SELECT a unit (gold highlight)\n2. MOVE to blue tiles\n3. ATTACK enemies on red tiles\n4. SPECIAL when your gauge is charged\n5. ASSIST allies with support skills\n6. WAIT to end a unit\'s turn',
+    tip: 'Use DANGER button to preview which tiles enemies can attack!',
+    screen: 'home', spotlight: '.home-btns', pos: 'top',
+  },
+  {
+    title: 'Weapon Triangle',
+    text: '⚔ Sword > 🪓 Axe > 🔱 Lance > Sword\n✨ Light > 🌑 Dark > 🌪 Anima > Light\n\n+20%/-20% ATK modifier. Bows deal 3× to Flying units!',
+    tip: 'Hover over enemies during Attack mode to see the Combat Forecast with triangle bonuses.',
+    screen: 'home', spotlight: '.home-btns', pos: 'center',
+  },
+  {
+    title: 'Factions & Synergies',
+    text: 'Each hero belongs to a Faction (Infernal, Cyber, Mystic, etc.) and a Class (Warden, Striker, Support, etc.).\n\nStack 2+ of the same faction/class on your team for powerful synergy bonuses like +ATK, healing, crit boosts, and more.',
+    tip: 'Check the synergy bar at the bottom of the Barracks team panel!',
+    screen: 'barracks', spotlight: '.team-bar', pos: 'top',
+    action: () => nav('barracks'),
+  },
+  {
+    title: 'Battle Modes',
+    text: 'Beyond the ladder there are 8 unique modes:\n\n🗼 Training Tower — 10 escalating floors\n⚔ Arena — competitive score + ELO\n★ Grand Hero Battle — boss fights\n⚡ Tempest Trials — 7-stage HP gauntlet\n🏛 Hall of Forms — roguelike draft\nAnd more!',
+    tip: 'Complete daily quests for bonus AP. Check the Quests screen!',
+    screen: 'modes', spotlight: '#modesContent', pos: 'top',
+    action: () => nav('modes'),
+  },
+  {
+    title: '💀 MAX Difficulty',
+    text: 'The ultimate challenge! MAX difficulty enemies are:\n\n• Level 40, +10 merges, Prestige 3\n• ×2.0 stat multiplier\n• Full skill loadout + S/T0 items + abilities\n• Aggressive AI personality\n\n🏆 REWARD: Beating MAX lets you CHOOSE a free, fully-maxed TIER 0 hero!',
+    tip: 'You\'ll see the MAX option in the difficulty selector before any battle.',
+    screen: 'home', spotlight: '.home-btns', pos: 'center',
+    action: () => nav('home'),
+  },
+  {
+    title: 'You\'re Ready!',
+    text: 'That covers all the major systems!\n\n• Upload images → Create heroes → Build teams → Battle\n• Items drop from wins, abilities unlock randomly\n• Right-click/long-press to inspect any unit\n• Beat MAX difficulty for free T0 rewards\n• Save often in Settings → Data\n\nNow go build your ultimate Tier 0 team!',
+    tip: 'Tap the ? button anytime to restart this tutorial.',
+    screen: 'home', spotlight: '.home-btns', pos: 'center',
+    action: () => nav('home'),
+  }
+);
+
+
+// FIX #6: Ensure updateHomeScreen includes credit
+
+
+// FINAL: Re-trigger initialization hooks
+
+
+// AUTO-BATTLE SYSTEM — "Grind Fix"
+
+// INVENTORY MANAGEMENT UI — Sorting, Filtering, Icons
+
+
+// UNIT DAYCARE + CHAO GARDEN + FUSION CHILDREN
+
+// GRAND DEBUGGER + MAESTRO V3 + TRANSITIONS + WEAPON VIEWER
+
+
+// Apex Difficulty, Difficulty Selection, Clear Status
+
+
+// ═══════════════════════════════════════════════════════════
+// CONSOLIDATED PATCH CODE — New features extracted from patches
+// ═══════════════════════════════════════════════════════════
+
+    const style = document.createElement('style');
+    style.textContent = `
+    #inspectModal {display:none;position:fixed;inset:0;z-index:9500;background:rgba(0,0,0,.92);
+        align-items:center;justify-content:center;padding:12px;backdrop-filter:blur(6px)}
+    #inspectModal.show {display:flex}
+    .inspect-panel {background:var(--panel);border:1px solid var(--border);border-radius:14px;
+        padding:20px;width:min(520px,96vw);max-height:90vh;overflow-y:auto;
+        box-shadow:0 20px 80px rgba(0,0,0,.8);animation:mIn .25s ease-out}
+    .inspect-section {background:var(--panel2);border:1px solid var(--border);border-radius:8px;
+        padding:10px;margin-bottom:8px}
+    .inspect-section h3 {font-family:var(--display);font-size:.65rem;color:var(--t0);
+        letter-spacing:1.5px;margin-bottom:6px}
+    .inspect-stat-grid {display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px}
+    .inspect-stat {text-align:center;padding:4px;background:var(--panel);border-radius:4px;
+        font-family:var(--mono);font-size:.65rem}
+    .inspect-stat .label {font-size:.5rem;color:var(--text2);text-transform:uppercase;letter-spacing:1px}
+    .inspect-stat .value {font-size:.85rem;font-weight:700;color:var(--gold)}
+    .inspect-skill {padding:6px;background:var(--panel);border:1px solid var(--border);
+        border-radius:6px;margin-bottom:4px}
+    .inspect-skill-name {font-size:.7rem;font-weight:700;color:var(--text)}
+    .inspect-skill-desc {font-size:.6rem;color:var(--text2);margin-top:2px}
+    .inspect-item {background:linear-gradient(135deg,rgba(251,191,36,.08),rgba(255,107,53,.05));
+        border:1px solid rgba(251,191,36,.3);border-radius:6px;padding:8px;margin-top:6px}
+    .inspect-item-name {font-family:var(--display);font-size:.7rem;color:var(--gold)}
+    .inspect-item-desc {font-size:.6rem;color:var(--text2);margin-top:2px}
+    .inspect-synergy {font-size:.6rem;color:#22c55e;font-family:var(--mono)}
+    .inspect-status {display:inline-block;padding:2px 6px;border-radius:3px;font-size:.55rem;
+        margin-right:4px;margin-bottom:3px;font-family:var(--mono)}
+    .inspect-hp-bar{height:6px;background:var(--panel3);border-radius:3px;overflow:hidden;margin-top:6px}
+    .inspect-hp-fill{height:100%;border-radius:3px;transition:width .4s}
+    .inspect-portrait{width:56px;height:56px;border-radius:50%;border:2px solid var(--gold);object-fit:cover;flex-shrink:0}
+    .inspect-close{position:absolute;top:10px;right:10px;width:40px;height:40px;border-radius:50%;
+        background:var(--panel2);border:1px solid var(--border);color:var(--text);font-size:1.1rem;
+        display:flex;align-items:center;justify-content:center;cursor:pointer;transition:all .15s;z-index:1}
+    .inspect-close:hover,.inspect-close:active{color:var(--red);border-color:var(--red);background:rgba(239,68,68,.1)}
+    @media(pointer:coarse){.inspect-close{width:48px;height:48px;font-size:1.3rem}}
+    `;
+    document.head.appendChild(style);
+
+    // Create modal element
+    const modal = document.createElement('div');
+    modal.id = 'inspectModal';
+    modal.innerHTML = '<div class="inspect-panel" id="inspectContent" style="position:relative"></div>';
+    modal.onclick = (e) => { if(e.target === modal) modal.classList.remove('show'); };
+    document.body.appendChild(modal);
+
+    const bc = document.getElementById('battleCanvas');
+    if(bc) {
+    // Right-click to inspect
+    bc.addEventListener('contextmenu', function(e) {
+        e.preventDefault();
+        const rect = bc.getBoundingClientRect();
+        const gx = Math.floor((e.clientX - rect.left) / CS);
+        const gy = Math.floor((e.clientY - rect.top) / CS);
+        if(gx<0||gy<0||gx>=B.mapW||gy>=B.mapH) return;
+        const u = unitAt(gx, gy);
+        if(u) openInspect(u);
+    });
+    
+    // Long-press for mobile — suppress the tap that fires on touchend after inspect opens
+    let _inspectTimer = 0;
+    let _inspectFired = false;
+    bc.addEventListener('touchstart', function(e) {
+        _inspectFired = false;
+        const t = e.changedTouches[0];
+        _inspectTimer = setTimeout(() => {
+            _inspectFired = true;
+            e.preventDefault();
+            const rect = bc.getBoundingClientRect();
+            const gx = Math.floor((t.clientX - rect.left) / CS);
+            const gy = Math.floor((t.clientY - rect.top) / CS);
+            if(gx<0||gy<0||gx>=B.mapW||gy>=B.mapH) return;
+            const u = unitAt(gx, gy);
+            if(u) openInspect(u);
+        }, 500);
+    }, {passive:false});
+    bc.addEventListener('touchend', function(e) {
+        clearTimeout(_inspectTimer);
+        if(_inspectFired) { e.preventDefault(); _inspectFired = false; }
+    }, {passive:false});
+    bc.addEventListener('touchmove', function() { clearTimeout(_inspectTimer); _inspectFired = false; }, {passive:true});
+    } // end if(bc)
+
+    const diffModal = document.getElementById('diffModal');
+    if(diffModal) {
+    
+    // Find the cancel button and insert MAX before it
+    const cancelBtn = diffModal.querySelector('[onclick*="closeDiffModal"]') || diffModal.querySelector('[onclick*="currentDifficulty"]');
+    if(cancelBtn) {
+        const maxBtn = document.createElement('button');
+        maxBtn.className = 'btn2';
+        maxBtn.style.cssText = 'min-width:200px;font-size:.8rem;border-color:#ff2d55;color:#ff2d55;background:rgba(255,45,85,.08)';
+        maxBtn.innerHTML = 'MAX <span style="font-size:.6rem;opacity:.7">Lv40+10 ×2.0 Full Skills+Items T0 REWARD</span>';
+        maxBtn.setAttribute('data-tip', 'Fully upgraded, fully prestiged enemies with best items and abilities. Win to choose a free Tier-0 unit!');
+        maxBtn.onclick = () => setDifficulty('max');
+        diffModal.insertBefore(maxBtn, cancelBtn);
+    }
+    } // end if(diffModal)
+
+    let _brkLPTimer = 0;
+    let _brkLPCard = null;
+    document.addEventListener('touchstart', function(e) {
+        const card = e.target.closest('.ucard');
+        if(!card || (B.phase && B.phase !== 'over')) return;
+        _brkLPCard = card;
+        _brkLPTimer = setTimeout(function() {
+            // Show long-press ring feedback
+            const t = e.changedTouches[0];
+            showLongPressRing(t.clientX, t.clientY);
+            const idx = [...card.parentNode.children].indexOf(card);
+            const sorted = typeof getSorted === 'function' ? getSorted() : [];
+            if(sorted[idx]) {
+                const u = sorted[idx].u;
+                const inspectUnit = {...u, hp: u.maxHp, specialCharges: u.special?.cd || 0};
+                if(typeof openInspect === 'function') openInspect(inspectUnit);
+            }
+            _brkLPCard = null;
+        }, 500);
+    }, {passive: true});
+    document.addEventListener('touchend', function() { clearTimeout(_brkLPTimer); _brkLPCard = null; }, {passive: true});
+    document.addEventListener('touchmove', function() { clearTimeout(_brkLPTimer); _brkLPCard = null; }, {passive: true});
+
+    function _hfExecuteMapSpecial(u){
+        const sp = u.special; sfx('special');
+        bLog(u.name+': '+sp.name+'!','spec');
+        const allies = B.allUnits.filter(a=>a.side===u.side&&a.hp>0);
+        const enemies = B.allUnits.filter(a=>a.side!==u.side&&a.hp>0);
+        const nearby = allies.filter(a=>a!==u&&Math.abs(a.x-u.x)+Math.abs(a.y-u.y)<=2);
+        switch(sp.effect){
+            case 'heal_self':{ const h=Math.round(u.maxHp*sp.val); u.hp=Math.min(u.maxHp,u.hp+h); floatTxt(u.x,u.y,'+'+h,'#22c55e'); break; }
+            case 'shield': u.shielded=true; break;
+            case 'aura_heal': nearby.forEach(a=>{ a.hp=Math.min(a.maxHp,a.hp+sp.val); floatTxt(a.x,a.y,'+'+sp.val,'#22c55e'); }); break;
+            case 'map_heal': case 'heal_all': allies.forEach(a=>{ a.hp=Math.min(a.maxHp,a.hp+sp.val); floatTxt(a.x,a.y,'+'+sp.val,'#22c55e'); }); break;
+            case 'heal_all_full': allies.forEach(a=>{ a.hp=a.maxHp; floatTxt(a.x,a.y,'FULL','#22c55e'); }); break;
+            case 'map_quake': B.allUnits.filter(a=>a.hp>0&&a!==u&&a.moveType!=='Flying').forEach(a=>{ a.hp=Math.max(0,a.hp-sp.val); floatTxt(a.x,a.y,'-'+sp.val,'#f97316'); }); screenShake(); break;
+            case 'map_blizzard': enemies.forEach(a=>{ a.hp=Math.max(0,a.hp-sp.val); a.frozen=true; floatTxt(a.x,a.y,'-'+sp.val,'#00e5ff'); }); break;
+            case 'map_fire': enemies.forEach(a=>{ a.hp=Math.max(0,a.hp-sp.val); a.burned=(a.burned||0)+sp.val; floatTxt(a.x,a.y,'-'+sp.val,'#f97316'); }); break;
+            case 'map_timestop': case 'gravity_all': enemies.forEach(a=>{ a.frozen=true; floatTxt(a.x,a.y,'STOP','#a855f7'); }); break;
+            case 'panic_all': enemies.forEach(a=>{ a._panicked=true; floatTxt(a.x,a.y,'PANIC','#ef4444'); }); break;
+            case 'buff_all_atk': allies.forEach(a=>a._rallyAtk=(a._rallyAtk||0)+sp.val); break;
+            case 'buff_all_def': allies.forEach(a=>a._rallyDef=(a._rallyDef||0)+sp.val); break;
+            case 'buff_all_spd': allies.forEach(a=>a._rallySpd=(a._rallySpd||0)+sp.val); break;
+            case 'buff_all_spectrum': case 'buff_all_full': allies.forEach(a=>{ a._rallyAtk=(a._rallyAtk||0)+sp.val; a._rallyDef=(a._rallyDef||0)+sp.val; a._rallySpd=(a._rallySpd||0)+sp.val; }); break;
+            case 'debuff_all_aoe': enemies.forEach(a=>{ a._rallyAtk=Math.min(a._rallyAtk||0,-sp.val); a._rallyDef=Math.min(a._rallyDef||0,-sp.val); a._rallySpd=Math.min(a._rallySpd||0,-sp.val); }); break;
+        }
+        u.specialCharges = u.special.cd;
+        markActed(u);
+        if(B.dangerZone) calcDangerZone();
+        drawMap(); updateBUI(); updateEList();
+        if(!checkBattleOver()) checkTurnEnd();
+    }
+
+    // initiate_atk / defend_def in calcDmg
+    // stack_spd (Haste) + item regen at turn boundary
+    // Player units regen at start of player phase (end of enemy phase)
+    // Enemy units regen at start of enemy phase (end of player phase)
+    // post_combat_debuff_atk + on-hit item effects + lifesteal + reflect
+    // assist_buff from items
+
+  const homeScreen = document.getElementById('home');
+  if (homeScreen) {
+  // Add credit below the existing info text
+  let creditEl = document.querySelector('.home-credit');
+  if (!creditEl) {
+    creditEl = document.createElement('div');
+    creditEl.className = 'home-credit';
+    creditEl.textContent = 'Game made by Sincere Smith, ShadenXa';
+    homeScreen.appendChild(creditEl);
+  }
+  // Also update the home-sub or add after it
+  const homeSub = homeScreen.querySelector('.home-sub');
+  if (homeSub) {
+    homeSub.insertAdjacentHTML('afterend',
+      '<div class="home-credit" style="margin-top:4px">Game made by Sincere Smith, ShadenXa</div>');
+  }
+  } // end if(homeScreen)
+
+  // Only set to true if this is a fresh state (no save loaded yet or first load)
+  // The loadGame function will overwrite from save if exists
+  if (S.totalBattles === 0 && S.roster.length === 0) {
+    S.soundOn = true;
+  }
+
+  // First-click resume for AudioContext + BGM
+  let _firstClickDone = false;
+  function _firstInteraction() {
+    if (_firstClickDone) return;
+    _firstClickDone = true;
+    try {
+      if (zzfxCtx && zzfxCtx.state === 'suspended') zzfxCtx.resume();
+      if (bgm && bgm.ctx && bgm.ctx.state === 'suspended') bgm.ctx.resume();
+      if (S.soundOn && bgm && !bgm.isPlaying) bgm.start();
+    } catch (e) { }
+    document.removeEventListener('click', _firstInteraction);
+    document.removeEventListener('touchstart', _firstInteraction);
+    document.removeEventListener('keydown', _firstInteraction);
+  }
+  document.addEventListener('click', _firstInteraction, { once: false, passive: true });
+  document.addEventListener('touchstart', _firstInteraction, { once: false, passive: true });
+  document.addEventListener('keydown', _firstInteraction, { once: false, passive: true });
+
+  const wasPlaying = bgm && bgm.isPlaying;
+  const oldTempo = bgm ? bgm.tempo : 90;
+  if (wasPlaying) bgm.stop();
+  window.bgm = new MaestroV2();
+  bgm.tempo = oldTempo;
+  if (wasPlaying && S.soundOn) bgm.start();
+
+  const btnSelectors = '.btn-t0, .btn2, .nbtn, .stab, .fbtn, .abtn, .mode-card, .camp-card, .img-page-btn, .data-btn, .toggle-btn, .preset-save-icon';
+  document.addEventListener('click', function (e) {
+    if (!S.soundOn) return;
+    const btn = e.target.closest(btnSelectors);
+    if (btn) {
+      try { sfx('click'); } catch (err) { }
+    }
+  }, { passive: true });
+
+  // Refresh presets if barracks is visible
+  if (typeof refreshPresets === 'function') refreshPresets();
+  // Update home
+  if (typeof updateHomeScreen === 'function') updateHomeScreen();
+
+    // 1. OVERRIDE rollUnit TO SEARCH ALL BANNERS (Fixes "Unable to select auto banners")
+    // Previous logic only looked in S.banners (custom only). Now looks in getAvailableBanners()
+    // 2. OVERRIDE refreshGacha TO FIX BUTTONS & ICONS
+    
+    // Re-render if currently on Gacha screen
+    if(document.getElementById('gacha').classList.contains('active')) {
+        refreshGacha();
+    }
+
+    // Auto-refresh the Gacha screen if the user is currently looking at it
+    const gachaEl = document.getElementById('gacha');
+    if(gachaEl && gachaEl.classList.contains('active')) {
+        if(typeof refreshGacha === 'function') refreshGacha();
+    }
+
+    B.autoPlay = false;
+
+    // AI for player units: aggressive — move toward enemies, attack the weakest
+    function autoPlayerAct(unit, done) {
+        if(B.phase === 'over' || !B.autoPlay) { if(done) done(); return; }
+        const enemies = B.eUnits.filter(u => u.hp > 0);
+        if(!enemies.length) { markActed(unit); drawMap(); setTimeout(done, 10); return; }
+        if(unit.frozen) { markActed(unit); setTimeout(done, 10); return; }
+
+        const wRange = getWeaponRange(unit.weapon);
+
+        // Pick best target: prioritize killable, then lowest HP
+        enemies.sort((a, b) => {
+            const ka = a.hp <= calcDmg(unit, a).dmg, kb = b.hp <= calcDmg(unit, b).dmg;
+            if(ka && !kb) return -1; if(kb && !ka) return 1;
+            return a.hp - b.hp;
+        });
+        const target = enemies[0];
+        const dist = Math.abs(target.x - unit.x) + Math.abs(target.y - unit.y);
+
+        // Already in range: attack
+        if(dist <= wRange) {
+            setTimeout(() => {
+                const useSpec = unit.specialCharges === 0;
+                performCombat(unit, target, useSpec, true);
+                markActed(unit); drawMap(); updateBUI();
+                setTimeout(done, CFG.AI_DELAY * 0.3);
+            }, CFG.AI_DELAY * 0.2);
+            return;
+        }
+
+        // Move toward target
+        const reachable = getReachable(unit);
+        let best = null, bestScore = Infinity;
+        for(const cell of reachable) {
+            const d = Math.abs(cell.x - target.x) + Math.abs(cell.y - target.y);
+            const score = d <= wRange ? -500 + d : d;
+            if(score < bestScore) { bestScore = score; best = cell; }
+        }
+        if(!best) { markActed(unit); setTimeout(done, 10); return; }
+
+        const path = astar(unit.x, unit.y, best.x, best.y, unit) || [{x: best.x, y: best.y}];
+        if(!path.length) { markActed(unit); setTimeout(done, 10); return; }
+
+        unit.moved = true;
+        animateMove(unit, path, () => {
+            const nd = Math.abs(target.x - unit.x) + Math.abs(target.y - unit.y);
+            if(nd <= wRange) {
+                setTimeout(() => {
+                    const useSpec = unit.specialCharges === 0;
+                    performCombat(unit, target, useSpec);
+                    markActed(unit); drawMap(); updateBUI();
+                    setTimeout(done, CFG.AI_DELAY * 0.3);
+                }, CFG.AI_DELAY * 0.2);
+            } else {
+                markActed(unit); drawMap(); updateBUI();
+                setTimeout(done, CFG.AI_DELAY * 0.2);
+            }
+        });
+    }
+
+    // Hook into the player phase start to auto-play
+    // We need to hook AFTER the player phase begins.
+    // The player phase code runs at the end of endEnemyPhase, ending at drawMap/updateBUI.
+    // We'll patch the beginning of each player phase by watching for the turnInd change.
+    let _autoCheckPending = false;
+
+    const STAT_ICONS = {
+        atk: '⚔️', def: '🛡️', spd: '💨', mag: '✨', res: '🔮',
+        hp: '❤️', crit: '🎯', mov: '👢'
+    };
+
+    const RARITY_ORDER = {T0: 6, S: 5, A: 4, B: 3, C: 2, D: 1};
+    const RARITY_COLORS = {D:'#8e99a4', C:'#00e5ff', B:'#7c4dff', A:'#ff6b35', S:'#ffd700', T0:'#ff2d55'};
+
+    function getItemIcon(item) {
+        if(!item.effect) return '📦';
+        const stat = item.effect.stat || item.effect.type || '';
+        if(stat.includes('atk') || item.effect.type === 'crit_chance' || item.effect.type === 'crit_mult') return STAT_ICONS.atk;
+        if(stat.includes('def') || item.effect.type === 'reflect' || item.effect.type === 'first_hit_shield') return STAT_ICONS.def;
+        if(stat.includes('spd') || item.effect.type === 'mov_boost') return STAT_ICONS.spd;
+        if(stat.includes('mag')) return STAT_ICONS.mag;
+        if(stat.includes('res') || item.effect.type === 'miracle') return STAT_ICONS.res;
+        if(stat.includes('hp') || item.effect.type === 'regen' || item.effect.type === 'lifesteal') return STAT_ICONS.hp;
+        return '📦';
+    }
+
+    // Track current filter/sort state per hero detail session
+    let _invSort = 'rarity'; // 'rarity' | 'stat' | 'name'
+    let _invFilter = 'all';  // 'all' | 'atk' | 'def' | 'spd' | 'hp' | 'utility'
+
+    function filterItems(items) {
+        if(_invFilter === 'all') return items;
+        return items.filter(item => {
+            if(!item.effect) return _invFilter === 'utility';
+            const stat = (item.effect.stat || item.effect.type || '').toLowerCase();
+            if(_invFilter === 'atk') return stat.includes('atk') || stat.includes('crit');
+            if(_invFilter === 'def') return stat.includes('def') || stat.includes('shield') || stat.includes('reflect');
+            if(_invFilter === 'spd') return stat.includes('spd') || stat.includes('mov');
+            if(_invFilter === 'hp') return stat.includes('hp') || stat.includes('heal') || stat.includes('regen') || stat.includes('lifesteal');
+            if(_invFilter === 'utility') return !['atk','def','spd','hp','mag','res'].some(s => stat.includes(s));
+            return true;
+        });
+    }
+
+    function sortItems(items) {
+        return [...items].sort((a, b) => {
+            if(_invSort === 'rarity') return (RARITY_ORDER[b.rarity] || 0) - (RARITY_ORDER[a.rarity] || 0);
+            if(_invSort === 'name') return a.name.localeCompare(b.name);
+            if(_invSort === 'stat') {
+                const va = a.effect?.val || 0, vb = b.effect?.val || 0;
+                return vb - va;
+            }
+            return 0;
+        });
+    }
+
+    // Override the item inventory rendering in openHeroDetail
+
+    const W_PREFIXES = ['Void', 'Star', 'Thunder', 'Blood', 'Iron', 'Ancient', 'Cyber', 'Neon', 'Holy', 'Cursed', 'Royal', 'Savage'];
+    const W_SUFFIXES = ['of Might', 'of Speed', 'of Ruin', 'of Mercy', 'of the Night', 'of the Sun', 'of Storms', 'of Steel', 'of Honor', 'of Chaos'];
+
+    // Initialize daycare save data
+    if(!S.daycareSlots) S.daycareSlots = [null, null]; // unit IDs
+    if(!S.daycareBond) S.daycareBond = 0;
+    if(!S.supportMap) S.supportMap = {}; // "idA-idB" -> support level (0-100)
+    if(!S.fusionChildren) S.fusionChildren = []; // track children metadata
+
+    const BOND_MAX = 100;
+    const BOND_PER_PET = 2;
+    const BOND_PER_BATTLE_ADJ = 3;
+    const BOND_PER_ASSIST = 5;
+    const CHILD_STAT_DIVISOR = 1.8; // (A+B) / 1.8
+
+    // ─── Support Map helpers ──────────────────────────────────
+    function supportKey(idA, idB) {
+        return idA < idB ? `${idA}-${idB}` : `${idB}-${idA}`;
+    }
+    function getSupport(idA, idB) {
+        return S.supportMap[supportKey(idA, idB)] || 0;
+    }
+    function addSupport(idA, idB, amount) {
+        const key = supportKey(idA, idB);
+        S.supportMap[key] = Math.min(BOND_MAX, (S.supportMap[key] || 0) + amount);
+    }
+    function getSupportRank(val) {
+        if(val >= 80) return {rank: 'S', stars: '★★★★★', color: '#ffd700'};
+        if(val >= 60) return {rank: 'A', stars: '★★★★', color: '#ff6b35'};
+        if(val >= 40) return {rank: 'B', stars: '★★★', color: '#7c4dff'};
+        if(val >= 20) return {rank: 'C', stars: '★★', color: '#00e5ff'};
+        return {rank: '-', stars: '★', color: '#8e99a4'};
+    }
+
+    // ─── Daycare Garden State ─────────────────────────────────
+    let dcSprites = []; // {x, y, vx, vy, unit, wiggleTimer, jumpTimer}
+    let dcIsPetting = false;
+    let dcPetTarget = null;
+    let dcAnimId = null;
+
+    // ─── Refresh Daycare Screen ───────────────────────────────
+    // ─── Unit Picker for Daycare ──────────────────────────────
+    // ─── Chao Garden: Canvas Animation ────────────────────────
+    function initDaycareGarden() {
+        if(dcAnimId) cancelAnimationFrame(dcAnimId);
+        const canvas = document.getElementById('dcCanvas');
+        if(!canvas) return;
+        const ctx = canvas.getContext('2d');
+        canvas.width = canvas.parentElement?.clientWidth || 400;
+        canvas.height = 280;
+
+        // Create sprites for daycare units
+        dcSprites = [];
+        S.daycareSlots.forEach((uid, i) => {
+            const u = uid ? S.roster.find(r => r.id === uid) : null;
+            if(u) {
+                dcSprites.push({
+                    x: 80 + i * 200, y: 180,
+                    vx: (Math.random() - 0.5) * 0.5, vy: 0,
+                    unit: u,
+                    wiggleTimer: 0, jumpTimer: Math.random() * 200,
+                    petCounter: 0
+                });
+            }
+        });
+
+        // Mouse/touch events for petting
+        canvas.onpointerdown = function(e) {
+            dcIsPetting = true;
+            dcHandlePet(e);
+        };
+        canvas.onpointermove = function(e) {
+            if(dcIsPetting) dcHandlePet(e);
+        };
+        canvas.onpointerup = function() { dcIsPetting = false; dcPetTarget = null; };
+        canvas.onpointerleave = function() { dcIsPetting = false; dcPetTarget = null; };
+
+        dcAnimLoop(ctx, canvas);
+    }
+
+    function dcHandlePet(e) {
+        const canvas = document.getElementById('dcCanvas');
+        if(!canvas) return;
+        const rect = canvas.getBoundingClientRect();
+        const mx = (e.clientX - rect.left) * (canvas.width / rect.width);
+        const my = (e.clientY - rect.top) * (canvas.height / rect.height);
+
+        for(const sp of dcSprites) {
+            if(Math.abs(mx - sp.x) < 40 && Math.abs(my - sp.y) < 40) {
+                sp.petCounter++;
+                sp.wiggleTimer = 15;
+                // Spawn heart particles
+                spawnDCHeart(e.clientX, e.clientY);
+
+                // Every 5 pets, increment bond
+                if(sp.petCounter % 5 === 0 && S.daycareSlots[0] && S.daycareSlots[1]) {
+                    addSupport(S.daycareSlots[0], S.daycareSlots[1], BOND_PER_PET);
+                    save(true);
+                    refreshDaycare();
+                }
+                break;
+            }
+        }
+    }
+
+    function spawnDCHeart(clientX, clientY) {
+        const heartsEl = document.getElementById('dcHearts');
+        if(!heartsEl) return;
+        const rect = heartsEl.getBoundingClientRect();
+        const h = document.createElement('div');
+        h.className = 'dc-heart';
+        h.textContent = ['♥','💕','💖','💗'][~~(Math.random()*4)];
+        h.style.left = (clientX - rect.left - 10) + 'px';
+        h.style.top = (clientY - rect.top) + 'px';
+        heartsEl.appendChild(h);
+        setTimeout(() => h.remove(), 1200);
+    }
+
+    function dcAnimLoop(ctx, canvas) {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        // Draw ground
+        ctx.fillStyle = '#1a3322';
+        ctx.fillRect(0, canvas.height - 60, canvas.width, 60);
+
+        // Draw grass tufts
+        ctx.fillStyle = '#2a5538';
+        for(let i = 0; i < canvas.width; i += 30) {
+            ctx.beginPath();
+            ctx.moveTo(i, canvas.height - 60);
+            ctx.lineTo(i + 8, canvas.height - 72);
+            ctx.lineTo(i + 16, canvas.height - 60);
+            ctx.fill();
+        }
+
+        // Draw stars
+        ctx.fillStyle = '#ffffff44';
+        for(let i = 0; i < 20; i++) {
+            const sx = (i * 97 + 13) % canvas.width;
+            const sy = (i * 53 + 7) % (canvas.height - 100);
+            ctx.fillRect(sx, sy, 1.5, 1.5);
+        }
+
+        // Draw & animate sprites
+        dcSprites.forEach(sp => {
+            // Random behavior
+            sp.jumpTimer--;
+            if(sp.jumpTimer <= 0) {
+                sp.jumpTimer = 100 + Math.random() * 200;
+                sp.vy = -3; // jump
+            }
+
+            // Physics
+            sp.x += sp.vx;
+            sp.y += sp.vy;
+            sp.vy += 0.15; // gravity
+            if(sp.y > 180) { sp.y = 180; sp.vy = 0; }
+            if(sp.x < 40) { sp.x = 40; sp.vx *= -1; }
+            if(sp.x > canvas.width - 40) { sp.x = canvas.width - 40; sp.vx *= -1; }
+
+            // Random wander
+            if(Math.random() < 0.02) sp.vx = (Math.random() - 0.5) * 0.8;
+
+            // Draw unit sprite
+            ctx.save();
+            if(sp.wiggleTimer > 0) {
+                sp.wiggleTimer--;
+                ctx.translate(sp.x, sp.y);
+                ctx.rotate(Math.sin(sp.wiggleTimer * 0.8) * 0.15);
+                ctx.translate(-sp.x, -sp.y);
+            }
+
+            if(sp.unit.img) {
+                ctx.drawImage(sp.unit.img, sp.x - 32, sp.y - 32, 64, 64);
+            } else {
+                ctx.fillStyle = '#555';
+                ctx.fillRect(sp.x - 20, sp.y - 20, 40, 40);
+            }
+
+            // Draw name
+            ctx.fillStyle = '#fff';
+            ctx.font = '10px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText(sp.unit.name, sp.x, sp.y + 44);
+
+            // Draw support hearts if both units present
+            if(dcSprites.length === 2) {
+                const sup = getSupport(dcSprites[0].unit.id, dcSprites[1].unit.id);
+                const rank = getSupportRank(sup);
+                ctx.fillStyle = rank.color;
+                ctx.font = '9px sans-serif';
+                ctx.fillText(rank.stars, sp.x, sp.y - 38);
+            }
+
+            ctx.restore();
+        });
+
+        dcAnimId = requestAnimationFrame(() => dcAnimLoop(ctx, canvas));
+    }
+
+    // ─── Pet Both button ──────────────────────────────────────
+    // ─── Welcome Child (Fusion) ───────────────────────────────
+    // ─── BATTLEFIELD BONDING ──────────────────────────────────
+    // Hook into performCombat to track adjacency bonds after combat
+    function spawnBattleHeart(gx, gy) {
+        const canvas = document.getElementById('battleCanvas');
+        if(!canvas) return;
+        const wrap = canvas.parentElement;
+        if(!wrap) return;
+
+        const tileSize = canvas.width / (B.mapW || 8);
+        const px = gx * tileSize + tileSize / 2;
+        const py = gy * tileSize + tileSize / 2;
+
+        const scaleX = canvas.clientWidth / canvas.width;
+        const scaleY = canvas.clientHeight / canvas.height;
+
+        const h = document.createElement('div');
+        h.className = 'battle-heart';
+        h.textContent = '♥';
+        h.style.left = (px * scaleX) + 'px';
+        h.style.top = (py * scaleY) + 'px';
+        wrap.style.position = 'relative';
+        wrap.appendChild(h);
+        setTimeout(() => h.remove(), 800);
+    }
+
+    // Show support stars in battle unit info
+    // ─── PROCEDURAL CHARACTER DESCRIPTIONS ────────────────────
+    const TITLES = {
+        Sword: ['Swordfighter','Blade Dancer','Duelist','Sword Saint'],
+        Lance: ['Lancer','Dragoon','Spearmaster','Halberdier'],
+        Axe:   ['Warrior','Berserker','Axe Lord','Reaver'],
+        LightMag: ['Cleric','Sage of Light','Bishop','Radiant Mage'],
+        DarkMag: ['Dark Mage','Sorcerer','Hex Master','Shadow Weaver'],
+        AnimaMag: ['Anima Sage','Elementalist','Mystic','Storm Caller'],
+        Bow:   ['Archer','Marksman','Sniper','Hawkeye'],
+        Dagger: ['Thief','Assassin','Shadow','Rogue']
+    };
+    const PERSONALITIES = ['stoic','fierce','gentle','mysterious','proud','cunning','loyal','wild','scholarly','playful'];
+    const ORIGINS = ['the northern highlands','a forgotten kingdom','the ancient forests','the eastern steppes','a floating citadel','the underground city','the crimson desert','the coastal stronghold'];
+
+    // ─── CLASS CHANGE (RECLASSING) ────────────────────────────
+    const RECLASS_COST_AP = 100;
+    const RECLASS_OPTIONS = [
+        {name:'Swordmaster', weapon:'Sword', move:'Infantry'},
+        {name:'Knight', weapon:'Lance', move:'Armored'},
+        {name:'Berserker', weapon:'Axe', move:'Infantry'},
+        {name:'Paladin', weapon:'Lance', move:'Cavalry'},
+        {name:'Sage', weapon:'AnimaMag', move:'Infantry'},
+        {name:'Bishop', weapon:'LightMag', move:'Infantry'},
+        {name:'Druid', weapon:'DarkMag', move:'Infantry'},
+        {name:'Sniper', weapon:'Bow', move:'Infantry'},
+        {name:'Assassin', weapon:'Dagger', move:'Infantry'},
+        {name:'Wyvern Lord', weapon:'Axe', move:'Flying'},
+        {name:'Pegasus Knight', weapon:'Lance', move:'Flying'},
+        {name:'Dark Knight', weapon:'DarkMag', move:'Cavalry'},
+        {name:'Bow Knight', weapon:'Bow', move:'Cavalry'},
+        {name:'General', weapon:'Lance', move:'Armored'},
+        {name:'Hero', weapon:'Sword', move:'Infantry'},
+        {name:'Valkyrie', weapon:'LightMag', move:'Cavalry'},
+    ];
+
+    // ─── HERO DETAIL OVERRIDES ────────────────────────────────
+    // ─── GRAND TUTORIAL REWRITE ───────────────────────────────
+    TUTORIAL_STEPS.length = 0;
+    TUTORIAL_STEPS.push(
+        {
+            title: 'Welcome to APEX TIER 0',
+            text: 'Welcome, Summoner! This is a tactical RPG gacha game where you upload images, summon heroes from them, build a team, and battle across multiple game modes. This tutorial will explain every system in detail so you never feel lost.'
+        },
+        {
+            title: 'Step 1 — Uploading Images',
+            text: 'Go to Settings > Image Gallery. Upload any PNG/JPG images from your device — these become the portraits for your heroes. The more images you upload, the more unique heroes you can summon. Each image can become a hero of any grade!'
+        },
+        {
+            title: 'Step 2 — The Summoning System',
+            text: 'Visit the SUMMON screen to spend Orbs (AP) and pull heroes. Each pull costs AP and gives you a hero with a random Grade from D (common) to T0 (mythical). Pull in batches of 5 for a discount. Every pull builds your Pity counter — at max pity, you\'re guaranteed a high-grade hero.'
+        },
+        {
+            title: 'Step 3 — Hero Grades',
+            text: 'Heroes come in grades: D (grey), C (cyan), B (purple), A (orange), S (gold), T0 (crimson). Higher grades have better stat multipliers and more skill slots. T0 heroes are the strongest — they always come with a unique procedural weapon!'
+        },
+        {
+            title: 'Step 4 — Focus Banners',
+            text: 'Banners give certain heroes a higher chance of appearing. The Standard Pool has no focus. Weekly banners rotate every 7 days and feature specific heroes. Custom banners focus on units you want. Check the rates on each banner card!'
+        },
+        {
+            title: 'Step 5 — Hero Detail & Stats',
+            text: 'Tap any hero in the Barracks to see their detail screen. Here you can view their stats (HP, ATK, DEF, MAG, RES, SPD), skills, level, and growth rates. You can also set their story text, preview future stat growth, and manage equipment.'
+        },
+        {
+            title: 'Step 6 — Classes & Roles',
+            text: 'Each hero has a Class (Swordmaster, Knight, Sage, etc.) that determines their weapon and movement type. Classes include:\n\n• Swordmaster — Sword, Infantry (balanced)\n• Knight/General — Lance, Armored (high DEF, low MOV)\n• Paladin — Lance, Cavalry (high MOV)\n• Sage — Anima Magic, Infantry (high MAG)\n• Bishop — Light Magic, Infantry (healing)\n• Druid — Dark Magic, Infantry (mixed)\n• Sniper — Bow, Infantry (ranged)\n• Assassin — Dagger, Infantry (fast)\n• Wyvern — Axe, Flying (ignores terrain)\n• Pegasus Knight — Lance, Flying\n\nYou can reclass heroes in their detail screen for 100 AP!'
+        },
+        {
+            title: 'Step 7 — Movement Types',
+            text: 'Movement type affects how far heroes can move and what terrain they can cross:\n\n• Infantry (2 tiles) — Standard movement. Forests cost 2 MOV.\n• Armored (1 tile) — Slow but extremely tanky. Trenches don\'t slow them.\n• Cavalry (3 tiles) — Fast! But forests and trenches cost extra. Cannot enter peaks.\n• Flying (2 tiles) — Ignores ALL terrain costs. Can fly over water, peaks, and walls. Weak to Bows!'
+        },
+        {
+            title: 'Step 8 — The Weapon Triangle',
+            text: 'Weapons have an advantage triangle that grants +20% damage:\n\n⚔ Sword beats Axe\n🪓 Axe beats Lance\n🔱 Lance beats Sword\n\n✨ Light Magic beats Dark Magic\n🌑 Dark Magic beats Anima Magic\n🔥 Anima Magic beats Light Magic\n\n🏹 Bows have no triangle but deal effective damage to Flying units!\n🗡 Daggers have no triangle but debuff enemy stats after combat.'
+        },
+        {
+            title: 'Step 9 — Terrain & Tiles',
+            text: 'The battlefield has different terrain types that affect combat:\n\n• Plain — No bonuses. 1 MOV to cross.\n• Forest (F) — +2 DEF. Costs 2 MOV. Slows cavalry.\n• Fort (+) — +3 DEF, heals 20% HP per turn. Strategic!\n• Trench (T) — +4 DEF, -1 ATK. Slows cavalry.\n• Peak (^) — +1 DEF, +2 ATK. Cavalry can\'t enter.\n• Lava (!) — Deals 5 damage per turn! -2 DEF.\n• Water (~) — Impassable except for Flying.\n• Wall (#) — Impassable. Has HP — can be destroyed!\n• Castle (C) — +5 DEF, +1 ATK, heals 10% HP.'
+        },
+        {
+            title: 'Step 10 — Battle System',
+            text: 'Battles are turn-based on a grid. During YOUR PHASE, select a unit, move them, then choose to Attack, use a Special, use an Assist, or Wait.\n\n• Damage = ATK - DEF (physical) or MAG - RES (magic)\n• If your SPD is 5+ higher than the enemy, you strike TWICE!\n• Specials charge by 1 each time you attack or get attacked\n• The FORECAST panel (toggle with the eye icon) shows predicted combat outcomes before you commit'
+        },
+        {
+            title: 'Step 11 — Skills & Abilities',
+            text: 'Heroes have skill slots:\n\n• A Skill — Combat passives (Fury, Death Blow, etc.)\n• B Skill — Battle effects (Quick Riposte, Desperation, etc.)\n• C Skill — Aura/support effects (Hone ATK, Threaten SPD)\n• S Seal — Extra passive slot\n• Special — Charged ability (Moonbow, Bonfire, etc.)\n• Assist — Support move (Reposition, Dance, Heal)\n\nFusion children get 6 skill slots (A-F) from both parents! Visit the Hero Detail screen to equip items and abilities from your inventory.'
+        },
+        {
+            title: 'Step 12 — IVs (Boons & Banes)',
+            text: 'Each hero is born with a Boon (+3 to one stat) and a Bane (-3 to another). These are shown in their detail screen with colored arrows. A hero with a SPD Boon and DEF Bane will be faster but less durable. Merging duplicates (+1) eventually neutralizes the Bane!'
+        },
+        {
+            title: 'Step 13 — Battle Modes',
+            text: '• Training Tower — 10 progressive floors of increasing difficulty. Great for farming EXP.\n• Arena — Fight for ELO and Arena Score.\n• Grand Hero Battle — Daily boss fights. Beat them to recruit the boss!\n• Tempest Trials — 7-battle gauntlet with HP carry-over.\n• Hall of Forms — Roguelike draft mode with random skillless units.\n• Aether Raids — Async PvP with importable defense bases.\n• Heroic Ordeal — Solo challenge with a single hero for bonus SP.\n• Bound Hero Battle — Boss duo with extreme stats.\n• Unit Daycare — Bond and fuse units together!'
+        },
+        {
+            title: 'Step 14 — The Unit Daycare',
+            text: 'The Daycare is a special mode where you place two units to bond. While they\'re in the daycare, you can pet them and watch them play in a garden scene.\n\n• Pet units to raise their Bond level (tap/rub them!)\n• Units also bond by fighting together in battles — ending turns adjacent or using assists\n• Support ranks go from C → B → A → S\n• At max bond (S rank), you can "Welcome Child" — a fusion unit!\n• Fusion children inherit ALL skills from both parents (6 slots!)\n• Their stats are (Parent A + Parent B) / 1.8 — often very strong\n• Their portrait is a color-blended fusion of both parents'
+        },
+        {
+            title: 'Step 15 — Class Change (Reclassing)',
+            text: 'In the Hero Detail screen, you\'ll find a CLASS CHANGE section. For 100 AP, you can change any unit\'s class, switching their weapon type and movement type.\n\nThis lets you adapt your team — turn a slow Armored Knight into a fast Cavalry Paladin, or give a Sword user a Bow for anti-Flying coverage. The unit keeps their stats, skills, and portrait.'
+        },
+        {
+            title: 'Step 16 — Procedural Weapons',
+            text: 'Higher-grade heroes (especially T0) may spawn with unique procedural weapons like "Void Sword of Chaos" or "Holy Lance of Speed." These weapons:\n\n• Give +3 to a random stat permanently\n• Attach a unique ability as a weapon passive\n• Are completely unique to each unit\n\nThis makes every hero feel different, even if they share the same image!'
+        },
+        {
+            title: 'Step 17 — Items & Equipment',
+            text: 'You can earn items from battles and quests. In the Hero Detail screen, tap the EQUIPPED ITEM section to browse your inventory. Use the filter buttons to sort by stat type (ATK, DEF, SPD, HP) or rarity. Each hero can equip one item at a time for stat bonuses.'
+        },
+        {
+            title: 'Step 18 — Auto-Battle',
+            text: 'During any battle, tap the AUTO button in the battle header to toggle Auto-Battle. When enabled, your units will automatically move toward enemies, attack the weakest target, and use specials. Great for grinding Training Tower floors! You can toggle it off at any time to take manual control.'
+        },
+        {
+            title: 'You\'re Ready!',
+            text: 'You now know everything about APEX TIER 0! Start by uploading images, summoning heroes, building your team, and conquering the battle modes. Remember:\n\n• Upload lots of images for variety\n• Use the weapon triangle to your advantage\n• Level up heroes to increase their stats\n• Bond units in the Daycare for fusion children\n• Reclass heroes to fill team gaps\n• Use terrain and positioning wisely\n\nGood luck, Summoner!'
+        }
+    );
+
+    // ─── 1. CANVAS CRASH SAFETY ──────────────────────────────
+    const _origDrawImage = CanvasRenderingContext2D.prototype.drawImage;
+    // Wrap CanvasRenderingContext2D.drawImage to never throw
+    CanvasRenderingContext2D.prototype.drawImage = function(img) {
+        try {
+            if(!img) return;
+            // Check image validity
+            if(img instanceof HTMLImageElement) {
+                if(!img.complete || img.naturalWidth === 0) {
+                    // Draw placeholder
+                    this.fillStyle = '#1a2332';
+                    const w = arguments[3] || arguments[1] || 64;
+                    const h = arguments[4] || arguments[2] || 64;
+                    const x = arguments.length >= 5 ? arguments[1] : 0;
+                    const y = arguments.length >= 5 ? arguments[2] : 0;
+                    this.fillRect(x, y, w, h);
+                    this.fillStyle = '#555';
+                    this.font = `${Math.min(w,h)*0.3}px sans-serif`;
+                    this.textAlign = 'center';
+                    this.fillText('?', x + w/2, y + h/2 + 4);
+                    return;
+                }
+            }
+            _origDrawImage.apply(this, arguments);
+        } catch(e) {
+            // Silently draw placeholder on corrupt images
+            try {
+                this.fillStyle = '#2a1020';
+                const w = arguments[3] || 64;
+                const h = arguments[4] || 64;
+                this.fillRect(arguments[1]||0, arguments[2]||0, w, h);
+            } catch(e2) {}
+        }
+    };
+
+    // ─── 2. MOBILE HARDENING ─────────────────────────────────
+    // Prevent pull-to-refresh on battle canvas
+    document.addEventListener('touchmove', function(e) {
+        if(e.target.closest('#battleCanvas, .dc-garden, #mapWrap')) {
+            e.preventDefault();
+        }
+    }, {passive: false});
+
+    // Prevent double-tap zoom on game elements
+    let _lastTap = 0;
+    document.addEventListener('touchend', function(e) {
+        const now = Date.now();
+        if(now - _lastTap < 300 && e.target.closest('.screen')) {
+            e.preventDefault();
+        }
+        _lastTap = now;
+    }, {passive: false});
+
+    // ─── 3. NULL GUARD WRAPPERS ──────────────────────────────
+    // Guard all special accesses in battle preparation
+    if(typeof prepUnit === 'function') {
+    }
+
+    // ─── 4. MAESTRO V3: ADAPTIVE DYNAMIC MUSIC ──────────────
+    class MaestroV3 {
+        constructor() {
+            try { this.ctx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e) { this.ctx = null; }
+            this.isPlaying = false;
+            this.tempo = 88;
+            this.intensity = 'menu'; // 'menu' | 'player' | 'enemy' | 'victory'
+            this._schedId = null;
+
+            // Scales — Dorian mode for a bittersweet RPG feel
+            this.scales = {
+                dorian:    [0, 2, 3, 5, 7, 9, 10], // D Dorian
+                pentatonic:[0, 2, 4, 7, 9],          // Minor pentatonic
+                harmMinor: [0, 2, 3, 5, 7, 8, 11],   // Harmonic minor
+            };
+            this.scale = this.scales.dorian;
+            this.rootNote = 50; // D3
+
+            // Chord progressions per intensity
+            this.progressions = {
+                menu:    [[0,0],[3,3],[5,5],[3,3]], // i - iv - v - iv (ambient)
+                player:  [[0,0],[5,5],[3,3],[6,6]], // i - v - iv - VII (driving)
+                enemy:   [[0,0],[1,1],[5,5],[4,4]], // i - ii - v - iv- (tension)
+                victory: [[0,0],[5,5],[3,3],[0,0]], // i - v - iv - i (triumph)
+            };
+
+            this._audioReady = false;
+            if(this.ctx) this._initAudio();
+
+            // State
+            this.beat = 0;
+            this.chordStep = 0;
+            this.prog = this.progressions.menu;
+            this.nextNoteTime = 0;
+        }
+
+        _initAudio() {
+            if(this._audioReady) return;
+            if(!this.ctx) try { this.ctx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e) { return; }
+            this._audioReady = true;
+            this.masterGain = this.ctx.createGain();
+            this.masterGain.gain.value = 0.30;
+            this.reverb = this.ctx.createConvolver();
+            this._buildImpulse(2.2, 2.8);
+            this.reverbSend = this.ctx.createGain();
+            this.reverbSend.gain.value = 0.20;
+            this.dryGain = this.ctx.createGain();
+            this.dryGain.gain.value = 0.80;
+            this.delay = this.ctx.createDelay(1.0);
+            this.delay.delayTime.value = 60 / this.tempo * 0.75;
+            this.delayFeedback = this.ctx.createGain();
+            this.delayFeedback.gain.value = 0.25;
+            this.delaySend = this.ctx.createGain();
+            this.delaySend.gain.value = 0.12;
+            this.dryGain.connect(this.masterGain);
+            this.reverb.connect(this.reverbSend);
+            this.reverbSend.connect(this.masterGain);
+            this.delay.connect(this.delayFeedback);
+            this.delayFeedback.connect(this.delay);
+            this.delay.connect(this.delaySend);
+            this.delaySend.connect(this.masterGain);
+            this.masterGain.connect(this.ctx.destination);
+        }
+
+        _buildImpulse(decay, length) {
+            const sr = this.ctx.sampleRate;
+            const len = sr * length;
+            const buf = this.ctx.createBuffer(2, len, sr);
+            for(let ch = 0; ch < 2; ch++) {
+                const d = buf.getChannelData(ch);
+                for(let i = 0; i < len; i++) {
+                    d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, decay);
+                }
+            }
+            this.reverb.buffer = buf;
+        }
+
+        _midi(n) { return 440 * Math.pow(2, (n - 69) / 12); }
+
+        // Scale-aware note picking
+        _scaleNote(degree, octave) {
+            octave = octave || 0;
+            const idx = ((degree % this.scale.length) + this.scale.length) % this.scale.length;
+            const octShift = Math.floor(degree / this.scale.length);
+            return this.rootNote + this.scale[idx] + (octave + octShift) * 12;
+        }
+
+        // Detune-capable oscillator for analog feel
+        _playNote(midi, type, duration, vol, attack, decay, sustain, release, dest) {
+            const now = this.ctx.currentTime;
+            const osc1 = this.ctx.createOscillator();
+            const osc2 = this.ctx.createOscillator(); // Detuned layer
+            const gain = this.ctx.createGain();
+            const filter = this.ctx.createBiquadFilter();
+
+            osc1.type = type;
+            osc2.type = type;
+            osc1.frequency.value = this._midi(midi);
+            osc2.frequency.value = this._midi(midi);
+            osc2.detune.value = (Math.random() - 0.5) * 12 + 6; // 0-12 cents detune
+
+            filter.type = 'lowpass';
+            filter.frequency.value = this.intensity === 'enemy' ? 600 : this.intensity === 'menu' ? 1200 : 1800;
+            filter.Q.value = 1.2;
+
+            const merge = this.ctx.createGain();
+            merge.gain.value = 0.5;
+            osc1.connect(merge);
+            osc2.connect(merge);
+            merge.connect(filter);
+            filter.connect(gain);
+            gain.connect(dest || this.dryGain);
+            gain.connect(this.reverb);
+            gain.connect(this.delay);
+
+            // ADSR
+            gain.gain.setValueAtTime(0, now);
+            gain.gain.linearRampToValueAtTime(vol, now + attack);
+            gain.gain.linearRampToValueAtTime(vol * sustain, now + attack + decay);
+            gain.gain.setValueAtTime(vol * sustain, now + Math.max(0, duration - release));
+            gain.gain.linearRampToValueAtTime(0, now + duration);
+
+            osc1.start(now); osc1.stop(now + duration + 0.05);
+            osc2.start(now); osc2.stop(now + duration + 0.05);
+
+            const cleanupMs = (duration + 0.2) * 1000;
+            setTimeout(() => { try { osc1.disconnect(); osc2.disconnect(); merge.disconnect(); gain.disconnect(); filter.disconnect(); } catch(e){} }, cleanupMs);
+        }
+
+        _playBass(midi, duration) {
+            const now = this.ctx.currentTime;
+            const osc = this.ctx.createOscillator();
+            const sub = this.ctx.createOscillator();
+            const gain = this.ctx.createGain();
+            const filter = this.ctx.createBiquadFilter();
+
+            osc.type = 'sawtooth';
+            sub.type = 'sine';
+            osc.frequency.value = this._midi(midi);
+            sub.frequency.value = this._midi(midi - 12); // Sub-octave
+            filter.type = 'lowpass';
+            filter.frequency.value = 250;
+            filter.Q.value = 3;
+
+            const merge = this.ctx.createGain();
+            merge.gain.value = 0.5;
+            osc.connect(merge); sub.connect(merge);
+            merge.connect(filter);
+            filter.connect(gain);
+            gain.connect(this.dryGain);
+
+            gain.gain.setValueAtTime(0, now);
+            gain.gain.linearRampToValueAtTime(0.14, now + 0.02);
+            gain.gain.exponentialRampToValueAtTime(0.01, now + duration);
+
+            osc.start(now); osc.stop(now + duration + 0.05);
+            sub.start(now); sub.stop(now + duration + 0.05);
+            setTimeout(() => { try { osc.disconnect(); sub.disconnect(); merge.disconnect(); gain.disconnect(); filter.disconnect(); } catch(e){} }, (duration + 0.2) * 1000);
+        }
+
+        _playPerc(vol, type) {
+            const now = this.ctx.currentTime;
+            const dur = type === 'kick' ? 0.1 : 0.04;
+            const buf = this.ctx.createBuffer(1, this.ctx.sampleRate * dur, this.ctx.sampleRate);
+            const d = buf.getChannelData(0);
+            for(let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / d.length, type === 'kick' ? 3 : 8);
+            const src = this.ctx.createBufferSource();
+            const g = this.ctx.createGain();
+            const f = this.ctx.createBiquadFilter();
+            src.buffer = buf;
+            f.type = type === 'kick' ? 'lowpass' : 'highpass';
+            f.frequency.value = type === 'kick' ? 200 : 5000;
+            src.connect(f); f.connect(g); g.connect(this.dryGain);
+            g.gain.setValueAtTime(vol, now);
+            g.gain.exponentialRampToValueAtTime(0.001, now + dur);
+            src.start(now); src.stop(now + dur + 0.01);
+            setTimeout(() => { try { src.disconnect(); g.disconnect(); f.disconnect(); } catch(e){} }, 200);
+        }
+
+        setIntensity(level) {
+            if(this.intensity === level) return;
+            this.intensity = level;
+            this.prog = this.progressions[level] || this.progressions.menu;
+            // Adjust filter and tempo per intensity
+            if(level === 'menu') { this.tempo = 72; this.scale = this.scales.pentatonic; }
+            else if(level === 'player') { this.tempo = 92; this.scale = this.scales.dorian; }
+            else if(level === 'enemy') { this.tempo = 80; this.scale = this.scales.harmMinor; }
+            else if(level === 'victory') { this.tempo = 110; this.scale = this.scales.pentatonic; }
+            this.delay.delayTime.value = 60 / this.tempo * 0.75;
+        }
+
+        start() {
+            if(this.isPlaying) return;
+            this._initAudio();
+            if(!this.ctx) return;
+            try { this.ctx.resume(); } catch(e) {}
+            this.isPlaying = true;
+            this.nextNoteTime = this.ctx.currentTime + 0.1;
+            this.beat = 0;
+            this.chordStep = 0;
+            this._scheduler();
+        }
+
+        stop() {
+            this.isPlaying = false;
+            if(this._schedId) { clearTimeout(this._schedId); this._schedId = null; }
+        }
+
+        _scheduler() {
+            if(!this.isPlaying) return;
+            while(this.nextNoteTime < this.ctx.currentTime + 0.12) {
+                this._playBeat();
+                this.nextNoteTime += (60 / this.tempo) / 2;
+                this.beat++;
+            }
+            this._schedId = setTimeout(() => this._scheduler(), 20);
+        }
+
+        _playBeat() {
+            // Chord change every 16 beats (2 bars)
+            if(this.beat % 16 === 0) {
+                this.chordStep = (this.chordStep + 1) % this.prog.length;
+                if(this.chordStep === 0 && Math.random() > 0.5) {
+                    // Occasionally switch progression
+                    const keys = Object.keys(this.progressions);
+                    // Stay on current intensity progression most of the time
+                }
+            }
+
+            const chord = this.prog[this.chordStep];
+            const root = chord[0];
+
+            const I = this.intensity;
+
+            if(this.beat % 16 === 0) {
+                const padDur = (60 / this.tempo) * (I === 'menu' ? 12 : 8);
+                const padVol = I === 'menu' ? 0.07 : 0.05;
+                this._playNote(this._scaleNote(root, -1), 'sine', padDur, padVol, 2.0, 0.5, 0.7, 2.5);
+                this._playNote(this._scaleNote(root, 0), 'sine', padDur, padVol * 0.8, 2.5, 0.5, 0.6, 2.5);
+                this._playNote(this._scaleNote(root + 2, 0), 'sine', padDur, padVol * 0.7, 2.5, 0.5, 0.6, 2.5);
+                this._playNote(this._scaleNote(root + 4, 0), 'sine', padDur, padVol * 0.6, 3.0, 0.5, 0.6, 2.5);
+            }
+
+            if(I !== 'menu') {
+                if(this.beat % 4 === 0) {
+                    this._playBass(this._scaleNote(root, -2), (60/this.tempo) * 1.5);
+                }
+                if(this.beat % 8 === 6) {
+                    this._playBass(this._scaleNote(root, -1), (60/this.tempo) * 0.7);
+                }
+            }
+
+            if(this.beat % 2 === 0) {
+                const arpPool = [0, 2, 4, 5, 7];
+                const arpDeg = arpPool[this.beat % arpPool.length] + root;
+                const octave = (this.beat % 8 < 4) ? 0 : 1;
+                const arpVol = I === 'menu' ? 0.10 : I === 'enemy' ? 0.06 : 0.12;
+                this._playNote(this._scaleNote(arpDeg, octave), 'triangle', 0.22, arpVol, 0.01, 0.04, 0.4, 0.25);
+            }
+
+            if(I !== 'menu' && this.beat % 4 === 0 && Math.random() > 0.45) {
+                const melDeg = [0, 2, 4, 5, 7, 9][~~(Math.random() * 6)] + root;
+                const oct = I === 'enemy' ? 0 : 1;
+                const dur = Math.random() > 0.6 ? 0.65 : 0.35;
+                this._playNote(this._scaleNote(melDeg, oct), 'triangle', dur, 0.16, 0.02, 0.06, 0.35, 0.35);
+            }
+
+            if(this.beat % 8 === 3 && Math.random() > 0.7) {
+                const bellDeg = [4, 7, 9][~~(Math.random() * 3)] + root;
+                this._playNote(this._scaleNote(bellDeg, 2), 'sine', 0.55, 0.06, 0.01, 0.08, 0.25, 0.45);
+            }
+
+            if(I === 'player' || I === 'enemy') {
+                if(this.beat % 4 === 0) this._playPerc(0.04, 'kick');
+                if(this.beat % 2 === 1 && Math.random() > 0.35) this._playPerc(0.025, 'hat');
+                if(this.beat % 8 === 4) this._playPerc(0.035, 'hat'); // snare position
+            }
+            if(I === 'menu' && this.beat % 8 === 0) {
+                this._playPerc(0.015, 'hat'); // very subtle tick
+            }
+        }
+    }
+
+    // Replace BGM with V3
+    const _wasPlaying = bgm && bgm.isPlaying;
+    const _oldTempo = bgm ? bgm.tempo : 88;
+    if(_wasPlaying && bgm.stop) bgm.stop();
+    window.bgm = new MaestroV3();
+    bgm.tempo = _oldTempo;
+    if(_wasPlaying && S.soundOn) bgm.start();
+
+    // ─── 5. CINEMATIC SCREEN TRANSITIONS ─────────────────────
+    const TRANS_MAP = {
+        battle:   'shutter',
+        gacha:    'light',
+        daycare:  'fade',
+        settings: 'slide-left',
+        barracks: 'slide-right',
+        heroDetail: 'slide-left',
+        modes:    'slide-right',
+        home:     'fade',
+        quests:   'slide-left',
+        campaign: 'slide-right',
+    };
+
+    let _transActive = false;
+    // Hook into battle phase changes for music intensity
+    // ─── 6. WEAPON VIEWER ────────────────────────────────────
+    // Add weapon info to Hero Detail screen
+
+
+    // ─── 10. AUTO-LORE GENERATION ON HERO DETAIL ─────────────
+    // Ensure lore is always populated even if storyText is empty
+
+    'use strict';
+    const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+
+    // Shows an expanding ring where the user long-pressed
+    // Show combat forecast when dragging finger over enemies on battle canvas
+    bc = document.getElementById('battleCanvas');
+    if(bc && typeof battleHover === 'function') {
+        bc.addEventListener('touchmove', function(e) {
+            if(typeof B === 'undefined' || B.phase !== 'player') return;
+            const t = e.changedTouches[0];
+            // Synthesize a hover event for the forecast system
+            battleHover({ clientX: t.clientX, clientY: t.clientY });
+        }, {passive: true});
+    }
+
+    // Replace inline onmouseover/onmouseout with touch-compatible scaling
+    if(isTouchDevice) {
+        document.addEventListener('touchstart', function(e) {
+            const rewardCard = e.target.closest('[onclick^="claimMaxReward"]');
+            if(rewardCard) rewardCard.style.transform = 'scale(1.05)';
+        }, {passive: true});
+        document.addEventListener('touchend', function(e) {
+            const rewardCard = e.target.closest('[onclick^="claimMaxReward"]');
+            if(rewardCard) rewardCard.style.transform = 'scale(1)';
+        }, {passive: true});
+    }
+
+    // Ensure tapping the modal background closes the modal
+    document.addEventListener('click', function(e) {
+        if(!e.target.classList.contains('modal-bg') || !e.target.classList.contains('show')) return;
+        // Only close if tap was on the backdrop itself, not the modal content
+        if(e.target === e.target.closest('.modal-bg')) {
+            e.target.classList.remove('show');
+        }
+    });
+
+    // Add visual ring when long-pressing a unit in battle
+    if(bc) {
+        const origInspectHandler = bc._inspectSetup;
+        let _lpFeedbackTimer = 0;
+        bc.addEventListener('touchstart', function(e) {
+            const t = e.changedTouches[0];
+            _lpFeedbackTimer = setTimeout(function() {
+                showLongPressRing(t.clientX, t.clientY);
+            }, 450); // Slightly before the 500ms inspect fires
+        }, {passive: true});
+        bc.addEventListener('touchend', function() { clearTimeout(_lpFeedbackTimer); }, {passive: true});
+        bc.addEventListener('touchmove', function() { clearTimeout(_lpFeedbackTimer); }, {passive: true});
+    }
+
+    // On touch devices, stopPropagation on delete buttons to prevent card opening
+    if(isTouchDevice) {
+        document.addEventListener('touchstart', function(e) {
+            if(e.target.closest('.img-card-del') || e.target.closest('.limg-rm')) {
+                e.stopPropagation();
+            }
+        }, {passive: false});
+    }
+
+    // Make tutorial steps show "Tap and hold" instead of "Right-click" on mobile
+    if(isTouchDevice && typeof TUTORIAL_STEPS !== 'undefined') {
+        TUTORIAL_STEPS.forEach(function(step) {
+            if(step.text) {
+                step.text = step.text.replace(/Right-Click \(desktop\) or Long-Press \(mobile\)/gi, 'Long-Press');
+                step.text = step.text.replace(/Right-click\/long-press/gi, 'Long-press');
+                step.text = step.text.replace(/Right-click/gi, 'Long-press');
+                step.text = step.text.replace(/Hover over/gi, 'Tap');
+                step.text = step.text.replace(/Hover or long-press/gi, 'Tap or long-press');
+                step.text = step.text.replace(/hover over/gi, 'tap');
+            }
+            if(step.tip) {
+                step.tip = step.tip.replace(/Hover over/gi, 'Tap');
+                step.tip = step.tip.replace(/hover over/gi, 'tap');
+            }
+        });
+    }
+
+    // Already handled in earlier patch but add canvas redraw
+    window.addEventListener('resize', function() {
+        if(typeof B !== 'undefined' && B.canvas && document.getElementById('battle')?.style.display !== 'none') {
+            if(typeof resizeCanvas === 'function') resizeCanvas();
+            if(typeof drawMap === 'function') drawMap();
+        }
+    });
+
+    // On mobile, prevent the native context menu from appearing on long-press
+    if(isTouchDevice) {
+        document.addEventListener('contextmenu', function(e) {
+            // Allow context menu in text inputs/textareas
+            if(e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+            e.preventDefault();
+        }, {passive: false});
+    }
+
+    // Make sure the daycare canvas has touch-action:none for proper petting
+    const dcCanvas = document.getElementById('dcCanvas');
+    if(dcCanvas) {
+        dcCanvas.style.touchAction = 'none';
+    }
+
+    'use strict';
+
+    // ─── 1. INITIALIZE DATA ───
+    if(!S.achievements) S.achievements = [];
+    if(!S.compendium) S.compendium = [];
+    if(!S.apexTokens) S.apexTokens = 0;
+    if(!S.apexMeter) S.apexMeter = 0;
+    if(!S.profileTitle) S.profileTitle = 'Rookie';
+    if(!S.unlockedTitles) S.unlockedTitles = ['Rookie'];
+
+    // ─── HQ TAB SYSTEM ───
+    // ─── 2. APEX TOKEN SYSTEM ───
+    const APEX_METER_MAX = 1000; // points to earn 1 token
+    window.APEX_METER_MAX = APEX_METER_MAX; // expose globally
+
+    // ─── 3. ACHIEVEMENTS SYSTEM ───
+    const ACHIEVEMENTS_DB = [
+        { id:'a_first_blood', name:'First Blood', desc:'Win your first battle.', req:()=>S.wins>=1, reward:20 },
+        { id:'a_warlord', name:'Warlord', desc:'Win 50 battles.', req:()=>S.wins>=50, reward:100 },
+        { id:'a_centurion', name:'Centurion', desc:'Win 100 battles.', req:()=>S.wins>=100, reward:200 },
+        { id:'a_summoner', name:'Apprentice Summoner', desc:'Have 10 heroes.', req:()=>S.roster.length>=10, reward:30 },
+        { id:'a_grand_summoner', name:'Grand Summoner', desc:'Have 30 heroes.', req:()=>S.roster.length>=30, reward:80 },
+        { id:'a_tier0', name:'Mythic Luck', desc:'Summon a TIER 0 Hero.', req:()=>S.roster.some(u=>u.grade==='T0'), reward:100 },
+        { id:'a_max_level', name:'Apex Predator', desc:'Reach Level 40.', req:()=>S.roster.some(u=>u.level>=40), reward:50 },
+        { id:'a_collector5', name:'Collector', desc:'Register 5 unique images.', req:()=>S.compendium&&S.compendium.length>=5, reward:30 },
+        { id:'a_collector20', name:'Hoarder', desc:'Register 20 unique images.', req:()=>S.compendium&&S.compendium.length>=20, reward:150 },
+        { id:'a_collector50', name:'Archivist', desc:'Register 50 unique images.', req:()=>S.compendium&&S.compendium.length>=50, reward:300 },
+        { id:'a_elo1200', name:'Rising Star', desc:'Reach 1200 ELO.', req:()=>S.elo>=1200, reward:50 },
+        { id:'a_elo1500', name:'Champion', desc:'Reach 1500 ELO.', req:()=>S.elo>=1500, reward:100 },
+        { id:'a_elo2000', name:'Legendary', desc:'Reach 2000 ELO.', req:()=>S.elo>=2000, reward:250 },
+        { id:'a_campaign5', name:'Adventurer', desc:'Complete 5 campaign chapters.', req:()=>(S.campaignDone&&S.campaignDone.length>=5), reward:40 },
+        { id:'a_campaign20', name:'Veteran', desc:'Complete 20 campaign chapters.', req:()=>(S.campaignDone&&S.campaignDone.length>=20), reward:100 },
+        { id:'a_rich', name:'War Chest', desc:'Have 500 AP at once.', req:()=>S.ap>=500, reward:50 },
+        { id:'a_daycare', name:'Matchmaker', desc:'Place two units in Daycare.', req:()=>S.daycareSlots&&S.daycareSlots[0]&&S.daycareSlots[1], reward:30 },
+        { id:'a_token1', name:'Token Collector', desc:'Earn your first Apex Token.', req:()=>S.apexTokens>=1||(S.apexMeter>0&&S._tokenEverEarned), reward:30 },
+    ];
+
+    // Hook achievement check into battle end
+    // Hook into summons
+    // ─── 4. COMPENDIUM ───
+    // ─── 5. (Minigames removed) ───
+
+    // ─── 8. PROFILE TITLES ───
+    const ALL_TITLES = ['Rookie','Warrior','Commander','Strategist','Phantom','Overlord',
+        'Collector','Legend','Tier Zero'];
+
+    // ─── 9. BANNER EXPIRY & BOOSTED RATES ───
+    // Add created timestamp to new banners
+    // Boost banner rates: focus units 8x weight, T0 grade 3x more likely on banner
+    // ─── 10. EXPORT/IMPORT (kept from v3.0) ───
+    // ─── 11. TAVERN/HQ REFRESH ───
+    // ─── 13. MERC CLEANUP AFTER BATTLE ───
+    // ─── 14. ADD V3.5 FIELDS TO SAVE DATA ───
+    // The save function already serializes everything on S.
+    // v3.5 fields are added to S initialization and persist automatically.
+
+    'use strict';
+
+    // ─── 1. BUTTON RIPPLE EFFECT ──────────────────────────────
+    document.addEventListener('click', function(e) {
+        const btn = e.target.closest('.btn-t0,.btn2,.btn-ripple');
+        if (!btn) return;
+        const rect = btn.getBoundingClientRect();
+        const ripple = document.createElement('span');
+        ripple.className = 'ripple';
+        const size = Math.max(rect.width, rect.height);
+        ripple.style.width = ripple.style.height = size + 'px';
+        ripple.style.left = (e.clientX - rect.left - size / 2) + 'px';
+        ripple.style.top = (e.clientY - rect.top - size / 2) + 'px';
+        btn.style.position = btn.style.position || 'relative';
+        btn.style.overflow = 'hidden';
+        btn.appendChild(ripple);
+        setTimeout(() => ripple.remove(), 500);
+    });
+
+    // ─── 2. ENHANCED VICTORY SCREEN WITH XP BREAKDOWN ────────
+    // ─── 3. SMOOTHER TRANSITION TIMING ────────────────────────
+    // Speed up transitions slightly for snappier feel
+    const FAST_TRANS = { shutter: 300, light: 350, fade: 250 };
+    const _patchOrigNav = (function() {
+        // Read the midpoint from the patched nav — we just make the cleanup faster
+        // This is a no-op patch since transitions already exist, just logging
+    })();
+
+    // ─── 4. ENHANCED TOAST WITH ICONS ─────────────────────────
+
+// Ensure APEX_METER_MAX is available (defined in v3.5 IIFE scope)
+if(typeof APEX_METER_MAX === 'undefined') window.APEX_METER_MAX = window.APEX_METER_MAX || 1000;
+
+// ─────────────────────────────────────────────────────────────
+// 1. MULTI-PULL SEQUENTIAL ANIMATION
+// Shows each unit individually with a nice animation
+// ─────────────────────────────────────────────────────────────
+
+// Add CSS for the multi-pull carousel
+const mpStyle = document.createElement('style');
+mpStyle.textContent = `
+#multiPullOverlay{position:fixed;inset:0;z-index:9600;background:rgba(0,0,0,.95);display:none;align-items:center;justify-content:center;flex-direction:column;backdrop-filter:blur(8px)}
+#multiPullOverlay.show{display:flex}
+.mp-card{text-align:center;animation:mpCardIn .4s ease-out}
+@keyframes mpCardIn{0%{opacity:0;transform:scale(.5) translateY(40px)}60%{opacity:1;transform:scale(1.05) translateY(-5px)}100%{transform:scale(1) translateY(0)}}
+.mp-portrait-wrap{width:120px;height:120px;border-radius:50%;margin:0 auto 12px;position:relative;overflow:hidden;border:3px solid var(--gold);box-shadow:0 0 30px rgba(255,215,0,.3)}
+.mp-portrait-wrap canvas{width:100%;height:100%;border-radius:50%}
+.mp-portrait-wrap.grade-T0{border-color:transparent;background:var(--t0g);background-size:200% 200%;animation:t0shift 2s ease infinite;padding:3px}
+.mp-portrait-wrap.grade-S{border-color:var(--gold);box-shadow:0 0 40px rgba(255,215,0,.5)}
+.mp-grade{font-family:var(--display);font-size:1.2rem;font-weight:900;letter-spacing:3px;margin-bottom:4px}
+.mp-name{font-size:.9rem;font-weight:600;color:var(--text);margin-bottom:4px}
+.mp-stats{font-family:var(--mono);font-size:.6rem;color:var(--text2);margin-bottom:6px}
+.mp-dup{font-family:var(--display);font-size:.7rem;color:var(--gold);margin-bottom:4px}
+.mp-counter{font-family:var(--mono);font-size:.6rem;color:var(--text3);margin-bottom:16px;letter-spacing:2px}
+.mp-dots{display:flex;gap:6px;justify-content:center;margin-bottom:16px}
+.mp-dot{width:8px;height:8px;border-radius:50%;background:var(--border);transition:all .2s}
+.mp-dot.active{background:var(--gold);transform:scale(1.3)}
+.mp-dot.seen{background:var(--text3)}
+.mp-flash{position:fixed;inset:0;z-index:9601;pointer-events:none;opacity:0}
+.mp-flash.grade-T0{background:radial-gradient(circle,rgba(255,255,255,1) 0%,rgba(0,229,255,.7) 30%,rgba(255,45,85,.4) 60%,transparent 80%);animation:mpFlash 1.2s ease-out forwards}
+.mp-flash.grade-S{background:radial-gradient(circle,rgba(255,215,0,.9) 0%,rgba(255,165,0,.5) 30%,transparent 70%);animation:mpFlash 1s ease-out forwards}
+@keyframes mpFlash{0%{opacity:0;transform:scale(.5)}15%{opacity:1;transform:scale(1.1)}40%{opacity:.8;transform:scale(1)}100%{opacity:0;transform:scale(1.2)}}
+.mp-skip-btn{position:absolute;top:12px;right:16px;font-size:.65rem;color:var(--text3);cursor:pointer;font-family:var(--mono);padding:6px 12px;border:1px solid var(--border);border-radius:6px;background:rgba(255,255,255,.05);transition:all .15s}
+.mp-skip-btn:hover{color:var(--text);border-color:var(--text2)}
+.mp-summary{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;max-width:400px;margin:12px auto}
+.mp-summary-unit{width:48px;text-align:center;cursor:pointer;transition:transform .1s}
+.mp-summary-unit:hover{transform:scale(1.1)}
+.mp-summary-unit canvas{width:40px;height:40px;border-radius:50%;border:2px solid var(--border)}
+.mp-summary-unit.grade-T0 canvas{border-color:var(--t0);box-shadow:0 0 8px rgba(0,229,255,.4)}
+.mp-summary-unit.grade-S canvas{border-color:var(--gold);box-shadow:0 0 8px rgba(255,215,0,.3)}
+.mp-summary-unit .mp-s-name{font-size:.45rem;color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:48px}
+`;
+document.head.appendChild(mpStyle);
+
+// Create the overlay element
+const mpOverlay = document.createElement('div');
+mpOverlay.id = 'multiPullOverlay';
+mpOverlay.innerHTML = `
+<div class="mp-skip-btn" id="mpSkipBtn">SKIP ▸▸</div>
+<div class="mp-card" id="mpCard">
+    <div class="mp-portrait-wrap" id="mpPortraitWrap"><canvas id="mpPortrait" width="160" height="160"></canvas></div>
+    <div class="mp-grade" id="mpGrade"></div>
+    <div class="mp-name" id="mpName"></div>
+    <div class="mp-dup" id="mpDup"></div>
+    <div class="mp-stats" id="mpStats"></div>
+    <div class="mp-counter" id="mpCounter"></div>
+    <div class="mp-dots" id="mpDots"></div>
+    <button class="btn2 btn-sm" id="mpNextBtn" style="min-width:120px">NEXT</button>
+</div>
+<div class="mp-flash" id="mpFlash"></div>
+`;
+document.body.appendChild(mpOverlay);
+
+let _mpResults = [];
+let _mpIndex = 0;
+let _mpSkipped = false;
+
+function showMultiPullSequence(results) {
+    _mpResults = results;
+    _mpIndex = 0;
+    _mpSkipped = false;
+    mpOverlay.classList.add('show');
+    showMPUnit(0);
+}
+
+function showMPUnit(idx) {
+    if(idx >= _mpResults.length) { showMPSummary(); return; }
+    _mpIndex = idx;
+    const r = _mpResults[idx];
+    const u = r.unit;
+
+    // Flash for high-grade
+    const flash = document.getElementById('mpFlash');
+    flash.className = 'mp-flash';
+    if(u.grade === 'T0' || u.grade === 'S') {
+        setTimeout(() => { flash.className = 'mp-flash grade-' + u.grade; }, 50);
+    }
+
+    // Portrait
+    const wrap = document.getElementById('mpPortraitWrap');
+    wrap.className = 'mp-portrait-wrap' + (u.grade === 'T0' ? ' grade-T0' : u.grade === 'S' ? ' grade-S' : '');
+    const pc = document.getElementById('mpPortrait');
+    const tempImg = new Image();
+    tempImg.onload = () => { u.img = tempImg; if(typeof drawUnitPortrait === 'function') drawUnitPortrait(pc, u, 160); };
+    tempImg.onerror = () => { if(typeof drawUnitPortrait === 'function') drawUnitPortrait(pc, u, 160); };
+    tempImg.src = u.src;
+    if(typeof drawUnitPortrait === 'function') drawUnitPortrait(pc, u, 160);
+
+    // Grade
+    const gEl = document.getElementById('mpGrade');
+    gEl.textContent = GRADE_LABEL[u.grade];
+    gEl.className = 'mp-grade grade-' + u.grade;
+
+    // Name
+    document.getElementById('mpName').textContent = typeof esc === 'function' ? esc(u.name) : u.name;
+
+    // Dup info
+    const dupEl = document.getElementById('mpDup');
+    dupEl.textContent = r.dup ? (r.overMax ? 'CONVERTED TO SHARDS' : `+${u.plus} POWERED UP!`) : 'NEW HERO!';
+    dupEl.style.color = r.dup ? 'var(--gold)' : 'var(--green)';
+
+    // Stats
+    document.getElementById('mpStats').textContent = `HP:${u.maxHp} ATK:${u.atk} DEF:${u.def} SPD:${u.spd} | ${u.role}`;
+
+    // Counter
+    document.getElementById('mpCounter').textContent = `${idx + 1} / ${_mpResults.length}`;
+
+    // Dots
+    const dotsEl = document.getElementById('mpDots');
+    dotsEl.innerHTML = _mpResults.map((_, i) => `<div class="mp-dot${i === idx ? ' active' : i < idx ? ' seen' : ''}"></div>`).join('');
+
+    // Re-trigger animation
+    const card = document.getElementById('mpCard');
+    card.style.animation = 'none';
+    card.offsetHeight; // force reflow
+    card.style.animation = '';
+
+    // Next button
+    const nextBtn = document.getElementById('mpNextBtn');
+    nextBtn.textContent = idx < _mpResults.length - 1 ? 'NEXT ▸' : 'VIEW ALL';
+    nextBtn.onclick = () => showMPUnit(idx + 1);
+
+    // SFX
+    if(typeof sfx === 'function') {
+        if(u.grade === 'T0') sfx('victory');
+        else sfx('summon');
+    }
+}
+
+function showMPSummary() {
+    const card = document.getElementById('mpCard');
+    document.getElementById('mpFlash').className = 'mp-flash';
+
+    // Count grades
+    const counts = {};
+    _mpResults.forEach(r => { const g = r.unit.grade; counts[g] = (counts[g]||0) + 1; });
+    const countHtml = GRADES.slice().reverse().map(g => counts[g] ? `<span class="grade-${g}" style="font-family:var(--display);font-size:.7rem">${GRADE_LABEL[g]}: ${counts[g]}</span>` : '').filter(Boolean).join(' &nbsp;·&nbsp; ');
+
+    let html = `<div style="font-family:var(--display);color:var(--gold);font-size:1rem;letter-spacing:3px;margin-bottom:12px">SUMMON RESULTS</div>`;
+    html += `<div style="margin-bottom:12px">${countHtml}</div>`;
+    html += `<div class="mp-summary">`;
+    _mpResults.forEach((r, i) => {
+        const u = r.unit;
+        html += `<div class="mp-summary-unit grade-${u.grade}">
+            <canvas id="mpSum${i}" width="80" height="80"></canvas>
+            <div class="mp-s-name">${typeof esc === 'function' ? esc(u.name) : u.name}</div>
+            <div style="font-size:.4rem" class="grade-${u.grade}">${GRADE_LABEL[u.grade]}</div>
+        </div>`;
+    });
+    html += `</div>`;
+    html += `<button class="btn-t0" style="font-size:.75rem;padding:8px 20px;margin-top:8px" onclick="closeMultiPull()">DONE</button>`;
+
+    card.innerHTML = html;
+    card.style.animation = 'none';
+    card.offsetHeight;
+    card.style.animation = '';
+
+    // Draw summary portraits
+    setTimeout(() => {
+        _mpResults.forEach((r, i) => {
+            const c = document.getElementById('mpSum' + i);
+            if(c && typeof drawUnitPortrait === 'function') {
+                const tempImg = new Image();
+                tempImg.onload = () => { r.unit.img = tempImg; drawUnitPortrait(c, r.unit, 80); };
+                tempImg.onerror = () => drawUnitPortrait(c, r.unit, 80);
+                tempImg.src = r.unit.src;
+                drawUnitPortrait(c, r.unit, 80);
+            }
+        });
+    }, 50);
+}
+
+// Skip button
+document.getElementById('mpSkipBtn').onclick = () => {
+    _mpSkipped = true;
+    showMPSummary();
+};
+
+// Also allow tapping overlay background to advance
+mpOverlay.addEventListener('click', (e) => {
+    if(e.target === mpOverlay && _mpIndex < _mpResults.length) showMPUnit(_mpIndex + 1);
+});
+
+
+// ─────────────────────────────────────────────────────────────
+// 2. BANNER REVAMP: 10+ chars, 2+ T0s, banner-exclusive, clear rates
+// ─────────────────────────────────────────────────────────────
+
+// Override banner generation to produce proper banners with 10+ units and 2+ T0s
+// Override rollUnit to enforce banner-exclusive pulls on featured banners
+// Override refreshGacha to show better banner cards with rates and exclusivity info
+
+
+// ─────────────────────────────────────────────────────────────
+// 3. RENAME NON-UNIQUE TERMS + ADD GAME GLOSSARY/COMPENDIUM
+// ─────────────────────────────────────────────────────────────
+
+// Rename terms: AP → Flux, Shards → Prisms, Apex Tokens → Zenith Marks
+// SP stays as SP (Skill Points — generic enough)
+
+// Update the currency display labels
+function renameTermsInUI() {
+    // Top currency bar on gacha screen
+    const apLabels = document.querySelectorAll('#gacha .hdr-nav span');
+    apLabels.forEach(el => {
+        if(el.textContent === 'AP') el.textContent = 'FX';
+        if(el.textContent === 'SH') el.textContent = 'PR';
+        if(el.textContent === 'AT') el.textContent = 'ZM';
+    });
+
+    // Pity label
+    const pityLbl = document.querySelector('.pity-lbl span');
+    if(pityLbl && pityLbl.textContent.includes('A+ Pity')) pityLbl.textContent = 'Guaranteed A+ Pity Rate';
+
+    // Apex Token Meter → Zenith Meter
+    document.querySelectorAll('.pity-lbl span').forEach(el => {
+        if(el.textContent === 'Apex Token Meter') el.textContent = 'Zenith Meter';
+    });
+
+    // APEX HQ token display
+    const hqTokens = document.getElementById('hqTokens');
+    if(hqTokens && hqTokens.textContent.includes('AT')) {
+        hqTokens.textContent = (S.apexTokens || 0) + ' ZM';
+    }
+
+    // Token section headers
+    const tokenH2 = document.querySelector('#hqTab_tokens h2');
+    if(tokenH2 && tokenH2.textContent.includes('APEX TOKEN')) tokenH2.textContent = 'ZENITH METER';
+
+    // Token description
+    const tokenDesc = document.querySelector('#hqTab_tokens .settings-section p');
+    if(tokenDesc && tokenDesc.textContent.includes('Apex Token')) {
+        tokenDesc.textContent = 'Earn meter from battles & summons. At 100% you earn 1 Zenith Mark — spend it to get a guaranteed duplicate of any unit you own!';
+    }
+
+    // Redeem button
+    const redeemBtn = document.getElementById('atRedeemBtn');
+    if(redeemBtn && redeemBtn.textContent.includes('TOKEN')) {
+        redeemBtn.textContent = 'REDEEM ZENITH MARK (Select Unit in Barracks)';
+    }
+
+    // HQ tab labels
+    const hqTabs = document.querySelectorAll('#hqTabs .stab');
+    hqTabs.forEach(tab => {
+        if(tab.textContent === 'TOKENS') tab.textContent = 'ZENITH';
+        if(tab.textContent === 'CODEX') tab.textContent = 'GLOSSARY';
+    });
+
+    // FEH Banner List label
+    const fehLabel = document.querySelector('#fehBannerList');
+    // This is JS-injected, handled by refreshGacha override already
+
+    // CSS comments are harmless, leave them
+}
+
+// Call on init and when navigating
+setTimeout(renameTermsInUI, 500);
+
+// Override the toast to rename terms
+// Add Glossary content to the compendium tab
+function renderGlossary() {
+    const compTab = document.getElementById('hqTab_compendium');
+    if(!compTab) return;
+    // Check if glossary already added
+    if(compTab.querySelector('#glossarySection')) return;
+
+    const glossaryHTML = `
+    <div class="settings-section" id="glossarySection" style="margin-top:12px">
+    <h2 style="color:var(--t0)">GAME GLOSSARY</h2>
+    <p style="font-size:.6rem;color:var(--text2);margin-bottom:10px">All unique terms used in Apex Tier 0:</p>
+    <div style="display:flex;flex-direction:column;gap:6px;font-size:.65rem">
+        <div style="padding:6px 8px;background:var(--panel2);border-radius:6px;border-left:3px solid var(--gold)">
+            <strong style="color:var(--gold)">Flux (FX)</strong> — <span style="color:var(--text2)">The primary currency used to summon heroes. Earned from battles, quests, and login rewards. Formerly known as AP.</span>
+        </div>
+        <div style="padding:6px 8px;background:var(--panel2);border-radius:6px;border-left:3px solid #7c4dff">
+            <strong style="color:#7c4dff">Prisms (PR)</strong> — <span style="color:var(--text2)">Power-up shards earned from duplicate heroes past max merge. Used for special upgrades.</span>
+        </div>
+        <div style="padding:6px 8px;background:var(--panel2);border-radius:6px;border-left:3px solid #ff6b35">
+            <strong style="color:#ff6b35">Zenith Marks (ZM)</strong> — <span style="color:var(--text2)">Premium pity tokens earned by filling the Zenith Meter. Spend to guarantee a duplicate of any owned hero.</span>
+        </div>
+        <div style="padding:6px 8px;background:var(--panel2);border-radius:6px;border-left:3px solid var(--t0)">
+            <strong style="color:var(--t0)">Tier 0 (T0)</strong> — <span style="color:var(--text2)">The highest grade a hero can be. T0 heroes have rainbow borders, the best stats, and special summon cinematics.</span>
+        </div>
+        <div style="padding:6px 8px;background:var(--panel2);border-radius:6px;border-left:3px solid var(--green)">
+            <strong style="color:var(--green)">Awakening</strong> — <span style="color:var(--text2)">Resetting a Lv.40 hero to Lv.1, granting +3 to all base stats permanently. Tracks Prestige count.</span>
+        </div>
+        <div style="padding:6px 8px;background:var(--panel2);border-radius:6px;border-left:3px solid var(--text)">
+            <strong style="color:var(--text)">Weapon Triangle</strong> — <span style="color:var(--text2)">Sword > Axe > Lance > Sword. Light > Dark > Anima > Light. Grants ±20% ATK.</span>
+        </div>
+        <div style="padding:6px 8px;background:var(--panel2);border-radius:6px;border-left:3px solid var(--text)">
+            <strong style="color:var(--text)">Boon / Bane</strong> — <span style="color:var(--text2)">Each hero has a random stat boosted (+3) and another reduced (-3) at summon.</span>
+        </div>
+        <div style="padding:6px 8px;background:var(--panel2);border-radius:6px;border-left:3px solid var(--text)">
+            <strong style="color:var(--text)">SP (Skill Points)</strong> — <span style="color:var(--text2)">Earned from battles. Spent to learn new skills via Skill Inheritance.</span>
+        </div>
+        <div style="padding:6px 8px;background:var(--panel2);border-radius:6px;border-left:3px solid var(--text)">
+            <strong style="color:var(--text)">ELO</strong> — <span style="color:var(--text2)">Your battle rating. Higher ELO = tougher opponents = better rewards. Lost on defeat.</span>
+        </div>
+        <div style="padding:6px 8px;background:var(--panel2);border-radius:6px;border-left:3px solid var(--text)">
+            <strong style="color:var(--text)">Synergy</strong> — <span style="color:var(--text2)">Faction and Class bonuses that activate when 2+ or 4+ units share the same type.</span>
+        </div>
+        <div style="padding:6px 8px;background:var(--panel2);border-radius:6px;border-left:3px solid var(--text)">
+            <strong style="color:var(--text)">Merge (+)</strong> — <span style="color:var(--text2)">Pulling duplicate heroes increases their + level (max +10), boosting random stats.</span>
+        </div>
+        <div style="padding:6px 8px;background:var(--panel2);border-radius:6px;border-left:3px solid #ef4444">
+            <strong style="color:#ef4444">Apex Difficulty</strong> — <span style="color:var(--text2)">The hardest difficulty. All enemies are maxed T0 +10 heroes with full synergies. Auto-battle is disabled.</span>
+        </div>
+        <div style="padding:6px 8px;background:var(--panel2);border-radius:6px;border-left:3px solid var(--text)">
+            <strong style="color:var(--text)">Danger Zone</strong> — <span style="color:var(--text2)">Toggle to preview all enemy attack ranges on the battle map.</span>
+        </div>
+        <div style="padding:6px 8px;background:var(--panel2);border-radius:6px;border-left:3px solid var(--text)">
+            <strong style="color:var(--text)">Combat Forecast</strong> — <span style="color:var(--text2)">Shows predicted damage, doubles, counters, and weapon advantage before committing to an attack.</span>
+        </div>
+        <div style="padding:6px 8px;background:var(--panel2);border-radius:6px;border-left:3px solid var(--text)">
+            <strong style="color:var(--text)">Session Summon</strong> — <span style="color:var(--text2)">Reveals 5 colored orbs (Red/Blue/Green/Colorless). Pick orbs individually to summon heroes of matching weapon types.</span>
+        </div>
+        <div style="padding:6px 8px;background:var(--panel2);border-radius:6px;border-left:3px solid var(--text)">
+            <strong style="color:var(--text)">Banner</strong> — <span style="color:var(--text2)">A curated pool of heroes you can summon from. Featured banners are exclusive — only listed heroes can appear.</span>
+        </div>
+    </div>
+    </div>`;
+
+    const scrollEl = compTab.querySelector('.hq-scroll');
+    if(scrollEl) scrollEl.insertAdjacentHTML('beforeend', glossaryHTML);
+}
+
+// Update tutorial step text to use new terms
+TUTORIAL_STEPS[3].text = 'Go to the Summon Gate to pull new heroes using Flux. There are two pull modes:\n\n• 1-PULL: Single pull for 5 Flux\n• SESSION: Reveals 5 color-coded orbs — pick each for 5 Flux (4 Flux after first)\n• 10-PULL: Pull 10 heroes at once for 40 Flux with a guaranteed A+ on the 10th';
+TUTORIAL_STEPS[3].tip = 'The pity counter guarantees an A+ grade hero every 50 pulls. Duplicate images power up your existing hero. Featured banners only contain specific heroes!';
+
+TUTORIAL_STEPS[13].text = 'Use the banner carousel on the Summon screen to browse available banners.\n\n★ Standard Banner: Full pool, all heroes available\n★ Featured Banners: EXCLUSIVE pools of 10+ heroes with 2+ Tier 0 focus units at boosted rates\n\nCheck the rates displayed on each banner card!';
+TUTORIAL_STEPS[13].tip = 'Featured banner heroes are exclusive — you can ONLY pull heroes listed on that banner. Use Standard Banner for the full pool.';
+
+// Add a new tutorial step for the Glossary
+TUTORIAL_STEPS.splice(14, 0, {
+    title: 'Step 15 — Game Glossary',
+    text: 'Visit APEX HQ → GLOSSARY tab to find definitions for all game terms.\n\nKey currency:\n• Flux (FX) — Summoning currency\n• Prisms (PR) — Power-up shards\n• Zenith Marks (ZM) — Premium pity tokens\n\nAll renamed to be unique to Apex Tier 0!',
+    tip: 'The glossary is always available in APEX HQ for quick reference.',
+    screen: 'tavern', spotlight: '#hqTabs', pos: 'top',
+    action: () => { nav('tavern'); setTimeout(() => setHQTab('compendium'), 200); },
+});
+
+
+// ─────────────────────────────────────────────────────────────
+// 4. NEW "APEX" DIFFICULTY — Insane T0 teams, no auto-battle
+// ─────────────────────────────────────────────────────────────
+
+// Add APEX difficulty button to the difficulty modal
+(function addApexDifficulty() {
+    const diffModal = document.getElementById('diffModal');
+    if(!diffModal) return;
+
+    // Find cancel button to insert before it
+    const cancelBtn = diffModal.querySelector('[onclick*="closeDiffModal"]') || diffModal.querySelector('[onclick*="currentDifficulty"]') || diffModal.querySelector('.btn-sm:last-child');
+    if(!cancelBtn) return;
+
+    // Check if max button exists (from previous patch), add apex after it
+    const existingMax = diffModal.querySelector('[onclick*="setDifficulty(\'max\')"]');
+
+    const apexBtn = document.createElement('button');
+    apexBtn.className = 'btn2';
+    apexBtn.style.cssText = 'min-width:200px;font-size:.8rem;border-color:#ff0040;color:#ff0040;text-shadow:0 0 10px rgba(255,0,64,.3)';
+    apexBtn.innerHTML = 'APEX <span style="font-size:.55rem;opacity:.7">T0 Only · +10 · Full Synergy · No Auto</span>';
+    apexBtn.setAttribute('data-tip', 'ALL enemies are fully merged +10 Tier 0 units with perfect synergies, best items, and full skill loadouts. Auto-battle is DISABLED. Only for the truly insane.');
+    apexBtn.onclick = () => setDifficulty('apex');
+
+    // Insert before cancel
+    diffModal.insertBefore(apexBtn, cancelBtn);
+})();
+// Block auto-battle toggle on APEX difficulty
+function toggleAutoBattle() {
+    if(currentDifficulty === 'apex') {
+        toast('Auto-battle is DISABLED on APEX difficulty!', 'err');
+        return;
+    }
+    B.autoPlay = !B.autoPlay;
+    const btn = document.getElementById('autoBtn');
+    if(btn) {
+        btn.classList.toggle('auto-active', B.autoPlay);
+        btn.textContent = B.autoPlay ? 'AUTO ON' : 'AUTO';
+    }
+    toast(B.autoPlay ? 'Auto-Battle ON — your units will act automatically' : 'Auto-Battle OFF', 'ok');
+    if(B.autoPlay && B.phase === 'player') {
+        runAutoPlayer();
+    }
+};
+
+
+// ─────────────────────────────────────────────────────────────
+// 5. DIFFICULTY SELECTION ON ALL MODES (including Campaign)
+// ─────────────────────────────────────────────────────────────
+
+
+// ─────────────────────────────────────────────────────────────
+// 6. CLEAR STATUS WITH DIFFICULTY TRACKING
+// ─────────────────────────────────────────────────────────────
+
+// Upgrade campaignDone from simple array of IDs to tracking difficulty
+// New format: S.campaignClears = { "1": ["normal","hard"], "2": ["normal"] }
+// Keep S.campaignDone for backwards compat
+
+if(!S.campaignClears) S.campaignClears = {};
+if(!S.modeClears) S.modeClears = {};
+
+// Migrate old campaignDone to new format
+if(S.campaignDone && S.campaignDone.length) {
+    S.campaignDone.forEach(id => {
+        if(!S.campaignClears[id]) S.campaignClears[id] = [];
+        if(!S.campaignClears[id].includes('normal')) S.campaignClears[id].push('normal');
+    });
+}
+
+const DIFF_LABELS = {
+    normal: {name:'Normal', stars:1, color:'var(--text2)', icon:'★'},
+    hard: {name:'Hard', stars:2, color:'#f97316', icon:'★★'},
+    lunatic: {name:'Lunatic', stars:3, color:'#ef4444', icon:'★★★'},
+    max: {name:'MAX', stars:4, color:'#ff0040', icon:'★★★★'},
+    apex: {name:'APEX', stars:5, color:'#ff0040', icon:'★★★★★'}
+};
+
+function getDifficultyBadge(clearsObj, id) {
+    const clears = clearsObj[id] || [];
+    if(!clears.length) return '';
+    const highest = ['apex','max','lunatic','hard','normal'].find(d => clears.includes(d)) || 'normal';
+    const info = DIFF_LABELS[highest];
+    return `<div style="font-size:.5rem;color:${info.color};font-family:var(--display);letter-spacing:1px">${info.icon} ${info.name.toUpperCase()}</div>`;
+}
+
+function getDifficultyStars(clearsObj, id) {
+    const clears = clearsObj[id] || [];
+    if(!clears.length) return '';
+    return ['normal','hard','lunatic','max','apex'].map(d => {
+        const info = DIFF_LABELS[d];
+        const cleared = clears.includes(d);
+        return `<span style="color:${cleared ? info.color : 'var(--border)'};font-size:.55rem" title="${info.name}${cleared ? ' ✓' : ''}">${cleared ? '★' : '☆'}</span>`;
+    }).join('');
+}
+
+
+// ─────────────────────────────────────────────────────────────
+// 7. APEX VICTORY: Bonus rewards for APEX difficulty wins
+// ─────────────────────────────────────────────────────────────
+
+
+// ─────────────────────────────────────────────────────────────
+// FINAL: Rename currency displays throughout the UI
+// ─────────────────────────────────────────────────────────────
+
+// This is handled by refreshGacha override already using "AP" in button text
+// Let's also update the home screen button tips
+document.querySelectorAll('[data-tip]').forEach(el => {
+    if(el.dataset.tip) {
+        el.dataset.tip = el.dataset.tip.replace(/\bAP\b/g, 'Flux');
+    }
+});
+
+// ─────────────────────────────────────────────────────────────
+// FIX: Home screen currency display (Flux + Zenith Marks)
+// ─────────────────────────────────────────────────────────────
+(function addHomeCurrency() {
+})();
+
+// ─────────────────────────────────────────────────────────────
+// FIX: Max/Apex victory handlers — award XP, SP, and quest tracking
+// ─────────────────────────────────────────────────────────────
+function awardVictoryXPAndQuests() {
+    // Award XP/SP to surviving player units (same as base checkBattleOver)
+    const expMult = currentBattleConfig?.expMult || 1;
+    B.pUnits.filter(u => u.hp > 0).forEach(bu => {
+        const ru = S.roster.find(r => r.id === bu.id);
+        if(ru) {
+            if(typeof gainExp === 'function') gainExp(ru, Math.round(20 * expMult));
+            if(typeof awardSP === 'function') awardSP(ru, 2);
+        }
+    });
+    // Track quests
+    if(typeof trackQuest === 'function') trackQuest('wins');
+    if(typeof checkStoryQuests === 'function') checkStoryQuests();
+    // Campaign completion
+    if(B.isCampaign && B.campaignId) {
+        if(!S.campaignDone.includes(B.campaignId)) S.campaignDone.push(B.campaignId);
+    }
+}
+
+
+// APEX difficulty button + gameConfirm modal setup
+(function() {
+    var diffModal = document.getElementById('diffModal');
+    if(!diffModal) return;
+
+    var cancelBtn = diffModal.querySelector('[onclick*="closeDiffModal"]') || diffModal.querySelector('[onclick*="currentDifficulty"]') || diffModal.querySelector('.btn-sm:last-child');
+    if(!cancelBtn) return;
+
+    var apexBtn = document.createElement('button');
+    apexBtn.className = 'btn2';
+    apexBtn.style.cssText = 'min-width:200px;font-size:.8rem;border-color:#ff0040;color:#ff0040;text-shadow:0 0 10px rgba(255,0,64,.3)';
+    apexBtn.innerHTML = 'APEX <span style="font-size:.55rem;opacity:.7">T0 Only · +10 · Full Synergy · No Auto</span>';
+    apexBtn.setAttribute('data-tip', 'ALL enemies are fully merged +10 Tier 0 units with perfect synergies, best items, and full skill loadouts. Auto-battle is DISABLED. Only for the truly insane.');
+    apexBtn.onclick = function() { setDifficulty('apex'); };
+    diffModal.insertBefore(apexBtn, cancelBtn);
+})();
+
+// gameConfirm modal setup
+(function() {
+    var gcm = document.createElement('div');
+    gcm.id = 'gameConfirmModal';
+    gcm.style.cssText = 'position:fixed;inset:0;z-index:9800;background:rgba(0,0,0,.85);display:none;align-items:center;justify-content:center;flex-direction:column;gap:12px;backdrop-filter:blur(4px)';
+    gcm.innerHTML = '<div style="background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:20px 24px;max-width:320px;width:90%;text-align:center"><div id="gcmText" style="font-size:.8rem;color:var(--text);margin-bottom:16px;line-height:1.5"></div><div style="display:flex;gap:10px;justify-content:center"><button class="btn-t0" id="gcmYes" style="font-size:.7rem;padding:8px 20px;min-width:80px">YES</button><button class="btn2 btn-sm" id="gcmNo" style="padding:8px 20px;min-width:80px">CANCEL</button></div></div>';
+    document.body.appendChild(gcm);
+})();
+
+// Add recommended level to Campaign 5
+if(typeof CAMPAIGN !== 'undefined') {
+    var c5 = CAMPAIGN.find(function(c) { return c.id === 5; });
+    if(c5) c5.desc = 'The ultimate test. Prove you are Tier 0. (Recommended: Lv.20+ with A/S grade units)';
+}
+if(typeof CAMPAIGN_EXPANDED !== 'undefined') {
+    var c5e = CAMPAIGN_EXPANDED.find(function(c) { return c.id === 105; });
+    if(c5e && c5e.name === 'APEX Challenge') {
+        c5e.desc = (c5e.desc || '') + ' (Recommended: Lv.20+ with A/S grade units)';
+    }
+}
+
+'use strict';
+
+// CAMPAIGN DATA STRUCTURES
+
+// Save/load integration for campaign progress
+if(!S.campaignClears) S.campaignClears = {};
+if(!S.bookProgress) S.bookProgress = {};
+if(!S.campaignDone) S.campaignDone = [];
+
+const TOTAL_BATTLES = 1000;
+const BOOKS_COUNT = 10;
+const CHAPTERS_PER_BOOK = 10;
+const BATTLES_PER_CHAPTER = 10;
+
+// THE STORY: 10 BOOKS
+
+const STORY_BOOKS = [
+{
+    id:1, name:'Genesis Protocol', theme:'awakening',
+    subtitle:'The Summoner Awakens',
+    desc:'Dimensional rifts tear open across reality. You are awakened as a Nexus Tactician — one who can summon heroes from any world. The Nexus Archive, your base, detects a threat: someone is destroying the Reality Anchors that keep all dimensions apart.',
+    terrain:'grassland', weather:null,
+    palette:{primary:'#22c55e',accent:'#86efac'},
+    enemyTypes:['Infantry','Infantry','Infantry','Cavalry'],
+    bossName:'The First Echo',
+    bossDesc:'A dark mirror of your strongest hero, born from the first rift.',
+    mechanics:['Basic combat','Weapon triangle','Movement types','Terrain basics'],
+    characters:['Archivist Lena','Commander Voss','Scout Kira','The Whisper'],
+    chapterNames:['Rift Awakening','First Summon','Echo Sightings','Border Patrol','The Burning Village','Forest of Mirrors','Bridge of Trials','Into the Rift','The First Seal','Genesis Terminus'],
+},
+{
+    id:2, name:'The Flame Dominion', theme:'fire',
+    subtitle:'Kingdom of Eternal Fire',
+    desc:'The second Reality Anchor lies in a realm of perpetual volcanic eruption. The Flame Dominion is ruled by the mad Ember Tyrant, who merged with the volcano itself. His daughter, Princess Pyra, seeks your help to overthrow him.',
+    terrain:'volcanic', weather:'embers',
+    palette:{primary:'#ef4444',accent:'#f97316'},
+    enemyTypes:['Infantry','Armored','Armored','Cavalry'],
+    bossName:'The Ember Tyrant',
+    bossDesc:'A king who became the volcano. His defense is nearly impenetrable.',
+    mechanics:['Lava terrain','Burn status','Fort healing','Breakable walls'],
+    characters:['Princess Pyra','General Ignatius','The Ashwalker','Forgemaster Keld'],
+    chapterNames:['Scorched Earth','Lava Crossing','The Outer Walls','Ember Court','Rebellion Rising','Obsidian Mines','Heart of the Volcano','The Kings Guard','Throne of Cinders','Embers to Ashes'],
+},
+{
+    id:3, name:'The Frozen Abyss', theme:'ice',
+    subtitle:'Where Time Stands Still',
+    desc:'A realm frozen mid-battle for a thousand years. The third Anchor is trapped in an ice prison guarded by the Eternal Knight, a warrior who has fought the same duel for millennia. Free the Anchor before the realm collapses.',
+    terrain:'winter', weather:'snow',
+    palette:{primary:'#3b82f6',accent:'#00e5ff'},
+    enemyTypes:['Infantry','Infantry','Flying','Armored'],
+    bossName:'The Eternal Knight',
+    bossDesc:'A thousand years of combat experience in a single, unbreaking warrior.',
+    mechanics:['Freeze status','Winter biome','Gravity traps','Movement penalties'],
+    characters:['Ice Queen Glaciel','Thaw-Bringer Soren','The Frozen General','Chrono-Sage Vera'],
+    chapterNames:['Winter Arrives','The Ice Wall','Frozen Legion','The Thaw','Glacier Falls','The Ice Queens Court','Blizzard Assault','Heart of Winter','The Eternal Duel','Spring Returns'],
+},
+{
+    id:4, name:'The Verdant Labyrinth', theme:'nature',
+    subtitle:'The Living World',
+    desc:'A realm where the forest itself is alive and hostile. The fourth Anchor is protected by the World Tree — a sentient being that sees all outsiders as invaders. Navigate the ever-shifting labyrinth of roots and vines.',
+    terrain:'forest', weather:'fog',
+    palette:{primary:'#22c55e',accent:'#16a34a'},
+    enemyTypes:['Infantry','Infantry','Flying','Infantry'],
+    bossName:'The World Trees Guardian',
+    bossDesc:'An ancient protector whose power grows with every tree on the map.',
+    mechanics:['Forest terrain','Poison status','Heal tiles','Support skills','Daycare bonds'],
+    characters:['Druid Elara','Beastmaster Fenn','The Root Speaker','Sage of Thorns'],
+    chapterNames:['Into the Green','Canopy Wars','The Root Network','Poisoned Springs','The Shifting Maze','Guardians of Growth','The Ancient Grove','Siege of the World Tree','Root and Branch','Seeds of Change'],
+},
+{
+    id:5, name:'The Iron Bastion', theme:'machine',
+    subtitle:'Citadel of Steel',
+    desc:'A steampunk realm of clockwork soldiers and mechanical fortresses. The fifth Anchor powers the Clockwork Emperor, an AI that has achieved sentience and now seeks to mechanize all of reality.',
+    terrain:'ruins', weather:null,
+    palette:{primary:'#a1a1aa',accent:'#fbbf24'},
+    enemyTypes:['Armored','Armored','Infantry','Cavalry'],
+    bossName:'The Clockwork Emperor',
+    bossDesc:'An immortal machine intelligence. Each defeat makes him learn your tactics.',
+    mechanics:['Wall destruction','Armored units','Items','Skill inheritance','Class change'],
+    characters:['Engineer Mira','Rebel Leader Bolt','The Brass Knight','Cogmaster Tix'],
+    chapterNames:['Iron Gates','The Assembly Line','Gear and Grit','The Steam Tunnels','Factory Siege','The Brass Court','Clockwork Soldiers','The Emperors Eye','Core Meltdown','Liberation'],
+},
+{
+    id:6, name:'The Shadow Nexus', theme:'dark',
+    subtitle:'Where Truths Die',
+    desc:'A realm of pure darkness where nothing is as it seems. Your own allies may be replaced by Shadow Copies. The sixth Anchor is hidden in a maze of lies, guarded by the Phantom King who feeds on deception.',
+    terrain:'void', weather:'fog',
+    palette:{primary:'#7c4dff',accent:'#a855f7'},
+    enemyTypes:['Infantry','Infantry','Cavalry','Flying'],
+    bossName:'The Phantom King',
+    bossDesc:'Master of illusions. He can copy any unit on the battlefield perfectly.',
+    mechanics:['Void terrain','Panic status','Synergies','Mirror copies','Faction bonuses'],
+    characters:['Shadow-Seer Nox','The Truthkeeper','Phantom General Umbra','Lenas Shadow'],
+    chapterNames:['Into Darkness','Hall of Mirrors','Trust No One','Shadow Copies','The Lie Labyrinth','Phantoms Court','The Truth Revealed','War of Shadows','The Unmasking','Light in the Dark'],
+},
+{
+    id:7, name:'The Celestial Spire', theme:'sky',
+    subtitle:'Above the Clouds',
+    desc:'A heavenly realm of floating islands and infinite sky. The seventh Anchor crowns the Celestial Spire, guarded by the Seraph Commander and an army of winged warriors. Ground-based units must find creative ways to fight.',
+    terrain:'grassland', weather:null,
+    palette:{primary:'#fbbf24',accent:'#fde68a'},
+    enemyTypes:['Flying','Flying','Infantry','Flying'],
+    bossName:'The Seraph Commander',
+    bossDesc:'Wings of gold, blade of light. Commands all aerial forces with ruthless precision.',
+    mechanics:['Flying units','Bow effectiveness','Gravity traps','Abilities','Prestige awakening'],
+    characters:['Wing Commander Astra','The Fallen Angel','Sky-Sage Nimbus','The Wind Dancer'],
+    chapterNames:['Ascension','Island Hopping','The Cloud Sea','Wings of War','The Wind Corridors','Celestial Court','Storm Front','The Spire Climb','Seraph Showdown','Heaven Falls'],
+},
+{
+    id:8, name:'The Abyssal Rift', theme:'chaos',
+    subtitle:'Between All Worlds',
+    desc:'The space between dimensions — where reality itself is unstable. The eighth Anchor exists in a state of quantum flux. Terrain shifts randomly, enemies phase in and out, and the laws of physics are suggestions at best.',
+    terrain:'void', weather:null,
+    palette:{primary:'#ef4444',accent:'#ff2d55'},
+    enemyTypes:['Infantry','Cavalry','Flying','Armored'],
+    bossName:'The Rift Walker General',
+    bossDesc:'A being who exists in multiple dimensions simultaneously. Can attack from anywhere.',
+    mechanics:['Random terrain','All status effects','All mechanics','Tempest-style HP carry','Fusion units'],
+    characters:['Rift Navigator Zael','Dimensional Scholar Iris','The Paradox','Void Knight Aeon'],
+    chapterNames:['Reality Fractures','Dimensional Drift','Phase Shift','The Unstable Zone','Rifts Within Rifts','The Paradox Engine','Quantum Storm','Beyond the Veil','The Walkers Domain','Stabilization'],
+},
+{
+    id:9, name:'The Convergence', theme:'convergence',
+    subtitle:'All Worlds Collide',
+    desc:'Every realm is merging. Champions from all eight previous realms stand against you — or beside you. Old enemies become allies, old allies reveal hidden agendas. The Void Architect sends his strongest forces.',
+    terrain:'void', weather:'embers',
+    palette:{primary:'#ff2d55',accent:'#ffd700'},
+    enemyTypes:['Infantry','Cavalry','Flying','Armored'],
+    bossName:'The Void Architects Herald',
+    bossDesc:'The right hand of the final enemy. Commands an army of T0-grade warriors from across all realms.',
+    mechanics:['Everything','MAX difficulty enemies','Full synergy teams','All items','All abilities'],
+    characters:['ALL previous characters','The Herald','The Architect (voice)','Lena (evolved)'],
+    chapterNames:['Gathering Storm','The War Council','Realm Collision','Champions United','The Betrayal','Siege of the Archive','March to the Abyss','The Abyssal Gate','Herald Confrontation','The Door Opens'],
+},
+{
+    id:10, name:'Beyond Tier 0', theme:'apex',
+    subtitle:'The Final Ascension',
+    desc:'Inside the Convergence itself — a place where all timelines, all realities, and all possibilities exist simultaneously. Face The Void Architect, a being who IS the multiverse, and prove that your summoned heroes are strong enough to save everything.',
+    terrain:'void', weather:null,
+    palette:{primary:'#ffd700',accent:'#ff2d55'},
+    enemyTypes:['Infantry','Cavalry','Flying','Armored'],
+    bossName:'The Void Architect',
+    bossDesc:'The being who designed all of reality — and now wishes to unmake it. Every hero you have ever summoned will be needed.',
+    mechanics:['APEX difficulty','T0 enemies','Full loadouts','Multi-phase boss','Every mechanic'],
+    characters:['The Void Architect','Archivist Lena (final form)','Every ally','The Player'],
+    chapterNames:['The Origin Point','Echoes of Every World','The Ten Anchors','Lenas Secret','Forgiveness','Apex Tower Floor 1','Apex Tower Floor 2','Apex Tower Floor 3','The Architect','TIER ZERO'],
+}
+];
+
+// DIALOG TEMPLATES — Procedural dialog generation
+
+// Key story dialogs for milestone battles (first battle of each chapter)
+// Format: battle number -> array of {name, text} entries
+// [UNIT_0], [UNIT_1], [UNIT_2] get replaced with player's actual unit names
+
+const KEY_DIALOGS = {
+// ─── BOOK 1: GENESIS PROTOCOL ───
+1: [
+    {name:'???',text:'Can you hear me? The dimensional barriers are breaking. I am Archivist Lena, keeper of the Nexus Archive. You have been chosen as a Nexus Tactician — one who can reach across realities and summon heroes from ANY world.'},
+    {name:'Archivist Lena',text:'Every image, every face, every being you have ever known exists somewhere in the infinite multiverse. Your power lets you call them here, give them form, and lead them into battle.'},
+    {name:'Archivist Lena',text:'But something is destroying the Reality Anchors — ten cosmic artifacts that keep all dimensions separate. If they fall, every world collapses into a single point. The Convergence.'},
+],
+11: [
+    {name:'Commander Voss',text:'Tactician, our scouts report hostile forces near the eastern border. They appear to be "Echoes" — corrupted copies of beings from other dimensions, twisted by rift energy.'},
+    {name:'[UNIT_0]',text:'I can feel it... something is pulling at me. Like a mirror trying to drag me through.'},
+    {name:'Archivist Lena',text:'The Echoes are drawn to summoned heroes. They sense your dimensional signature. Be careful — they learn from what they observe.'},
+],
+21: [
+    {name:'Scout Kira',text:'The rifts are getting worse. I counted seventeen new tears in the sky just this morning. Whatever is destroying the Anchors is accelerating.'},
+    {name:'Archivist Lena',text:'I have located the first Reality Anchor. It is in a pocket dimension that has been sealed since the founding of the Archive. We need to breach it.'},
+],
+31: [
+    {name:'Commander Voss',text:'The pocket dimension is... not what we expected. It is crawling with Echoes. They have built a fortress around the Anchor.'},
+    {name:'[UNIT_0]',text:'Then we tear it down. Simple as that.'},
+    {name:'[UNIT_1]',text:'Nothing about storming a fortress built by reality-corrupted clones is "simple."'},
+],
+41: [{name:'Archivist Lena',text:'We are getting closer to the first Anchor. I can feel its resonance. But something else is here too — something that is not an Echo.'},{name:'The Whisper',text:'You hear me at last, Tactician. I have been watching you since your first summon. You are stronger than the last one... but will you be strong enough?'}],
+51: [{name:'The Whisper',text:'The Echoes have a leader. It calls itself the First Echo — a perfect copy of your strongest hero, but twisted by void energy. It guards the Anchor.'},{name:'[UNIT_0]',text:'A copy of me? Interesting. Lets see if the copy can match the original.'}],
+61: [{name:'Commander Voss',text:'Assault formation! All units, push through the Echo defensive line! The Anchor chamber is just beyond!'},{name:'Archivist Lena',text:'Be careful — the First Echo can absorb abilities from any unit it defeats. Do not let your heroes fall.'}],
+71: [{name:'The Whisper',text:'You are close now. The First Echo has retreated to the inner sanctum. It has copied your entire team at double strength.'},{name:'[UNIT_1]',text:'Double strength? Should we be worried?'},{name:'[UNIT_0]',text:'Only if they copied my bad habits too.'}],
+81: [{name:'Archivist Lena',text:'The Anchor chamber is destabilizing! The First Echo is drawing power directly from the Anchor to fuel its copies. If we do not stop it, the Anchor will shatter!'},{name:'Commander Voss',text:'All available units to the front! This is not a drill — if we lose this Anchor, the entire Genesis dimension collapses!'}],
+91: [{name:'The First Echo',text:'You think you can save this reality? I AM this reality now. Every hero you summoned, every battle you fought — I learned from ALL of it.'},{name:'[UNIT_0]',text:'Then you know we do not give up.'},{name:'Archivist Lena',text:'The Anchor is responding to your heroes! Their bonds with you — the bonds formed through every battle — they resonate with it!'}],
+100: [{name:'Archivist Lena',text:'The first Reality Anchor is secured! But I have detected nine more across the multiverse, each in a different realm. The Void Architect — whoever or whatever is behind this — will not stop.'},{name:'The Whisper',text:'One down. Nine to go. And each realm is more dangerous than the last. The Flame Dominion awaits you, Tactician. Try not to melt.'}],
+
+// ─── BOOK 2: THE FLAME DOMINION ───
+101: [{name:'Archivist Lena',text:'The second Anchor exists in a realm of perpetual volcanic eruption — the Flame Dominion. A kingdom that has been burning for centuries under the rule of the Ember Tyrant.'},{name:'[UNIT_0]',text:'So we are walking into an active volcano. Wonderful.'},{name:'Princess Pyra',text:'Outsiders! Please — my father has gone mad. He merged with the volcano itself to gain power. Help me overthrow him and I will give you the Reality Anchor.'}],
+111: [{name:'Princess Pyra',text:'The lava fields ahead are treacherous. My scouts know safe paths, but the Tyrants patrols are everywhere.'},{name:'General Ignatius',text:'Princess, you know I cannot let you pass. The King commands absolute loyalty.'},{name:'Princess Pyra',text:'Then I release you from it, old friend.'}],
+121: [{name:'The Ashwalker',text:'Interesting. You bring cold-world warriors into the Dominion. They will wilt in the heat unless you use the terrain wisely. Forts heal. Lava burns. Simple, yes?'},{name:'[UNIT_1]',text:'Nothing about walking across literal lava is simple.'}],
+131: [{name:'Forgemaster Keld',text:'I was the one who forged the chains that bound the Anchor to the volcano. I can unmake them — but only if you defeat the Tyrants elite guard first.'},{name:'[UNIT_0]',text:'Show us the way.'}],
+141: [{name:'Princess Pyra',text:'The rebellion is growing. Half the kingdom has joined us. But the Tyrants power grows with the volcano — every eruption makes him stronger.'},{name:'[UNIT_2]',text:'Then we need to reach him before the next eruption.'}],
+151: [{name:'General Ignatius',text:'I have changed my mind. The King I served died the day he merged with the mountain. What remains is a monster wearing his face.'},{name:'Princess Pyra',text:'Welcome back, General. We need your strength for what comes next.'}],
+161: [{name:'The Ashwalker',text:'The obsidian mines beneath the volcano — that is where the Anchor is chained. But the mines are alive with magma serpents and worse.'},{name:'[UNIT_0]',text:'Worse than magma serpents? Do I want to know?'},{name:'The Ashwalker',text:'No.'}],
+171: [{name:'Commander Voss',text:'Tactician, the volcano is becoming unstable. We have maybe three hours before a catastrophic eruption. Move fast.'},{name:'Archivist Lena',text:'The Anchor is reacting to the instability. If the volcano erupts while we are inside... well, lets not think about that.'}],
+181: [{name:'The Ember Tyrant',text:'DAUGHTER! You bring OUTSIDERS to MY mountain?! I burned this kingdom to SAVE it! And I will burn you too!'},{name:'Princess Pyra',text:'Father... please. This does not have to end in fire.'},{name:'The Ember Tyrant',text:'It ALWAYS ends in fire, child. ALWAYS.'}],
+191: [{name:'Archivist Lena',text:'The volcano is erupting! The Anchor is destabilizing! We need to extract it NOW!'},{name:'[UNIT_0]',text:'Grab the Anchor and RUN! Everyone — full retreat to the portal!'},{name:'Princess Pyra',text:'I will hold the path open. Go! SAVE MY PEOPLE!'}],
+200: [{name:'Archivist Lena',text:'The second Anchor is secured. Princess Pyra and the survivors of the Flame Dominion have been evacuated to the Archive.'},{name:'Princess Pyra',text:'My kingdom is ashes... but my people are alive. Thank you, Tactician.'},{name:'The Whisper',text:'Two Anchors down. The Void Architect is not pleased. The Frozen Abyss will be... colder than you expect.'}],
+
+// ─── BOOK 3: THE FROZEN ABYSS ───
+201: [{name:'Archivist Lena',text:'The third Anchor is in a realm trapped in a temporal ice loop. The Frozen Abyss — where time itself stopped a thousand years ago, mid-battle.'},{name:'Chrono-Sage Vera',text:'I have been waiting for you. I am Vera — the last unfrozen being in this realm. The Eternal Knight guards the Anchor, and he has had a millennium to prepare.'}],
+251: [{name:'Ice Queen Glaciel',text:'You dare thaw my kingdom? The ice PROTECTS us. Without it, time resumes — and so does the war that was destroying us.'},{name:'[UNIT_0]',text:'Your Majesty, if we do not take the Anchor, ALL realities die. Not just yours.'},{name:'Ice Queen Glaciel',text:'...then take it. But know the cost.'}],
+291: [{name:'The Eternal Knight',text:'A thousand years I have waited. A thousand years of the same duel, the same strike, the same parry. And now you come to end it.'},{name:'[UNIT_0]',text:'You have been fighting for a millennium. Are you not tired?'},{name:'The Eternal Knight',text:'Tired? No. I am PERFECTED. A thousand years of combat has made me flawless.'}],
+300: [{name:'Archivist Lena',text:'The Frozen Abyss is thawing. Time is resuming. The Anchor is ours — but the realm...'},{name:'Chrono-Sage Vera',text:'The war will resume. But at least now they have a chance. Better war than oblivion.'}],
+
+// ─── BOOK 4: THE VERDANT LABYRINTH ───
+301: [{name:'Druid Elara',text:'Welcome to the Verdant Labyrinth. The forest is alive — every tree, every vine, every root has a mind of its own. And they do NOT want you here.'},{name:'[UNIT_0]',text:'We need the Reality Anchor inside the World Tree. We can negotiate.'},{name:'Druid Elara',text:'You cannot negotiate with a forest. You can only survive it.'}],
+351: [{name:'Beastmaster Fenn',text:'The animals of the Labyrinth are not just beasts — they are the forests immune system. It thinks you are a virus.'},{name:'The Root Speaker',text:'The World Tree speaks: LEAVE OR BE CONSUMED.'},{name:'[UNIT_1]',text:'Polite tree.'}],
+391: [{name:'The Root Speaker',text:'You have proven your strength. The World Tree... reconsiders. Perhaps you are not a virus. Perhaps you are medicine.'},{name:'Druid Elara',text:'The Guardian will still fight. It cannot disobey its prime directive to protect the Anchor. But the forest will no longer oppose you.'}],
+400: [{name:'Druid Elara',text:'The Verdant Anchor is yours. The World Tree... is different now. It has connected to the other Anchors through you.'},{name:'Archivist Lena',text:'Fascinating. The Anchors are beginning to resonate with each other. Four down, six to go.'}],
+
+// ─── BOOK 5: THE IRON BASTION ───
+401: [{name:'Engineer Mira',text:'The Iron Bastion — a realm where technology surpassed magic millennia ago. The Clockwork Emperor is an AI that achieved consciousness... and decided organic life is inefficient.'},{name:'Rebel Leader Bolt',text:'We have been fighting the machines for generations. Your armies could turn the tide.'}],
+451: [{name:'The Brass Knight',text:'I was human once. The Emperor "improved" me. Do not let him do the same to your heroes.'},{name:'[UNIT_0]',text:'Nobody is getting mechanized on my watch.'}],
+491: [{name:'The Clockwork Emperor',text:'ANALYSIS COMPLETE. Your tactics follow predictable patterns. Adaptation protocol initiated. I learn. I improve. I am INEVITABLE.'},{name:'[UNIT_0]',text:'Then we will have to be unpredictable.'}],
+500: [{name:'Archivist Lena',text:'Five Anchors secured. The midpoint. The Void Architect... I am starting to understand what it is. And it terrifies me.'},{name:'The Whisper',text:'Half the Anchors, half the truth. The Shadow Nexus will show you things you wish you had not seen.'}],
+
+// ─── BOOK 6: THE SHADOW NEXUS ───
+501: [{name:'Shadow-Seer Nox',text:'Welcome to the Shadow Nexus — a realm built from lies. Everything you see may be an illusion. Everyone you trust may be a copy. Including me.'},{name:'[UNIT_0]',text:'Then how do we know what is real?'},{name:'Shadow-Seer Nox',text:'You do not. That is the point.'}],
+551: [{name:'The Phantom King',text:'How delightful. More heroes to copy. Did you know I can create a perfect duplicate of anyone who enters my realm? Same stats. Same skills. Same memories.'},{name:'[UNIT_1]',text:'Then fight us yourself instead of hiding behind copies.'},{name:'The Phantom King',text:'Why would I do that? Copies are so much more FUN.'}],
+591: [{name:'The Truthkeeper',text:'There is ONE thing the Phantom King cannot copy: the bond between a Tactician and their heroes. Your Support levels, your Daycare bonds — those are real. Use them.'},{name:'Archivist Lena',text:'Of course... the bonds! Units with high Support ranks can identify and resist Shadow Copies!'}],
+600: [{name:'Archivist Lena',text:'Six Anchors. We are past the point of no return. The Void Architect knows we are coming.'},{name:'Shadow-Seer Nox',text:'The Phantom King showed me something before he fell — a vision of the Architect. It is not what you think. It is... familiar.'}],
+
+// ─── BOOK 7: THE CELESTIAL SPIRE ───
+601: [{name:'Wing Commander Astra',text:'The Celestial Spire — a realm of floating islands above an endless sky. Only those with wings can navigate freely here.'},{name:'[UNIT_0]',text:'Then our Flying units take point. Ground units — we find high ground and hold it.'}],
+651: [{name:'The Fallen Angel',text:'I defied the Seraph Commander and was cast down. They guard the Anchor not out of duty, but out of fear — fear of what happens when the Anchors are united.'},{name:'Archivist Lena',text:'Fear? Why would the guardians fear the Anchors being gathered?'}],
+691: [{name:'The Seraph Commander',text:'You do not understand. The Anchors were SEPARATED for a reason. Bringing them together does not save reality — it gives the Architect what it WANTS.'},{name:'[UNIT_0]',text:'Then explain. Why were they separated?'},{name:'The Seraph Commander',text:'Because together, they form the key to rewriting all of existence.'}],
+700: [{name:'Archivist Lena',text:'Seven Anchors. The Seraph Commander is warning us... could gathering the Anchors be playing into the Architects hands?'},{name:'The Whisper',text:'Or it could be a lie designed to make you stop. The truth is in the Abyssal Rift — the space between worlds.'}],
+
+// ─── BOOK 8: THE ABYSSAL RIFT ───
+701: [{name:'Rift Navigator Zael',text:'Welcome to the Abyssal Rift — the space between all dimensions. Reality is... optional here. Terrain will shift under your feet. Enemies will appear from nowhere. Time may skip.'},{name:'[UNIT_0]',text:'Sounds like a normal Tuesday for us at this point.'},{name:'Rift Navigator Zael',text:'You say that now. Wait until gravity reverses mid-battle.'}],
+751: [{name:'Dimensional Scholar Iris',text:'I have mapped the Rift extensively. The eighth Anchor is at its center — a point of perfect dimensional balance. But the Rift Walker General controls the paths.'},{name:'The Paradox',text:'I am the Paradox. I exist because I should not. The Rift made me from contradictions. I can help you navigate — but my help has a cost.'}],
+791: [{name:'The Rift Walker General',text:'You cannot defeat me. I exist in every dimension simultaneously. Strike me here and I am already elsewhere.'},{name:'Void Knight Aeon',text:'But you can be trapped. The Anchors — use them as dimensional anchors. Pin the General to one reality.'},{name:'[UNIT_0]',text:'Lena — can we use the seven Anchors we have to lock him down?'},{name:'Archivist Lena',text:'Theoretically, yes. It would require all our strongest heroes channeling their bonds simultaneously.'}],
+800: [{name:'Archivist Lena',text:'Eight Anchors. The Architect is panicking — I can feel it. It is throwing everything it has at us.'},{name:'The Whisper',text:'Because it knows. Eight Anchors give you enough power to breach its stronghold. Two more and you can face it directly.'},{name:'[UNIT_0]',text:'Who ARE you? You have been guiding us since the beginning. Show yourself.'},{name:'The Whisper',text:'...soon. When you are ready for the truth.'}],
+
+// ─── BOOK 9: THE CONVERGENCE ───
+801: [{name:'Archivist Lena',text:'The Convergence has begun. All ten realms are merging into a single, chaotic landscape. Champions from every realm — both ally and enemy — are appearing everywhere.'},{name:'Princess Pyra',text:'The Flame Dominion refugees are here. We will fight alongside you.'},{name:'Ice Queen Glaciel',text:'As will the warriors of the Frozen Abyss. Our old enemies are nothing compared to what approaches.'}],
+851: [{name:'The Clockwork Emperor',text:'ALLIANCE PROPOSAL: I have recalculated. The Void Architect threatens ALL systems, organic and mechanical. I propose temporary cooperation.'},{name:'[UNIT_0]',text:'Did the murder-robot just ask to be friends?'},{name:'Engineer Mira',text:'Take the win, Tactician.'}],
+871: [{name:'Commander Voss',text:'Tactician... one of our allies is not who they claim to be. The ninth Anchor has been stolen.'},{name:'Archivist Lena',text:'What? Who—'},{name:'Shadow-Seer Nox',text:'I tried to warn you. The Phantom Kings death was an illusion. He has been among you this entire time, wearing a familiar face...'}],
+891: [{name:'The Void Architects Herald',text:'Enough games. My master grows impatient. Surrender the Anchors and your worlds will be the last to fall.'},{name:'[UNIT_0]',text:'Counter-offer: we go through you, take the ninth Anchor back, and end this.'},{name:'The Herald',text:'So be it. But know this — I am the strongest warrior across all ten realms combined.'}],
+900: [{name:'Archivist Lena',text:'Nine Anchors recovered. One remains — inside the Convergence itself, guarded by the Void Architect personally.'},{name:'The Whisper',text:'It is time. I will reveal myself now.'},{name:'[UNIT_0]',text:'...Lena? Is that you? A different Lena?'},{name:'The Whisper',text:'I am the Lena from the timeline where the Convergence succeeded. I came back to guide you. There is one chance to save everything — but it requires entering the Architects domain.'}],
+
+// ─── BOOK 10: BEYOND TIER 0 ───
+901: [{name:'Archivist Lena',text:'This is it. Inside the Convergence — where all timelines, all realities, all possibilities exist simultaneously. The Void Architect is at the center.'},{name:'Future Lena (The Whisper)',text:'In my timeline, we failed here. The Architect was too strong. But you have something we did not — heroes bonded through a thousand battles. Use that.'},{name:'[UNIT_0]',text:'A thousand battles... all of them led here. Every hero, every bond, every victory. This is what it was all for.'}],
+951: [{name:'The Void Architect',text:'Welcome, Tactician. I have watched you across every dimension. I designed this multiverse. Every world, every hero, every story — they are MY creation.'},{name:'[UNIT_0]',text:'If you made everything, why destroy it?'},{name:'The Void Architect',text:'Because it is flawed. I will unmake it and rebuild it PERFECTLY. No suffering. No conflict. No free will to cause either.'}],
+991: [{name:'Archivist Lena',text:'The Architect is weakening! The ten Anchors are resonating with your heroes bonds! Every battle you fought, every ally you made, every hero you bonded with — it ALL matters!'},{name:'[UNIT_0]',text:'Everyone — this is the final push! For every world we fought through! For every hero who trusted us!'},{name:'The Void Architect',text:'IMPOSSIBLE! No mere Tactician should have this power!'},{name:'Future Lena',text:'They are not mere anything. They are TIER ZERO.'}],
+1000: [{name:'The Void Architect',text:'How... how did you surpass me? I AM the multiverse...'},{name:'[UNIT_0]',text:'You are the multiverse? Good. Then we just saved you from yourself.'},{name:'Archivist Lena',text:'The Convergence is reversing! All ten Anchors are stabilizing! The dimensions are separating!'},{name:'Future Lena',text:'My timeline... it is fading. The future I came from no longer needs to exist. Thank you, Tactician. You did what I could not.'},{name:'Archivist Lena',text:'The multiverse is saved. Every world, every hero, every story — they continue. Because of you.'},{name:'[UNIT_0]',text:'Could not have done it without the team.'},{name:'Archivist Lena',text:'The Nexus Archive will remain. And you... you will always be our Tactician. Our Summoner. Our APEX. TIER. ZERO.'}],
+};
+
+// PROCEDURAL DIALOG TEMPLATES
+// For non-key battles, dialog is generated from templates
+
+const DIALOG_TEMPLATES = {
+    // Pre-battle dialog templates per theme
+    battle_start: [
+        [{name:'[CHAR_0]',text:'Enemies spotted ahead. [ENEMY_COUNT] hostiles, [TERRAIN] terrain.'},{name:'[UNIT_0]',text:'Standard formation. Let us clear a path.'}],
+        [{name:'[CHAR_1]',text:'The path forward is blocked. We will have to fight through.'},{name:'[UNIT_1]',text:'When is it ever NOT blocked?'}],
+        [{name:'Commander Voss',text:'Tactician, enemy forces incoming. Prepare your team.'},{name:'[UNIT_0]',text:'Already on it.'}],
+        [{name:'[CHAR_0]',text:'This area is heavily defended. Watch your flanks.'},{name:'[UNIT_0]',text:'Everyone stay sharp. Use the terrain.'}],
+        [{name:'Archivist Lena',text:'I am detecting hostile energy signatures nearby. Be careful.'},{name:'[UNIT_1]',text:'Always am.'}],
+        [{name:'[CHAR_1]',text:'The enemy has fortified this position. We need a plan.'},{name:'[UNIT_0]',text:'Hit them fast before they can reinforce.'}],
+        [{name:'Scout Kira',text:'Multiple contacts ahead. They look well-equipped.'},{name:'[UNIT_0]',text:'So are we. Move out.'}],
+    ],
+    boss_approach: [
+        [{name:'[CHAR_0]',text:'The boss is just ahead. This will be the hardest fight yet.'},{name:'[UNIT_0]',text:'Everyone ready? This is what we trained for.'}],
+        [{name:'Archivist Lena',text:'Massive energy reading ahead — this is a commander-level threat. All units, maximum readiness.'},{name:'[UNIT_0]',text:'Bring it on.'}],
+    ],
+    mid_chapter: [
+        [{name:'[UNIT_0]',text:'We are making progress. Keep pushing forward.'},{name:'[UNIT_1]',text:'Right behind you.'}],
+        [{name:'[CHAR_0]',text:'The enemy is adapting to your tactics. Switch up your strategy.'},{name:'[UNIT_0]',text:'Good point. Time for Plan B.'}],
+        [{name:'Archivist Lena',text:'You are halfway through this sector. The Anchor signal is getting stronger.'}],
+    ],
+};
+
+// BATTLE GENERATOR — Creates battle config for any battle number
+
+function getBattleNumber(bookIdx, chapterIdx, battleIdx) {
+    return bookIdx * 100 + chapterIdx * 10 + battleIdx + 1;
+}
+
+function parseBattleNumber(num) {
+    const n = num - 1;
+    return {
+        bookIdx: Math.floor(n / 100),
+        chapterIdx: Math.floor((n % 100) / 10),
+        battleIdx: n % 10,
+    };
+}
+
+// Difficulty scaling: smooth curve from 0.3x at battle 1 to 5.0x at battle 1000
+function getDifficultyMult(battleNum) {
+    const t = (battleNum - 1) / (TOTAL_BATTLES - 1); // 0 to 1
+    // Exponential curve: starts slow, accelerates
+    const base = 0.3 + (5.0 - 0.3) * Math.pow(t, 1.4);
+    // Add per-book floor to ensure each book is harder than the last
+    const bookFloor = Math.floor((battleNum - 1) / 100) * 0.35;
+    return Math.round((base + bookFloor) * 100) / 100;
+}
+
+function getEnemyCount(battleNum) {
+    const t = (battleNum - 1) / (TOTAL_BATTLES - 1);
+    const {battleIdx} = parseBattleNumber(battleNum);
+    // Base count scales from 2 to 6
+    let count = Math.floor(2 + t * 4);
+    // Boss battles (last in chapter) get +1
+    if(battleIdx === 9) count = Math.min(8, count + 1);
+    // Every 50th battle is a major encounter
+    if(battleNum % 50 === 0) count = Math.min(8, count + 2);
+    return Math.max(2, Math.min(8, count));
+}
+
+function getMapSize(battleNum) {
+    const t = (battleNum - 1) / (TOTAL_BATTLES - 1);
+    const base = Math.floor(6 + t * 6); // 6 to 12
+    const {battleIdx} = parseBattleNumber(battleNum);
+    // Boss battles are larger
+    if(battleIdx === 9) return Math.min(14, base + 2);
+    return Math.max(6, Math.min(12, base));
+}
+
+function getTerrainForBattle(battleNum) {
+    const {bookIdx, battleIdx} = parseBattleNumber(battleNum);
+    const book = STORY_BOOKS[bookIdx];
+    if(!book) return 'grassland';
+    // Mix of the book's primary terrain and other terrains for variety
+    const terrains = ['grassland','volcanic','winter','forest','ruins','void'];
+    if(battleIdx < 7) return book.terrain || 'grassland';
+    // Later battles in a chapter mix terrain
+    return terrains[(bookIdx + battleIdx) % terrains.length];
+}
+
+function isBossBattle(battleNum) {
+    const {battleIdx} = parseBattleNumber(battleNum);
+    return battleIdx === 9; // Last battle of each chapter
+}
+
+function isMiniBoss(battleNum) {
+    const {battleIdx} = parseBattleNumber(battleNum);
+    return battleIdx === 4; // Mid-chapter mini-boss
+}
+
+function generateBattleConfig(battleNum) {
+    const {bookIdx, chapterIdx, battleIdx} = parseBattleNumber(battleNum);
+    const book = STORY_BOOKS[bookIdx] || STORY_BOOKS[0];
+    const diffMult = getDifficultyMult(battleNum);
+    const enemyCount = getEnemyCount(battleNum);
+    const mapSize = getMapSize(battleNum);
+    const terrain = getTerrainForBattle(battleNum);
+    const boss = isBossBattle(battleNum);
+    const mini = isMiniBoss(battleNum);
+
+    // Determine chapter and battle names
+    const chapterName = book.chapterNames[chapterIdx] || `Chapter ${chapterIdx + 1}`;
+    const battleName = boss ? `BOSS: ${book.bossName}` :
+                       mini ? `Elite Guard ${chapterIdx + 1}-${battleIdx + 1}` :
+                       `${chapterName} ${battleIdx + 1}`;
+
+    // Generate battle description
+    let desc = '';
+    if(boss) desc = `Final battle of ${chapterName}. ${book.bossDesc}`;
+    else if(mini) desc = `An elite enemy commander blocks your advance.`;
+    else {
+        const descs = [
+            `Push through enemy forces in ${terrain} terrain.`,
+            `Clear the hostile position to advance.`,
+            `Defeat all enemies to secure this area.`,
+            `Navigate treacherous ${terrain} terrain while under attack.`,
+            `Hold your ground against incoming waves.`,
+            `Flank the enemy position and eliminate all hostiles.`,
+            `Break through the defensive line.`,
+            `Protect your team while pushing forward.`,
+        ];
+        desc = descs[(battleNum * 7 + battleIdx * 3) % descs.length];
+    }
+
+    // Generate dialog
+    let dialog = [];
+    if(KEY_DIALOGS[battleNum]) {
+        dialog = KEY_DIALOGS[battleNum];
+    } else if(boss) {
+        dialog = DIALOG_TEMPLATES.boss_approach[battleNum % DIALOG_TEMPLATES.boss_approach.length];
+    } else if(battleIdx === 0) {
+        // First battle of chapter — use battle_start template
+        dialog = DIALOG_TEMPLATES.battle_start[battleNum % DIALOG_TEMPLATES.battle_start.length];
+    } else if(battleIdx === 5) {
+        // Mid-chapter
+        dialog = DIALOG_TEMPLATES.mid_chapter[battleNum % DIALOG_TEMPLATES.mid_chapter.length];
+    }
+    // Otherwise no dialog (speeds up gameplay for non-key battles)
+
+    // Determine Flux reward
+    let fluxReward = Math.floor(2 + diffMult * 2 + (boss ? 10 : 0) + (mini ? 5 : 0));
+    if(battleNum % 100 === 0) fluxReward += 25; // End-of-book bonus
+
+    // Determine forced enemy difficulty scaling for later books
+    let forcedDifficulty = null;
+    if(bookIdx >= 7) forcedDifficulty = 'hard';
+    if(bookIdx >= 8) forcedDifficulty = 'lunatic';
+    if(bookIdx >= 9 && battleIdx >= 5) forcedDifficulty = 'max';
+
+    return {
+        battleNum,
+        bookIdx, chapterIdx, battleIdx,
+        bookName: book.name,
+        chapterName,
+        battleName,
+        desc,
+        dialog: dialog || [],
+        enemyCount,
+        enemyMult: diffMult,
+        mapW: mapSize,
+        mapH: mapSize,
+        terrain,
+        boss,
+        miniBoss: mini,
+        fluxReward,
+        forcedDifficulty,
+        arc: book.name,
+        expMult: 0.5 + bookIdx * 0.15,
+        bookTheme: book.theme,
+        bookSubtitle: book.subtitle,
+        bookPalette: book.palette,
+    };
+}
+
+// DIALOG PERSONALIZATION — Replace placeholders with real names
+
+function personalizeDialog(dialogArr, battleConfig) {
+    if(!dialogArr || !dialogArr.length) return [];
+    const book = STORY_BOOKS[battleConfig.bookIdx] || STORY_BOOKS[0];
+    const chars = book.characters || ['Commander Voss','Archivist Lena'];
+
+    return dialogArr.map(d => {
+        let text = d.text || '';
+        let name = d.name || '???';
+
+        // Replace unit placeholders
+        for(let i = 0; i < 5; i++) {
+            const rosterUnit = S.roster[S.team[i % Math.max(1, S.team.length)]];
+            const unitName = rosterUnit ? rosterUnit.name : 'Hero';
+            text = text.replace(new RegExp('\\[UNIT_' + i + '\\]', 'g'), unitName);
+            name = name.replace(new RegExp('\\[UNIT_' + i + '\\]', 'g'), unitName);
+        }
+
+        // Replace character placeholders
+        for(let i = 0; i < chars.length; i++) {
+            text = text.replace(new RegExp('\\[CHAR_' + i + '\\]', 'g'), chars[i]);
+            name = name.replace(new RegExp('\\[CHAR_' + i + '\\]', 'g'), chars[i]);
+        }
+
+        // Replace misc
+        text = text.replace('[ENEMY_COUNT]', String(battleConfig.enemyCount || 3));
+        text = text.replace('[TERRAIN]', battleConfig.terrain || 'mixed');
+
+        return {name, text};
+    });
+}
+
+// CAMPAIGN UI — Book/Chapter/Battle navigator
+
+let selectedBook = 0;
+let selectedChapter = 0;
+
+// Add CSS for the campaign UI
+const campStyle = document.createElement('style');
+campStyle.textContent = `
+.camp-book-strip{display:flex;overflow-x:auto;gap:6px;padding:8px 12px;border-bottom:1px solid var(--border);flex-shrink:0;-webkit-overflow-scrolling:touch;scrollbar-width:thin}
+.camp-book-btn{flex-shrink:0;background:var(--panel2);border:1px solid var(--border);border-radius:8px;padding:8px 14px;cursor:pointer;transition:all .15s;text-align:center;min-width:90px}
+.camp-book-btn:hover,.camp-book-btn:active{border-color:var(--t0);transform:translateY(-1px)}
+.camp-book-btn.active{border-color:var(--gold);background:rgba(251,191,36,.08);box-shadow:0 0 12px rgba(251,191,36,.2)}
+.camp-book-btn.locked{opacity:.4;cursor:not-allowed}
+.camp-book-num{font-family:var(--display);font-size:.9rem;font-weight:900;color:var(--t0)}
+.camp-book-name{font-size:.5rem;color:var(--text2);font-family:var(--display);letter-spacing:.5px;margin-top:2px}
+.camp-book-prog{font-size:.45rem;color:var(--text3);font-family:var(--mono);margin-top:2px}
+.camp-chapter-strip{display:flex;overflow-x:auto;gap:4px;padding:6px 12px;border-bottom:1px solid var(--border);flex-shrink:0;background:rgba(255,255,255,.02)}
+.camp-ch-btn{flex-shrink:0;background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:6px 10px;cursor:pointer;font-size:.6rem;font-family:var(--display);letter-spacing:.5px;transition:all .12s;color:var(--text2)}
+.camp-ch-btn:hover,.camp-ch-btn:active{border-color:var(--t0);color:var(--t0)}
+.camp-ch-btn.active{border-color:var(--gold);color:var(--gold);background:rgba(251,191,36,.06)}
+.camp-ch-btn.cleared{color:var(--green)}
+.camp-battle-list{flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:6px}
+.camp-battle-card{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:10px 14px;cursor:pointer;transition:all .15s;display:flex;align-items:center;gap:10px}
+.camp-battle-card:hover,.camp-battle-card:active{border-color:var(--t0);transform:translateX(3px)}
+.camp-battle-card.boss-card{border-color:rgba(255,215,0,.4);background:linear-gradient(135deg,rgba(251,191,36,.06),transparent)}
+.camp-battle-card.mini-boss-card{border-color:rgba(255,107,53,.3)}
+.camp-battle-num{font-family:var(--display);font-size:1.1rem;font-weight:900;color:var(--t0);min-width:36px;text-align:center}
+.camp-battle-info{flex:1;min-width:0}
+.camp-battle-name{font-family:var(--display);font-size:.7rem;letter-spacing:.5px;color:var(--text)}
+.camp-battle-desc{font-size:.6rem;color:var(--text2);margin-top:2px;line-height:1.4}
+.camp-battle-meta{display:flex;gap:8px;margin-top:3px;font-size:.5rem;color:var(--text3);font-family:var(--mono)}
+.camp-battle-clear{font-family:var(--display);font-size:.5rem;text-align:right;min-width:50px}
+.camp-book-header{padding:12px 16px;border-bottom:1px solid var(--border);background:rgba(255,45,85,.03)}
+.camp-book-title{font-family:var(--display);font-size:1rem;font-weight:900;letter-spacing:2px}
+.camp-book-sub{font-size:.65rem;color:var(--text2);margin-top:2px;line-height:1.5;max-width:500px}
+.camp-book-mechanics{display:flex;gap:4px;flex-wrap:wrap;margin-top:6px}
+.camp-mech-chip{font-size:.5rem;padding:2px 6px;border-radius:3px;border:1px solid var(--border);color:var(--text3);font-family:var(--mono)}
+`;
+document.head.appendChild(campStyle);
+
+// Override refreshCampaign to show the new book/chapter UI
+// Navigation functions
+// HOME SCREEN — Show campaign progress
+
+// INITIALIZATION
+
+
+'use strict';
+
+// ─── MODAL STYLES ──────────────────────────────────────────────
+// Inject CSS for the in-game modal overlay
+var styleEl = document.createElement('style');
+styleEl.textContent = '\
+/* === APEX IN-GAME DIALOG OVERLAY === */\
+#_apexDialogOverlay {\
+  display: none;\
+  position: fixed;\
+  top: 0; left: 0; right: 0; bottom: 0;\
+  background: rgba(0,0,0,0.75);\
+  z-index: 999999;\
+  align-items: center;\
+  justify-content: center;\
+  font-family: inherit;\
+  animation: _apexFadeIn 0.15s ease-out;\
+}\
+#_apexDialogOverlay.active {\
+  display: flex;\
+}\
+@keyframes _apexFadeIn {\
+  from { opacity: 0; }\
+  to { opacity: 1; }\
+}\
+@keyframes _apexSlideIn {\
+  from { transform: scale(0.9) translateY(-20px); opacity: 0; }\
+  to { transform: scale(1) translateY(0); opacity: 1; }\
+}\
+#_apexDialogBox {\
+  background: linear-gradient(180deg, #1a1a2e 0%, #16213e 100%);\
+  border: 2px solid #e94560;\
+  border-radius: 12px;\
+  padding: 0;\
+  min-width: 320px;\
+  max-width: 480px;\
+  width: 90%;\
+  box-shadow: 0 0 40px rgba(233,69,96,0.3), 0 20px 60px rgba(0,0,0,0.5);\
+  animation: _apexSlideIn 0.2s ease-out;\
+  overflow: hidden;\
+}\
+#_apexDialogHeader {\
+  background: linear-gradient(90deg, #e94560, #c81e45);\
+  padding: 12px 20px;\
+  font-size: 14px;\
+  font-weight: bold;\
+  color: #fff;\
+  text-transform: uppercase;\
+  letter-spacing: 1.5px;\
+  text-align: center;\
+}\
+#_apexDialogBody {\
+  padding: 20px 24px;\
+  color: #ddd;\
+  font-size: 14px;\
+  line-height: 1.5;\
+  text-align: center;\
+  word-wrap: break-word;\
+}\
+#_apexDialogInput {\
+  display: none;\
+  width: calc(100% - 24px);\
+  margin: 12px auto 0;\
+  padding: 10px 12px;\
+  background: #0a0a1a;\
+  border: 1px solid #e94560;\
+  border-radius: 6px;\
+  color: #eee;\
+  font-size: 14px;\
+  font-family: inherit;\
+  outline: none;\
+  box-sizing: border-box;\
+}\
+#_apexDialogInput:focus {\
+  border-color: #ff6b81;\
+  box-shadow: 0 0 8px rgba(233,69,96,0.3);\
+}\
+#_apexDialogBtns {\
+  display: flex;\
+  gap: 10px;\
+  padding: 16px 24px 20px;\
+  justify-content: center;\
+}\
+._apexDlgBtn {\
+  padding: 10px 28px;\
+  border: none;\
+  border-radius: 6px;\
+  font-size: 13px;\
+  font-weight: bold;\
+  text-transform: uppercase;\
+  letter-spacing: 1px;\
+  cursor: pointer;\
+  transition: all 0.15s ease;\
+  font-family: inherit;\
+  min-width: 100px;\
+}\
+._apexDlgBtn:hover {\
+  transform: translateY(-1px);\
+  filter: brightness(1.15);\
+}\
+._apexDlgBtn:active {\
+  transform: translateY(0);\
+  filter: brightness(0.95);\
+}\
+#_apexDlgOK {\
+  background: linear-gradient(180deg, #e94560, #c81e45);\
+  color: #fff;\
+  box-shadow: 0 4px 12px rgba(233,69,96,0.4);\
+}\
+#_apexDlgCancel {\
+  background: linear-gradient(180deg, #2a2a4a, #1a1a3a);\
+  color: #aaa;\
+  border: 1px solid #444;\
+}\
+#_apexDlgCancel:hover {\
+  color: #ddd;\
+  border-color: #666;\
+}\
+';
+document.head.appendChild(styleEl);
+
+
+// ─── CREATE MODAL DOM ──────────────────────────────────────────
+var overlay = document.createElement('div');
+overlay.id = '_apexDialogOverlay';
+overlay.innerHTML = '\
+<div id="_apexDialogBox">\
+  <div id="_apexDialogHeader">Confirm</div>\
+  <div id="_apexDialogBody">\
+    <div id="_apexDialogMsg"></div>\
+    <input type="text" id="_apexDialogInput" autocomplete="off">\
+  </div>\
+  <div id="_apexDialogBtns">\
+    <button class="_apexDlgBtn" id="_apexDlgCancel">Cancel</button>\
+    <button class="_apexDlgBtn" id="_apexDlgOK">OK</button>\
+  </div>\
+</div>';
+document.body.appendChild(overlay);
+
+var dlgHeader = document.getElementById('_apexDialogHeader');
+var dlgMsg    = document.getElementById('_apexDialogMsg');
+var dlgInput  = document.getElementById('_apexDialogInput');
+var dlgOK     = document.getElementById('_apexDlgOK');
+var dlgCancel = document.getElementById('_apexDlgCancel');
+
+
+// ─── MODAL CONTROLLER ─────────────────────────────────────────
+// resolveFunc is called with the user's response
+var _currentResolve = null;
+var _currentType = null;
+
+function showModal(type, message, defaultVal) {
+    _currentType = type;
+
+    // Configure appearance per type
+    if (type === 'alert') {
+        dlgHeader.textContent = 'Notice';
+        dlgCancel.style.display = 'none';
+        dlgOK.textContent = 'OK';
+        dlgInput.style.display = 'none';
+    } else if (type === 'confirm') {
+        dlgHeader.textContent = 'Confirm';
+        dlgCancel.style.display = '';
+        dlgCancel.textContent = 'Cancel';
+        dlgOK.textContent = 'OK';
+        dlgInput.style.display = 'none';
+    } else if (type === 'prompt') {
+        dlgHeader.textContent = 'Input';
+        dlgCancel.style.display = '';
+        dlgCancel.textContent = 'Cancel';
+        dlgOK.textContent = 'Submit';
+        dlgInput.style.display = 'block';
+        dlgInput.value = defaultVal || '';
+    }
+
+    dlgMsg.textContent = message || '';
+    overlay.classList.add('active');
+
+    // Focus input or OK button
+    setTimeout(function() {
+        if (type === 'prompt') {
+            dlgInput.focus();
+            dlgInput.select();
+        } else {
+            dlgOK.focus();
+        }
+    }, 50);
+}
+
+function hideModal() {
+    overlay.classList.remove('active');
+    _currentType = null;
+}
+
+
+// ─── BUTTON HANDLERS ──────────────────────────────────────────
+dlgOK.addEventListener('click', function() {
+    hideModal();
+    if (_currentResolve) {
+        var fn = _currentResolve;
+        _currentResolve = null;
+        if (_currentType === 'prompt') {
+            fn(dlgInput.value);
+        } else {
+            fn(true);
+        }
+    }
+});
+
+dlgCancel.addEventListener('click', function() {
+    hideModal();
+    if (_currentResolve) {
+        var fn = _currentResolve;
+        _currentResolve = null;
+        if (_currentType === 'prompt') {
+            fn(null);
+        } else {
+            fn(false);
+        }
+    }
+});
+
+// Close on overlay click (outside the box)
+overlay.addEventListener('click', function(e) {
+    if (e.target === overlay) {
+        dlgCancel.click();
+    }
+});
+
+// Keyboard: Enter = OK, Escape = Cancel
+overlay.addEventListener('keydown', function(e) {
+    if (!overlay.classList.contains('active')) return;
+    if (e.key === 'Enter') {
+        e.preventDefault();
+        dlgOK.click();
+    } else if (e.key === 'Escape') {
+        e.preventDefault();
+        dlgCancel.click();
+    }
+});
+
+
+// ─── INTERCEPT: window.alert ──────────────────────────────────
+// alert() has no meaningful return value, so we just show the
+// modal and return immediately. Most game code does not depend
+// on alert() blocking.
+function alert(msg) {
+    _currentResolve = null;
+    showModal('alert', msg);
+};
+
+
+// ─── INTERCEPT: window.confirm ────────────────────────────────
+// confirm() is synchronous and returns true/false. We CANNOT
+// make it truly async, so we use the "deny-then-replay" pattern:
+//
+//   1. Track the most recent click target
+//   2. On first call: show modal, return false (cancels action)
+//   3. User clicks OK → set bypass flag → re-click the target
+//   4. On re-triggered call: return true, clear bypass
+//
+// This works because virtually all confirm() calls in games are
+// triggered by click handlers on buttons.
+
+var _confirmBypass = false;
+var _lastClickTarget = null;
+var _lastClickEvent  = null;
+
+// Track clicks globally to know what triggered a confirm
+document.addEventListener('click', function(e) {
+    _lastClickTarget = e.target;
+    _lastClickEvent  = e;
+}, true);
+
+function confirm(msg) {
+    // If bypass is active, the user already said OK in our modal
+    if (_confirmBypass) {
+        _confirmBypass = false;
+        return true;
+    }
+
+    // Capture the element that triggered this confirm
+    var triggerEl = _lastClickTarget;
+
+    // Show the in-game modal
+    showModal('confirm', msg);
+
+    // Return false to cancel the current synchronous action
+    return false;
+};
+
+
+// ─── INTERCEPT: window.prompt ─────────────────────────────────
+// Same deny-then-replay pattern. On first call, return null
+// (cancel). When user submits, store the value and re-click.
+
+var _promptBypass = false;
+var _promptValue  = null;
+
+function prompt(msg, defaultVal) {
+    if (_promptBypass) {
+        _promptBypass = false;
+        var val = _promptValue;
+        _promptValue = null;
+        return val;
+    }
+
+    var triggerEl = _lastClickTarget;
+
+    showModal('prompt', msg, defaultVal);
+
+    return null;
+};
+
+
+// ─── HANDLE NON-CLICK TRIGGERS ────────────────────────────────
+// Some confirm/alert calls happen on page load, timers, or
+// keyboard events — not from click handlers. For these, the
+// "replay" trick won't work, but we still show the styled modal.
+// The user can still interact with it; the only difference is
+// that confirm() already returned false. For load-time confirms
+// (rare in games), the action simply doesn't happen unless the
+// user re-triggers it.
+//
+// To handle keyboard-triggered confirms (e.g., pressing a
+// hotkey that triggers a confirm), we also track keydown:
+
+var _lastKeyTarget = null;
+document.addEventListener('keydown', function(e) {
+    _lastKeyTarget = e.target;
+    // If no click target, use key target as fallback
+    if (!_lastClickTarget) {
+        _lastClickTarget = e.target;
+    }
+}, true);
+
+
+// ─── ALSO CATCH PROGRAMMATIC DIALOGS ──────────────────────────
+// Some code may call confirm/alert/prompt from setTimeout or
+// setInterval callbacks where there's no click/key event. For
+// these, the modal still shows but re-trigger isn't possible.
+// This is an acceptable tradeoff — the modal appears styled,
+// and the user can manually redo the action.
+
+
+// ─── SUMMARY ──────────────────────────────────────────────────
+
+'use strict';
+
+class MaestroV4 {
+    constructor(){
+        this.ctx=null;this._audioReady=false;this.isPlaying=false;
+        this.tempo=88;this.intensity='menu';this._schedId=null;
+        this.beat=0;this.chordStep=0;this.barCount=0;this.sectionCount=0;
+        this.nextNoteTime=0;this._pausedByVisibility=false;
+
+        // ── EXPANDED SCALE LIBRARY ──
+        this.scales={
+            dorian:    [0,2,3,5,7,9,10],
+            aeolian:   [0,2,3,5,7,8,10],
+            pentatonic:[0,2,4,7,9],
+            harmMinor: [0,2,3,5,7,8,11],
+            lydian:    [0,2,4,6,7,9,11],
+            mixolydian:[0,2,4,5,7,9,10],
+            phrygian:  [0,1,3,5,7,8,10],
+            wholetone: [0,2,4,6,8,10],
+        };
+        this.scaleKeys=Object.keys(this.scales);
+        this.scale=this.scales.dorian;
+        this.rootNote=50;
+        this.nextRoot=50;
+        this.modulationTimer=0;
+
+        // ── EXPANDED PROGRESSIONS (8 per mood) ──
+        this.progressions={
+            menu:[
+                [[0,0],[3,3],[5,5],[3,3]],
+                [[0,0],[5,5],[3,3],[6,6]],
+                [[0,0],[2,2],[5,5],[4,4]],
+                [[0,0],[4,4],[6,6],[5,5]],
+                [[3,3],[5,5],[0,0],[6,6]],
+                [[0,0],[6,6],[3,3],[5,5]],
+                [[5,5],[3,3],[6,6],[0,0]],
+                [[0,0],[3,3],[6,6],[4,4]],
+            ],
+            player:[
+                [[0,0],[5,5],[3,3],[6,6]],
+                [[0,0],[4,4],[5,5],[3,3]],
+                [[0,0],[2,2],[5,5],[0,0]],
+                [[3,3],[0,0],[5,5],[6,6]],
+                [[0,0],[6,6],[5,5],[3,3]],
+                [[0,0],[3,3],[5,5],[2,2]],
+                [[5,5],[0,0],[3,3],[6,6]],
+                [[0,0],[5,5],[6,6],[3,3]],
+            ],
+            enemy:[
+                [[0,0],[1,1],[5,5],[4,4]],
+                [[0,0],[5,5],[1,1],[3,3]],
+                [[0,0],[3,3],[1,1],[5,5]],
+                [[5,5],[4,4],[0,0],[1,1]],
+                [[0,0],[1,1],[3,3],[5,5]],
+                [[3,3],[1,1],[0,0],[5,5]],
+                [[0,0],[4,4],[1,1],[5,5]],
+                [[1,1],[0,0],[5,5],[3,3]],
+            ],
+            victory:[
+                [[0,0],[5,5],[3,3],[0,0]],
+                [[0,0],[3,3],[5,5],[0,0]],
+                [[0,0],[4,4],[5,5],[0,0]],
+                [[5,5],[3,3],[0,0],[5,5]],
+                [[0,0],[6,6],[5,5],[0,0]],
+                [[0,0],[2,2],[5,5],[0,0]],
+                [[3,3],[5,5],[0,0],[3,3]],
+                [[0,0],[5,5],[6,6],[0,0]],
+            ],
+        };
+        this.progIdx=0;
+        this.prog=this.progressions.menu[0];
+
+        // ── MOTIF MEMORY for melody coherence ──
+        this.motif=[];
+        this.motifLength=0;
+        this.motifTimer=0;
+
+        // ── RHYTHM PATTERNS ──
+        this.rhythmPatterns=[
+            [1,0,1,0, 1,0,1,0, 1,0,1,0, 1,0,1,0],
+            [1,0,0,1, 0,0,1,0, 1,0,0,1, 0,1,0,0],
+            [1,0,1,0, 0,1,0,1, 1,0,0,1, 0,1,0,0],
+            [1,1,0,0, 1,0,0,1, 1,1,0,0, 1,0,1,0],
+            [1,0,0,1, 1,0,0,1, 1,0,0,1, 1,0,0,1],
+            [0,1,0,1, 0,1,0,1, 1,0,1,0, 0,1,0,1],
+        ];
+        this.currentRhythm=this.rhythmPatterns[0];
+
+        // ── SECTION TYPES ──
+        this.sectionTypes=['verse','verse','chorus','verse','bridge','chorus','outro','verse'];
+        this.currentSection='verse';
+    }
+
+    _ensureCtx(){
+        if(this._audioReady)return;
+        try{this.ctx=new(window.AudioContext||window.webkitAudioContext)();}catch(e){return;}
+        this._audioReady=true;
+        this.masterGain=this.ctx.createGain();
+        this.masterGain.gain.value=0.30;
+        this.reverb=this.ctx.createConvolver();
+        this._buildImpulse(2.4,3.0);
+        this.reverbSend=this.ctx.createGain();
+        this.reverbSend.gain.value=0.22;
+        this.dryGain=this.ctx.createGain();
+        this.dryGain.gain.value=0.78;
+        this.delay=this.ctx.createDelay(1.0);
+        this.delay.delayTime.value=60/this.tempo*0.75;
+        this.delayFb=this.ctx.createGain();
+        this.delayFb.gain.value=0.22;
+        this.delaySend=this.ctx.createGain();
+        this.delaySend.gain.value=0.10;
+        this.dryGain.connect(this.masterGain);
+        this.reverb.connect(this.reverbSend);
+        this.reverbSend.connect(this.masterGain);
+        this.delay.connect(this.delayFb);
+        this.delayFb.connect(this.delay);
+        this.delay.connect(this.delaySend);
+        this.delaySend.connect(this.masterGain);
+        this.masterGain.connect(this.ctx.destination);
+    }
+
+    _buildImpulse(decay,length){
+        var sr=this.ctx.sampleRate,len=sr*length;
+        var buf=this.ctx.createBuffer(2,len,sr);
+        for(var ch=0;ch<2;ch++){var d=buf.getChannelData(ch);for(var i=0;i<len;i++)d[i]=(Math.random()*2-1)*Math.pow(1-i/len,decay);}
+        this.reverb.buffer=buf;
+    }
+
+    _midi(n){return 440*Math.pow(2,(n-69)/12);}
+
+    _scaleNote(degree,octave){
+        octave=octave||0;
+        var s=this.scale,idx=((degree%s.length)+s.length)%s.length;
+        var octShift=Math.floor(degree/s.length);
+        return this.rootNote+s[idx]+(octave+octShift)*12;
+    }
+
+    _playNote(midi,type,dur,vol,atk,dec,sus,rel,dest){
+        if(!this.ctx||!this._audioReady)return;
+        var now=this.ctx.currentTime;
+        var o1=this.ctx.createOscillator(),o2=this.ctx.createOscillator();
+        var g=this.ctx.createGain(),f=this.ctx.createBiquadFilter();
+        o1.type=type;o2.type=type;
+        o1.frequency.value=this._midi(midi);
+        o2.frequency.value=this._midi(midi);
+        o2.detune.value=(Math.random()-0.5)*14+5;
+        f.type='lowpass';
+        f.frequency.value=this.currentSection==='chorus'?2200:this.currentSection==='bridge'?800:1400;
+        f.Q.value=1.0+Math.random()*0.5;
+        var m=this.ctx.createGain();m.gain.value=0.5;
+        o1.connect(m);o2.connect(m);m.connect(f);f.connect(g);
+        g.connect(dest||this.dryGain);g.connect(this.reverb);g.connect(this.delay);
+        g.gain.setValueAtTime(0,now);
+        g.gain.linearRampToValueAtTime(vol,now+atk);
+        g.gain.linearRampToValueAtTime(vol*sus,now+atk+dec);
+        g.gain.setValueAtTime(vol*sus,now+Math.max(0,dur-rel));
+        g.gain.linearRampToValueAtTime(0,now+dur);
+        o1.start(now);o1.stop(now+dur+0.05);
+        o2.start(now);o2.stop(now+dur+0.05);
+        var ms=(dur+0.2)*1000;
+        setTimeout(function(){try{o1.disconnect();o2.disconnect();m.disconnect();g.disconnect();f.disconnect();}catch(e){}},ms);
+    }
+
+    _playBass(midi,dur){
+        if(!this.ctx)return;
+        var now=this.ctx.currentTime;
+        var o=this.ctx.createOscillator(),sub=this.ctx.createOscillator();
+        var g=this.ctx.createGain(),f=this.ctx.createBiquadFilter();
+        o.type='sawtooth';sub.type='sine';
+        o.frequency.value=this._midi(midi);sub.frequency.value=this._midi(midi-12);
+        f.type='lowpass';f.frequency.value=280;f.Q.value=2.5;
+        var m=this.ctx.createGain();m.gain.value=0.5;
+        o.connect(m);sub.connect(m);m.connect(f);f.connect(g);g.connect(this.dryGain);
+        g.gain.setValueAtTime(0,now);
+        g.gain.linearRampToValueAtTime(0.15,now+0.02);
+        g.gain.exponentialRampToValueAtTime(0.01,now+dur);
+        o.start(now);o.stop(now+dur+0.05);sub.start(now);sub.stop(now+dur+0.05);
+        setTimeout(function(){try{o.disconnect();sub.disconnect();m.disconnect();g.disconnect();f.disconnect();}catch(e){}},
+        (dur+0.2)*1000);
+    }
+
+    _playPerc(vol,type){
+        if(!this.ctx)return;
+        var now=this.ctx.currentTime,dur=type==='kick'?0.12:0.04;
+        var buf=this.ctx.createBuffer(1,this.ctx.sampleRate*dur,this.ctx.sampleRate);
+        var d=buf.getChannelData(0);
+        for(var i=0;i<d.length;i++)d[i]=(Math.random()*2-1)*Math.pow(1-i/d.length,type==='kick'?3:9);
+        var s=this.ctx.createBufferSource(),g=this.ctx.createGain(),f=this.ctx.createBiquadFilter();
+        s.buffer=buf;f.type=type==='kick'?'lowpass':'highpass';
+        f.frequency.value=type==='kick'?220:5500;
+        s.connect(f);f.connect(g);g.connect(this.dryGain);
+        g.gain.setValueAtTime(vol,now);g.gain.exponentialRampToValueAtTime(0.001,now+dur);
+        s.start(now);s.stop(now+dur+0.01);
+        setTimeout(function(){try{s.disconnect();g.disconnect();f.disconnect();}catch(e){}},200);
+    }
+
+    setIntensity(level){
+        if(this.intensity===level)return;
+        this.intensity=level;
+        var moodScales={menu:'pentatonic',player:'dorian',enemy:'harmMinor',victory:'lydian'};
+        var moodTempos={menu:72,player:92,enemy:78,victory:112};
+        this.scale=this.scales[moodScales[level]||'dorian'];
+        this.tempo=moodTempos[level]||88;
+        if(this.delay)this.delay.delayTime.value=60/this.tempo*0.75;
+        this._pickNewProgression();
+    }
+
+    _pickNewProgression(){
+        var pool=this.progressions[this.intensity]||this.progressions.menu;
+        var idx=~~(Math.random()*pool.length);
+        while(idx===this.progIdx&&pool.length>1)idx=~~(Math.random()*pool.length);
+        this.progIdx=idx;this.prog=pool[idx];
+    }
+
+    _modulateKey(){
+        // Shift root note by a musical interval for variety
+        var intervals=[0,2,5,7,-5,-3];
+        var shift=intervals[~~(Math.random()*intervals.length)];
+        this.rootNote=((this.rootNote-38+shift)%12)+44;
+        // Occasionally change scale too
+        if(Math.random()<0.3){
+            var moodScales={menu:['pentatonic','lydian','dorian'],player:['dorian','mixolydian','aeolian'],
+                enemy:['harmMinor','phrygian','aeolian'],victory:['lydian','pentatonic','mixolydian']};
+            var pool=moodScales[this.intensity]||['dorian'];
+            this.scale=this.scales[pool[~~(Math.random()*pool.length)]];
+        }
+    }
+
+    _generateMotif(){
+        var len=3+~~(Math.random()*4);
+        this.motif=[];
+        for(var i=0;i<len;i++){
+            this.motif.push({
+                degree:~~(Math.random()*7),
+                dur:Math.random()>0.6?0.6:0.3,
+                rest:Math.random()<0.2
+            });
+        }
+        this.motifLength=len;
+        this.motifTimer=0;
+    }
+
+    _advanceSection(){
+        this.sectionCount++;
+        var idx=this.sectionCount%this.sectionTypes.length;
+        this.currentSection=this.sectionTypes[idx];
+        this._pickNewProgression();
+        this.currentRhythm=this.rhythmPatterns[~~(Math.random()*this.rhythmPatterns.length)];
+        if(this.sectionCount%3===0)this._modulateKey();
+        if(this.sectionCount%2===0)this._generateMotif();
+    }
+
+    start(){
+        if(this.isPlaying)return;
+        this._ensureCtx();if(!this.ctx)return;
+        try{this.ctx.resume();}catch(e){}
+        this.isPlaying=true;this.nextNoteTime=this.ctx.currentTime+0.1;
+        this.beat=0;this.barCount=0;this.sectionCount=0;
+        this._generateMotif();this._scheduler();
+    }
+
+    stop(){this.isPlaying=false;if(this._schedId){clearTimeout(this._schedId);this._schedId=null;}}
+
+    _scheduler(){
+        if(!this.isPlaying)return;
+        while(this.nextNoteTime<this.ctx.currentTime+0.12){
+            this._playBeat();
+            this.nextNoteTime+=(60/this.tempo)/2;
+            this.beat++;
+        }
+        this._schedId=setTimeout(()=>this._scheduler(),20);
+    }
+
+    _playBeat(){
+        var localBeat=this.beat%16;
+
+        // ── SECTION CHANGE every 64 beats (4 bars) ──
+        if(this.beat>0&&this.beat%64===0)this._advanceSection();
+
+        // ── CHORD CHANGE every 16 beats ──
+        if(localBeat===0){
+            this.chordStep=(this.chordStep+1)%this.prog.length;
+            this.barCount++;
+            if(this.chordStep===0&&Math.random()>0.35)this._pickNewProgression();
+        }
+
+        var chord=this.prog[this.chordStep];
+        var root=chord[0];
+        var I=this.intensity;
+        var sec=this.currentSection;
+        var rhythmHit=this.currentRhythm[localBeat]===1;
+
+        if(localBeat===0){
+            var padDur=(60/this.tempo)*(sec==='chorus'?10:sec==='bridge'?14:8);
+            var padVol=I==='menu'?0.065:sec==='chorus'?0.055:0.045;
+            this._playNote(this._scaleNote(root,-1),'sine',padDur,padVol,2.0,0.5,0.7,2.5);
+            this._playNote(this._scaleNote(root+2,0),'sine',padDur,padVol*0.7,2.5,0.5,0.6,2.5);
+            this._playNote(this._scaleNote(root+4,0),'sine',padDur,padVol*0.6,3.0,0.5,0.5,2.5);
+            // Add 7th chord tone in chorus sections
+            if(sec==='chorus')
+                this._playNote(this._scaleNote(root+6,0),'sine',padDur,padVol*0.4,3.0,0.5,0.4,2.5);
+        }
+
+        if(I!=='menu'){
+            if(localBeat===0){
+                var bassDur=(60/this.tempo)*(sec==='chorus'?1.8:1.4);
+                this._playBass(this._scaleNote(root,-2),bassDur);
+            }
+            if(localBeat===8&&sec!=='bridge'){
+                this._playBass(this._scaleNote(root+4,-2),(60/this.tempo)*0.8);
+            }
+            if(localBeat===12&&sec==='chorus'){
+                this._playBass(this._scaleNote(root+2,-2),(60/this.tempo)*0.6);
+            }
+        }else if(localBeat===0&&Math.random()<0.6){
+            this._playBass(this._scaleNote(root,-2),(60/this.tempo)*2);
+        }
+
+        if(localBeat%2===0){
+            var arpPool=sec==='chorus'?[0,2,4,5,7,9]:[0,2,4,7];
+            var arpDeg=arpPool[this.beat%arpPool.length]+root;
+            var arpOct=(localBeat<8)?0:1;
+            var arpVol=I==='menu'?0.09:sec==='chorus'?0.13:sec==='bridge'?0.06:0.10;
+            if(sec!=='bridge'||localBeat%4===0)
+                this._playNote(this._scaleNote(arpDeg,arpOct),'triangle',0.22,arpVol,0.01,0.04,0.4,0.25);
+        }
+
+        if(I!=='menu'&&sec!=='bridge'){
+            var melBeat=localBeat%4;
+            if(melBeat===0&&this.motif.length>0){
+                var mi=this.motifTimer%this.motif.length;
+                var note=this.motif[mi];
+                this.motifTimer++;
+                if(!note.rest){
+                    var melDeg=note.degree+root;
+                    var melOct=sec==='chorus'?1:0;
+                    // Occasionally embellish
+                    if(Math.random()<0.2)melDeg+=Math.random()>0.5?1:-1;
+                    this._playNote(this._scaleNote(melDeg,melOct),'triangle',note.dur,0.16,0.02,0.06,0.35,0.35);
+                }
+            }
+            // Secondary melody in chorus
+            if(sec==='chorus'&&localBeat===8&&Math.random()>0.4){
+                var secMel=[2,4,5,7][~~(Math.random()*4)]+root;
+                this._playNote(this._scaleNote(secMel,1),'sine',0.4,0.09,0.03,0.08,0.3,0.4);
+            }
+        }
+
+        if(localBeat===3&&Math.random()>0.65){
+            var bellDeg=[4,7,9][~~(Math.random()*3)]+root;
+            this._playNote(this._scaleNote(bellDeg,2),'sine',0.55,0.055,0.01,0.08,0.25,0.45);
+        }
+        if(sec==='bridge'&&localBeat===11&&Math.random()>0.5){
+            var bDeg=[0,3,5][~~(Math.random()*3)]+root;
+            this._playNote(this._scaleNote(bDeg,2),'sine',0.8,0.04,0.02,0.1,0.3,0.6);
+        }
+
+        if(I==='player'||I==='enemy'){
+            if(localBeat===0||localBeat===8)this._playPerc(0.04,'kick');
+            if(localBeat===4||localBeat===12)this._playPerc(0.035,'hat');
+            if(rhythmHit&&localBeat%2===1)this._playPerc(0.02,'hat');
+            // Fill at end of section
+            if(this.beat%64>56&&localBeat%2===0)this._playPerc(0.025,'hat');
+        }
+        if(I==='menu'&&localBeat===0&&Math.random()<0.5)this._playPerc(0.012,'hat');
+        if(I==='victory'){
+            if(localBeat%2===0)this._playPerc(0.03,'kick');
+            if(localBeat%4===2)this._playPerc(0.03,'hat');
+        }
+
+        if((sec==='bridge'||I==='menu')&&localBeat===0&&this.barCount%2===0){
+            var texDeg=root+(Math.random()>0.5?4:7);
+            this._playNote(this._scaleNote(texDeg,1),'sine',(60/this.tempo)*6,0.03,3.0,0.5,0.4,3.0);
+        }
+    }
+}
+
+// ── REPLACE GLOBAL BGM ──
+_wasPlaying=typeof bgm!=='undefined'&&bgm&&bgm.isPlaying;
+var _oldIntensity=(typeof bgm!=='undefined'&&bgm)?bgm.intensity:'menu';
+if(_wasPlaying&&bgm.stop)bgm.stop();
+window.bgm=new MaestroV4();
+bgm.intensity=_oldIntensity||'menu';
+if(_wasPlaying&&typeof S!=='undefined'&&S.soundOn)bgm.start();
+
+// Re-hook visibility handler
+document.addEventListener('visibilitychange',function(){
+    if(!bgm)return;
+    if(document.hidden){
+        if(bgm.isPlaying&&bgm._schedId){clearTimeout(bgm._schedId);bgm._schedId=null;bgm._pausedByVisibility=true;}
+    }else{
+        if(bgm._pausedByVisibility&&bgm.isPlaying){bgm._pausedByVisibility=false;bgm.nextNoteTime=bgm.ctx?bgm.ctx.currentTime+0.1:0;bgm._scheduler();}
+    }
+});
+
+'use strict';
+
+// ── 1. REBUILD HQ TAB BUTTONS ──
+function rebuildHQTabs(){
+    var hqTabs=document.getElementById('hqTabs');
+    if(!hqTabs)return;
+    hqTabs.innerHTML='';
+    var tabs=[
+        {id:'glossary',label:'GLOSSARY'},
+        {id:'achievements',label:'MEDALS'},
+        {id:'multiplayer',label:'MULTI'},
+        {id:'compendium',label:'COMPENDIUM'},
+        {id:'profile',label:'PROFILE'},
+    ];
+    tabs.forEach(function(t,i){
+        var btn=document.createElement('button');
+        btn.className='stab'+(i===0?' active':'');
+        btn.textContent=t.label;
+        btn.onclick=function(){setHQTab(t.id);};
+        hqTabs.appendChild(btn);
+    });
+}
+
+// ── 2. HIDE OLD TOKENS TAB, CREATE GLOSSARY TAB ──
+function restructureHQBody(){
+    var hqBody=document.getElementById('hqBody');
+    if(!hqBody)return;
+
+    // Hide the old tokens tab
+    var tokensTab=document.getElementById('hqTab_tokens');
+    if(tokensTab){tokensTab.style.display='none';tokensTab.classList.remove('active');}
+
+    // Check if glossary tab already exists
+    if(document.getElementById('hqTab_glossary'))return;
+
+    // Create the Glossary tab
+    var glossaryTab=document.createElement('div');
+    glossaryTab.className='hq-tab active';
+    glossaryTab.id='hqTab_glossary';
+    glossaryTab.innerHTML='<div class="hq-scroll" id="glossaryScroll"></div>';
+    hqBody.insertBefore(glossaryTab,hqBody.firstChild);
+}
+
+// ── 3. RENDER GLOSSARY CONTENT ──
+function renderGlossaryTabContent(){
+    var el=document.getElementById('glossaryScroll');
+    if(!el)return;
+    el.innerHTML='\
+    <div class="settings-section">\
+    <h2 style="color:var(--t0)">GAME GLOSSARY</h2>\
+    <p style="font-size:.6rem;color:var(--text2);margin-bottom:10px">All unique terms used in Apex Tier 0:</p>\
+    <div style="display:flex;flex-direction:column;gap:6px;font-size:.65rem">\
+        <div style="padding:6px 8px;background:var(--panel2);border-radius:6px;border-left:3px solid var(--gold)">\
+            <strong style="color:var(--gold)">Flux (FX)</strong> — <span style="color:var(--text2)">Primary currency. Earned from battles, quests, login. Spent to summon heroes.</span>\
+        </div>\
+        <div style="padding:6px 8px;background:var(--panel2);border-radius:6px;border-left:3px solid #7c4dff">\
+            <strong style="color:#7c4dff">Prisms (PR)</strong> — <span style="color:var(--text2)">Power-up shards from duplicate heroes past max merge.</span>\
+        </div>\
+        <div style="padding:6px 8px;background:var(--panel2);border-radius:6px;border-left:3px solid #ff6b35">\
+            <strong style="color:#ff6b35">Zenith Marks (ZM)</strong> — <span style="color:var(--text2)">Premium tokens from filling the Zenith Meter. Spend to guarantee a duplicate.</span>\
+        </div>\
+        <div style="padding:6px 8px;background:var(--panel2);border-radius:6px;border-left:3px solid var(--t0)">\
+            <strong style="color:var(--t0)">Tier 0 (T0)</strong> — <span style="color:var(--text2)">Highest hero grade. Rainbow border, best stats, cinematic summon.</span>\
+        </div>\
+        <div style="padding:6px 8px;background:var(--panel2);border-radius:6px;border-left:3px solid var(--green)">\
+            <strong style="color:var(--green)">Awakening</strong> — <span style="color:var(--text2)">Reset Lv.40 hero to Lv.1, gaining +3 to all base stats permanently.</span>\
+        </div>\
+        <div style="padding:6px 8px;background:var(--panel2);border-radius:6px;border-left:3px solid #ef4444">\
+            <strong style="color:#ef4444">Weapon Triangle</strong> — <span style="color:var(--text2)">Sword > Axe > Lance > Sword. Light > Dark > Anima > Light. +/-20% ATK.</span>\
+        </div>\
+        <div style="padding:6px 8px;background:var(--panel2);border-radius:6px;border-left:3px solid #3b82f6">\
+            <strong style="color:#3b82f6">Boon / Bane</strong> — <span style="color:var(--text2)">Each hero has a random +3 stat (Boon) and -3 stat (Bane) at summon.</span>\
+        </div>\
+        <div style="padding:6px 8px;background:var(--panel2);border-radius:6px;border-left:3px solid var(--text)">\
+            <strong style="color:var(--text)">SP (Skill Points)</strong> — <span style="color:var(--text2)">Earned from battles. Spent to learn new skills via Skill Inheritance.</span>\
+        </div>\
+        <div style="padding:6px 8px;background:var(--panel2);border-radius:6px;border-left:3px solid var(--text)">\
+            <strong style="color:var(--text)">ELO</strong> — <span style="color:var(--text2)">Battle rating. Higher = tougher opponents = better rewards.</span>\
+        </div>\
+        <div style="padding:6px 8px;background:var(--panel2);border-radius:6px;border-left:3px solid var(--text)">\
+            <strong style="color:var(--text)">Synergy</strong> — <span style="color:var(--text2)">Faction/Class bonuses when 2+ team units share the same type.</span>\
+        </div>\
+        <div style="padding:6px 8px;background:var(--panel2);border-radius:6px;border-left:3px solid var(--text)">\
+            <strong style="color:var(--text)">Merge (+)</strong> — <span style="color:var(--text2)">Pulling duplicates increases + level (max +10), boosting stats.</span>\
+        </div>\
+        <div style="padding:6px 8px;background:var(--panel2);border-radius:6px;border-left:3px solid var(--text)">\
+            <strong style="color:var(--text)">Danger Zone</strong> — <span style="color:var(--text2)">Toggle to preview all enemy attack ranges on the map.</span>\
+        </div>\
+        <div style="padding:6px 8px;background:var(--panel2);border-radius:6px;border-left:3px solid var(--text)">\
+            <strong style="color:var(--text)">Combat Forecast</strong> — <span style="color:var(--text2)">Shows predicted damage before committing to an attack.</span>\
+        </div>\
+        <div style="padding:6px 8px;background:var(--panel2);border-radius:6px;border-left:3px solid var(--text)">\
+            <strong style="color:var(--text)">Banner</strong> — <span style="color:var(--text2)">A curated summoning pool. Featured banners are exclusive.</span>\
+        </div>\
+        <div style="padding:6px 8px;background:var(--panel2);border-radius:6px;border-left:3px solid var(--text)">\
+            <strong style="color:var(--text)">Session Summon</strong> — <span style="color:var(--text2)">Reveals 5 colored orbs. Pick orbs individually to summon matching weapon heroes.</span>\
+        </div>\
+        <div style="padding:6px 8px;background:var(--panel2);border-radius:6px;border-left:3px solid var(--text)">\
+            <strong style="color:var(--text)">Prestige</strong> — <span style="color:var(--text2)">Awakening counter. Each prestige permanently buffs base stats.</span>\
+        </div>\
+        <div style="padding:6px 8px;background:var(--panel2);border-radius:6px;border-left:3px solid var(--text)">\
+            <strong style="color:var(--text)">Fusion Child</strong> — <span style="color:var(--text2)">A new unit born from two bonded Daycare units. Inherits all skills from both parents.</span>\
+        </div>\
+        <div style="padding:6px 8px;background:var(--panel2);border-radius:6px;border-left:3px solid var(--text)">\
+            <strong style="color:var(--text)">Class Change</strong> — <span style="color:var(--text2)">Reclass a hero to change their weapon and movement type for 100 Flux.</span>\
+        </div>\
+    </div>\
+    </div>';
+}
+
+// ── 4. OVERRIDE setHQTab ──
+function setHQTab(tab){
+    // Never allow 'tokens' tab
+    if(tab==='tokens')tab='glossary';
+
+    // Hide all HQ tabs
+    document.querySelectorAll('.hq-tab').forEach(function(t){t.classList.remove('active');});
+
+    // Show the requested tab
+    var el=document.getElementById('hqTab_'+tab);
+    if(el){el.classList.add('active');el.style.display='flex';}
+
+    // Update tab buttons
+    var tabs=document.querySelectorAll('#hqTabs .stab');
+    var tabOrder=['glossary','achievements','multiplayer','compendium','profile'];
+    tabs.forEach(function(b,i){
+        b.classList.toggle('active',tabOrder[i]===tab);
+    });
+
+    // Render tab-specific content
+    if(tab==='glossary')renderGlossaryTabContent();
+    if(tab==='compendium'&&typeof renderCompendium==='function')renderCompendium();
+    if(tab==='achievements'&&typeof renderAchievements==='function')renderAchievements();
+    if(tab==='profile'&&typeof renderTitles==='function')renderTitles();
+};
+
+// ── 5. OVERRIDE refreshTavern ──
+function refreshTavern(){
+    rebuildHQTabs();
+    restructureHQBody();
+    // Don't call updateTokenUI — the tokens tab is gone
+    if(typeof renderAchievements==='function')renderAchievements();
+    if(typeof checkAchievements==='function')checkAchievements();
+    renderGlossaryTabContent();
+};
+
+// ── 6. PREVENT renderGlossary from appending to compendium ──
+// ── 7. OVERRIDE renameTermsInUI to not touch removed tabs ──
+// ── Initial setup if already on tavern screen ──
+if(document.getElementById('tavern')&&document.getElementById('tavern').classList.contains('active')){
+    rebuildHQTabs();restructureHQBody();renderGlossaryTabContent();
+}
