@@ -1519,7 +1519,7 @@ html,body{
    ============================================================ */
 
 // ═══ ZZFX MINI SYNTH ═══════════════════════════════════════
-const zzfx=(...p)=>{if(!S.soundOn)return;try{const a=zzfxCtx||(zzfxCtx=new(window.AudioContext||window.webkitAudioContext)),b=a.createBufferSource(),c=a.createBuffer(1,~~(a.sampleRate*.5),a.sampleRate),d=c.getChannelData(0);zzfxG(...p).forEach((v,i)=>d[i]=v);b.buffer=c;b.connect(a.destination);b.start();}catch(e){}};
+const zzfx=(...p)=>{if(!S.soundOn)return;try{const a=zzfxCtx||(zzfxCtx=new(window.AudioContext||window.webkitAudioContext));if(a.state==='suspended')a.resume();const b=a.createBufferSource(),c=a.createBuffer(1,~~(a.sampleRate*.5),a.sampleRate),d=c.getChannelData(0);zzfxG(...p).forEach((v,i)=>d[i]=v);b.buffer=c;b.connect(a.destination);b.onended=()=>{try{b.disconnect();}catch(e){}b.buffer=null;};b.start();}catch(e){}};
 let zzfxCtx;
 const zzfxG=(vol=1,freq=220,attack=0,sustain=0,release=.1,shape=0,shapeCurve=1,slide=0,noise=0)=>{
 const sR=44100,len=~~(sR*(attack+sustain+release)),out=new Float32Array(len);
@@ -3041,7 +3041,11 @@ if(typeof initWallHp==='function')initWallHp();
 if(typeof applyTeamSynergies==='function'){applyTeamSynergies(B.pUnits);applyTeamSynergies(B.eUnits);} // Bug #13: apply synergies to enemies too
 
 B.canvas=document.getElementById('battleCanvas');B.ctx=B.canvas.getContext('2d');
-resizeCanvas();window.onresize=resizeCanvas;
+resizeCanvas();
+if(!window._resizeListenerAdded){
+window.addEventListener('resize',function(){if(typeof B!=='undefined'&&B.canvas&&B.ctx){try{window.resizeCanvas();}catch(e){}}});
+window._resizeListenerAdded=true;
+}
 await preloadImgs();
 B.canvas.onclick=battleClick;B.canvas.onmousemove=battleHover;
 B.canvas.onmouseleave=()=>{B.hover={x:-1,y:-1};hideFC();drawMap();};
@@ -3094,6 +3098,8 @@ drawMap();
 }
 
 async function preloadImgs(){
+// Evict oldest cache entries to prevent unbounded growth (cap=100)
+if(B.unitImgs){const keys=Object.keys(B.unitImgs);if(keys.length>100){for(let i=0;i<keys.length-80;i++)delete B.unitImgs[keys[i]];}}
 // Bug #63: Add timeout race to prevent infinite hang on broken images
 await Promise.all(B.allUnits.map(u=>new Promise(r=>{
 if(!u.src){r();return;}
@@ -3106,8 +3112,8 @@ img.src=u.src;
 })));
 }
 
-// ═══ MAP DRAWING ════════════════════════════════════════════
-function drawMap(){
+// ═══ MAP DRAWING (basic fallback) ═══════════════════════════
+function drawMapBasic(){
 const ctx=B.ctx,w=B.mapW,h=B.mapH;
 ctx.clearRect(0,0,B.canvas.width,B.canvas.height);
 
@@ -3990,6 +3996,8 @@ function hitPause(cb){setTimeout(cb,spd(100));}
 
 if(!B.floatingTexts)B.floatingTexts=[];
 function floatTxt(x,y,text,color='#fbbf24',isCrit=false){
+// Cap floating text array to prevent unbounded growth in long auto-battles
+if(B.floatingTexts&&B.floatingTexts.length>=40){B.floatingTexts.splice(0,B.floatingTexts.length-35);}
 const px=x*CS+CS/2,py=y*CS+CS/2;
 const sz=isCrit?CS*.38:CS*.22;
 const speed=isCrit?2.5:1.5;
@@ -4023,6 +4031,8 @@ function fireProjectile(a,d){
 if(!B.ctx||!a||!d)return;
 const ranged=['Bow','LightMag','DarkMag','AnimaMag'];
 if(!ranged.includes(a.weapon))return;
+// Cap projectile array to prevent unbounded growth
+if(B.projectiles&&B.projectiles.length>=20){B.projectiles.splice(0,B.projectiles.length-15);}
 const colMap={Bow:'#fbbf24',LightMag:'#f0fdf4',DarkMag:'#a855f7',AnimaMag:'#3b82f6'};
 const col=colMap[a.weapon]||'#fbbf24';
 const x0=a.x*CS+CS/2,y0=a.y*CS+CS/2,x1=d.x*CS+CS/2,y1=d.y*CS+CS/2;
@@ -4469,6 +4479,8 @@ function _onBattleEnd(prevPhase,isVictory){
 const pe=B.pUnits.filter(u=>u.hp>0).length;
 // BGM intensity
 if(bgm&&bgm.setIntensity)bgm.setIntensity(isVictory?'victory':'menu');
+// Clean up canvas hover handler to stop forecast calculations
+if(B.canvas)B.canvas.onmousemove=null;
 // Only on phase transition
 if(prevPhase==='over'||B.phase!=='over')return;
 if(isVictory){
@@ -6771,13 +6783,16 @@ ctx.fillText('★'.repeat(Math.min(u.prestige,3)),px+CS/2,py+1);
 }
 }
 
-// [CONSOLIDATED] Override drawMap with enhanced version + RAF loop + auto-battle trigger
+// drawMap: enhanced version with RAF loop + auto-battle trigger + mutex (integrated)
 let _mapAnimRAF=0;
 let _autoCheckPending=false;
-const _origDrawMap=window.drawMap;
-window.drawMap=function(){
+let _drawMapMutex=false;
+function drawMap(){
 if(!B.ctx)return;
-try{drawMapEnhanced();}catch(e){_origDrawMap();}
+// Prevent duplicate RAF chains from rapid calls
+if(_drawMapMutex){try{drawMapEnhanced();}catch(e){drawMapBasic();}return;}
+_drawMapMutex=true;
+try{drawMapEnhanced();}catch(e){drawMapBasic();}
 // Auto-start animation loop while battle is active so water/lava keep animating
 if(B.phase&&B.phase!=='over'&&!_mapAnimRAF){
 _mapAnimRAF=requestAnimationFrame(function _animLoop(){
@@ -6787,7 +6802,7 @@ _mapAnimRAF=requestAnimationFrame(_animLoop);
 }else{_mapAnimRAF=0;}
 });
 }
-// Auto-battle trigger (from auto-battle patch)
+// Auto-battle trigger
 if(B.autoPlay&&B.phase==='player'&&!_autoCheckPending){
 const hasUnacted=B.pUnits.some(u=>u.hp>0&&!u.acted);
 if(hasUnacted){
@@ -6795,7 +6810,9 @@ _autoCheckPending=true;
 setTimeout(()=>{_autoCheckPending=false;if(B.autoPlay&&B.phase==='player')runAutoPlayer();},spd(CFG.AI_DELAY*0.5));
 }
 }
-};
+// Release mutex on next microtask to allow RAF callback to proceed
+Promise.resolve().then(function(){_drawMapMutex=false;});
+}
 
 // ═══ IV SYSTEM (BOONS / BANES) ═══════════════════════════════
 function applyIVs(unit){
@@ -12454,6 +12471,14 @@ window.confirm = function(msg) {
     // Show the in-game modal
     _currentResolve = function(result) {
         if (result) {
+            // Detect reset/delete dialogs and clear storage if confirmed
+            var msgLow = (msg || '').toLowerCase();
+            if (msgLow.indexOf('reset') !== -1 || msgLow.indexOf('delete') !== -1 ||
+                msgLow.indexOf('erase') !== -1 || msgLow.indexOf('wipe') !== -1 ||
+                msgLow.indexOf('clear all') !== -1) {
+                try { localStorage.clear(); } catch(ex) {}
+                try { sessionStorage.clear(); } catch(ex) {}
+            }
             // User clicked OK — set bypass and re-trigger
             _confirmBypass = true;
             if (triggerEl) {
@@ -12671,29 +12696,7 @@ for (var gi = 0; gi < _gameObjs.length; gi++) {
     }
 }
 
-// 2c. Intercept localStorage.setItem to detect save operations,
-//     so we know the game uses localStorage at all (diagnostic only)
-var _origSetItem = localStorage.setItem.bind(localStorage);
-localStorage.setItem = function(key, value) {
-    return _origSetItem(key, value);
-};
-
-// 2d. Wrap confirm() to detect "are you sure" reset dialogs
-//     and ensure localStorage is cleared if the user confirms
-var _origConfirm = window.confirm;
-window.confirm = function(msg) {
-    var result = _origConfirm.call(window, msg);
-    if (result) {
-        var msgLow = (msg || '').toLowerCase();
-        if (msgLow.indexOf('reset') !== -1 || msgLow.indexOf('delete') !== -1 ||
-            msgLow.indexOf('erase') !== -1 || msgLow.indexOf('wipe') !== -1 ||
-            msgLow.indexOf('clear all') !== -1) {
-            try { localStorage.clear(); } catch(ex) {}
-            try { sessionStorage.clear(); } catch(ex) {}
-        }
-    }
-    return result;
-};
+// Reset-detection for confirm() is now integrated into the main confirm override above.
 
 console.log('[UI Tweaks] Patches active: Reset clears localStorage');
 })();
@@ -12704,93 +12707,8 @@ console.log('[UI Tweaks] Patches active: Reset clears localStorage');
 (function _memoryLeakFixes() {
 'use strict';
 
-// ═══ 1. AUDIO NODE LIMITER ══════════════════════════════════
-// Problem: MaestroV3 creates 4-8 audio nodes per beat at ~90 BPM
-//          = ~360-720 nodes/min. setTimeout cleanup is unreliable
-//          when the tab is backgrounded (browsers throttle timers).
-// Fix:    Track active audio nodes globally; refuse to create new
-//         ones past a cap; use a single cleanup sweep on each beat.
-
-(function fixAudioLeaks() {
-    if (typeof bgm === 'undefined' || !bgm) return;
-
-    var AUDIO_NODE_CAP = 80;  // max simultaneous audio nodes
-    var _activeNodes = [];
-
-    // Sweep dead nodes from the tracking array
-    function sweepNodes() {
-        var now = Date.now();
-        _activeNodes = _activeNodes.filter(function(entry) {
-            if (now > entry.expiry) {
-                // Force-disconnect even if setTimeout missed
-                try { entry.nodes.forEach(function(n) { n.disconnect(); }); } catch(e) {}
-                return false;
-            }
-            return true;
-        });
-    }
-
-    // Wrap _playNote to track and cap nodes
-    if (bgm._playNote) {
-        var _origPlayNote = bgm._playNote.bind(bgm);
-        bgm._playNote = function(midi, type, duration, vol, attack, decay, sustain, release, dest) {
-            sweepNodes();
-            if (_activeNodes.length >= AUDIO_NODE_CAP) return; // skip note
-            _origPlayNote(midi, type, duration, vol, attack, decay, sustain, release, dest);
-        };
-    }
-
-    // Wrap _playBass
-    if (bgm._playBass) {
-        var _origPlayBass = bgm._playBass.bind(bgm);
-        bgm._playBass = function(midi, duration) {
-            sweepNodes();
-            if (_activeNodes.length >= AUDIO_NODE_CAP) return;
-            _origPlayBass(midi, duration);
-        };
-    }
-
-    // Wrap _playPerc
-    if (bgm._playPerc) {
-        var _origPlayPerc = bgm._playPerc.bind(bgm);
-        bgm._playPerc = function(vol, type) {
-            sweepNodes();
-            if (_activeNodes.length >= AUDIO_NODE_CAP) return;
-            _origPlayPerc(vol, type);
-        };
-    }
-
-    // Intercept createOscillator to automatically track every node
-    if (bgm.ctx) {
-        var _origCreateOsc = bgm.ctx.createOscillator.bind(bgm.ctx);
-        bgm.ctx.createOscillator = function() {
-            var osc = _origCreateOsc();
-            // Record the node with a generous expiry
-            _activeNodes.push({ nodes: [osc], expiry: Date.now() + 12000 });
-            return osc;
-        };
-    }
-
-    // Pause music when tab is hidden to stop node creation entirely
-    document.addEventListener('visibilitychange', function() {
-        if (!bgm) return;
-        if (document.hidden) {
-            if (bgm.isPlaying && bgm._schedId) {
-                clearTimeout(bgm._schedId);
-                bgm._schedId = null;
-                bgm._pausedByVisibility = true;
-            }
-        } else {
-            if (bgm._pausedByVisibility && bgm.isPlaying) {
-                bgm._pausedByVisibility = false;
-                bgm.nextNoteTime = bgm.ctx ? bgm.ctx.currentTime + 0.1 : 0;
-                if (typeof bgm._scheduler === 'function') bgm._scheduler();
-            }
-        }
-    });
-
-    console.log('%c  [MLF] Audio node limiter installed (cap=' + AUDIO_NODE_CAP + ')', 'color:#22c55e');
-})();
+// [REMOVED] Audio node limiter monkey patch — integrated directly into MaestroV4._playNote/Bass/Perc
+// Visibility-based pause/resume is handled by the listener after MaestroV4 initialization.
 
 
 // ═══ 2. ANIMATED IMAGE POOL CLEANUP ═════════════════════════
@@ -12841,120 +12759,17 @@ console.log('[UI Tweaks] Patches active: Reset clears localStorage');
 })();
 
 
-// ═══ 3. FLOATING TEXT & PROJECTILE ARRAY CAPS ═══════════════
-// Problem: B.floatingTexts and B.projectiles grow unbounded
-//          during long auto-battle sessions. Each entry holds
-//          references to colors, positions, etc.
-// Fix:    Hard cap both arrays; drop oldest entries when full.
-
-(function fixBattleArrays() {
-    var FT_CAP = 40;
-    var PROJ_CAP = 20;
-
-    if (typeof floatTxt === 'function') {
-        var _origFloatTxt = window.floatTxt;
-        window.floatTxt = function(x, y, text, color, isCrit) {
-            if (typeof B !== 'undefined' && B.floatingTexts && B.floatingTexts.length >= FT_CAP) {
-                B.floatingTexts.splice(0, B.floatingTexts.length - FT_CAP + 5);
-            }
-            return _origFloatTxt.apply(this, arguments);
-        };
-    }
-
-    if (typeof fireProjectile === 'function') {
-        var _origFireProjectile = window.fireProjectile;
-        window.fireProjectile = function(a, d) {
-            if (typeof B !== 'undefined' && B.projectiles && B.projectiles.length >= PROJ_CAP) {
-                B.projectiles.splice(0, B.projectiles.length - PROJ_CAP + 5);
-            }
-            return _origFireProjectile.apply(this, arguments);
-        };
-    }
-
-    console.log('%c  [MLF] FloatingText cap=' + FT_CAP + ', Projectile cap=' + PROJ_CAP, 'color:#22c55e');
-})();
+// [REMOVED] FloatTxt/fireProjectile caps — integrated directly into original functions.
 
 
-// ═══ 4. UNIT IMAGE CACHE LIMIT ══════════════════════════════
-// Problem: B.unitImgs is a plain object that grows every battle
-//          as new images are loaded. Keys are data: URLs (huge).
-// Fix:    Evict oldest entries when cache exceeds limit.
-
-(function fixUnitImgCache() {
-    var CACHE_CAP = 100;
-
-    if (typeof B !== 'undefined') {
-        var _origPreload = window.preloadImgs;
-        if (_origPreload) {
-            window.preloadImgs = function() {
-                // Evict before loading more
-                if (B.unitImgs) {
-                    var keys = Object.keys(B.unitImgs);
-                    if (keys.length > CACHE_CAP) {
-                        var excess = keys.length - CACHE_CAP + 20;
-                        for (var i = 0; i < excess; i++) {
-                            delete B.unitImgs[keys[i]];
-                        }
-                    }
-                }
-                return _origPreload.apply(this, arguments);
-            };
-        }
-    }
-
-    console.log('%c  [MLF] B.unitImgs cache capped at ' + CACHE_CAP, 'color:#22c55e');
-})();
+// [REMOVED] preloadImgs cache cap — integrated directly into original function.
 
 
 // [CONSOLIDATED] fixBackgroundRAF removed — home screen RAF loops (starfield, emblem, orb)
 // now properly stop when leaving home screen and restart on nav('home') via source-level fix.
 
 
-// ═══ 6. BATTLE EVENT LISTENER CLEANUP ═══════════════════════
-// Problem: startBattle() does B.canvas.onclick = battleClick
-//          and B.canvas.onmousemove = battleHover every time.
-//          The old handlers are replaced but the onmousemove
-//          assigned in animateMove's callback can stack.
-//          Also, window.onresize is reassigned each battle.
-// Fix:    Use a single persistent resize handler; clean canvas
-//         handlers properly before reassigning.
-
-(function fixEventListeners() {
-    // Replace window.onresize with addEventListener (once)
-    var _resizeHandler = null;
-
-    var _origResizeCanvas = window.resizeCanvas;
-    if (_origResizeCanvas) {
-        window.resizeCanvas = function() {
-            _origResizeCanvas.apply(this, arguments);
-        };
-
-        // Remove old onresize pattern, use listener
-        if (!window._resizeListenerAdded) {
-            window.addEventListener('resize', function() {
-                if (typeof B !== 'undefined' && B.canvas && B.ctx) {
-                    try { window.resizeCanvas(); } catch(e) {}
-                }
-            });
-            window._resizeListenerAdded = true;
-        }
-    }
-
-    // Clean up canvas handlers on battle end
-    var _origCheckBO = window.checkBattleOver;
-    if (_origCheckBO) {
-        window.checkBattleOver = function() {
-            var result = _origCheckBO.apply(this, arguments);
-            if (typeof B !== 'undefined' && B.phase === 'over' && B.canvas) {
-                // Remove hover handler to stop forecast calculations
-                B.canvas.onmousemove = null;
-            }
-            return result;
-        };
-    }
-
-    console.log('%c  [MLF] Event listener cleanup installed', 'color:#22c55e');
-})();
+// [REMOVED] resizeCanvas/checkBattleOver patches — integrated directly into original functions.
 
 
 // ═══ 7. TRANSITION LAYER DOM CLEANUP ════════════════════════
@@ -12982,34 +12797,7 @@ console.log('[UI Tweaks] Patches active: Reset clears localStorage');
 })();
 
 
-// ═══ 8. BATTLE LOG DOM NODE LIMIT ═══════════════════════════
-// Problem: bLog is patched to append a <span> for turn timestamps
-//          on every log entry. Over long auto-battles this creates
-//          thousands of DOM nodes. The trim to 60 children helps
-//          but each child now has a child <span>.
-// Fix:    Tighten the trim limit and ensure removed nodes are
-//         fully dereferenced.
-
-(function fixBattleLog() {
-    var LOG_CAP = 40; // tighter than original 60
-
-    var _origBLog = window.bLog;
-    if (!_origBLog) return;
-
-    window.bLog = function(msg, type) {
-        _origBLog.apply(this, arguments);
-        var log = document.getElementById('bLog');
-        if (!log) return;
-        while (log.children.length > LOG_CAP) {
-            var child = log.firstChild;
-            // Clear any child nodes to help GC
-            child.textContent = '';
-            log.removeChild(child);
-        }
-    };
-
-    console.log('%c  [MLF] Battle log DOM cap tightened to ' + LOG_CAP, 'color:#22c55e');
-})();
+// [REMOVED] bLog cap patch — already integrated into original bLog function.
 
 
 // ═══ 9. DAYCARE ANIMATION CLEANUP ═══════════════════════════
@@ -13073,88 +12861,16 @@ console.log('[UI Tweaks] Patches active: Reset clears localStorage');
 })();
 
 
-// ═══ 11. ZZFX CONTEXT LEAK PREVENTION ═══════════════════════
-// Problem: zzfx() creates a new AudioContext on first call and
-//          creates a new bufferSource + buffer for EVERY sound.
-//          The bufferSources are never explicitly disconnected.
-// Fix:    Disconnect bufferSource after playback ends.
-
-(function fixZzfx() {
-    var _origZzfx = window.zzfx;
-    if (!_origZzfx) return;
-
-    window.zzfx = function() {
-        if (typeof S === 'undefined' || !S.soundOn) return;
-        try {
-            var a = zzfxCtx || (zzfxCtx = new (window.AudioContext || window.webkitAudioContext));
-            if (a.state === 'suspended') a.resume();
-            var b = a.createBufferSource();
-            var c = a.createBuffer(1, ~~(a.sampleRate * 0.5), a.sampleRate);
-            var d = c.getChannelData(0);
-            zzfxG.apply(null, arguments).forEach(function(v, i) { d[i] = v; });
-            b.buffer = c;
-            b.connect(a.destination);
-            b.onended = function() {
-                try { b.disconnect(); } catch(e) {}
-                b.buffer = null;
-            };
-            b.start();
-        } catch(e) {}
-    };
-
-    console.log('%c  [MLF] zzfx buffer disconnect installed', 'color:#22c55e');
-})();
+// [REMOVED] zzfx buffer disconnect patch — integrated directly into original zzfx function.
 
 
-// ═══ 12. PREVENT DUPLICATE DRAWMAP RAF CHAINS ═══════════════
-// Problem: Multiple overrides of drawMap each check
-//          B.phase !== 'over' && !_mapAnimRAF and start their
-//          own RAF loop. If drawMap is called rapidly, multiple
-//          loops can coexist because _mapAnimRAF is set inside
-//          the RAF callback but checked outside it.
-// Fix:    Add a mutex flag so only one loop can start.
-
-(function fixDrawMapRAF() {
-    var _drawMapMutex = false;
-    var _wrappedDrawMap = window.drawMap;
-    if (!_wrappedDrawMap) return;
-
-    window.drawMap = function() {
-        if (_drawMapMutex) {
-            // Another call is in progress; just invoke the draw
-            // without starting a new RAF chain
-            try { _wrappedDrawMap.apply(this, arguments); } catch(e) {}
-            return;
-        }
-        _drawMapMutex = true;
-        try {
-            _wrappedDrawMap.apply(this, arguments);
-        } finally {
-            // Release mutex on next microtask to allow the RAF
-            // callback (which is the legitimate loop) to proceed
-            Promise.resolve().then(function() { _drawMapMutex = false; });
-        }
-    };
-
-    console.log('%c  [MLF] DrawMap RAF mutex installed', 'color:#22c55e');
-})();
+// [REMOVED] DrawMap RAF mutex — integrated directly into drawMap function.
 
 
 // ═══ SUMMARY ════════════════════════════════════════════════
 console.log('%c ═══════════════════════════════════════', 'color:#ffd700;font-weight:bold');
-console.log('%c  MEMORY LEAK FIX PACK — ALL 12 PATCHES ACTIVE', 'color:#ffd700;font-weight:bold');
-console.log('%c  1. Audio node limiter (cap 80)', 'color:#86efac');
-console.log('%c  2. AnimElPool cleanup (cap 50)', 'color:#86efac');
-console.log('%c  3. FloatingText/Projectile caps', 'color:#86efac');
-console.log('%c  4. UnitImgs cache limit', 'color:#86efac');
-console.log('%c  5. Background RAF management', 'color:#86efac');
-console.log('%c  6. Event listener cleanup', 'color:#86efac');
-console.log('%c  7. Transition layer observer', 'color:#86efac');
-console.log('%c  8. Battle log DOM cap (40)', 'color:#86efac');
-console.log('%c  9. Daycare RAF cleanup', 'color:#86efac');
-console.log('%c  10. Periodic GC sweep (60s)', 'color:#86efac');
-console.log('%c  11. zzfx buffer disconnect', 'color:#86efac');
-console.log('%c  12. DrawMap RAF mutex', 'color:#86efac');
+console.log('%c  MEMORY LEAK FIXES — INTEGRATED INTO SOURCE', 'color:#ffd700;font-weight:bold');
+console.log('%c  Remaining runtime patches: AnimElPool, TransitionLayer, PeriodicGC', 'color:#86efac');
 console.log('%c ═══════════════════════════════════════', 'color:#ffd700;font-weight:bold');
 
 })();
@@ -13175,6 +12891,9 @@ class MaestroV4 {
         this.tempo=88;this.intensity='menu';this._schedId=null;
         this.beat=0;this.chordStep=0;this.barCount=0;this.sectionCount=0;
         this.nextNoteTime=0;this._pausedByVisibility=false;
+        // Audio node tracking for memory leak prevention
+        this._activeNodes=[];
+        this._AUDIO_NODE_CAP=80;
 
         // ── EXPANDED SCALE LIBRARY ──
         this.scales={
@@ -13304,8 +13023,21 @@ class MaestroV4 {
         return this.rootNote+s[idx]+(octave+octShift)*12;
     }
 
+    _sweepNodes(){
+        var now=Date.now();
+        this._activeNodes=this._activeNodes.filter(function(entry){
+            if(now>entry.expiry){
+                try{entry.nodes.forEach(function(n){n.disconnect();});}catch(e){}
+                return false;
+            }
+            return true;
+        });
+    }
+
     _playNote(midi,type,dur,vol,atk,dec,sus,rel,dest){
         if(!this.ctx||!this._audioReady)return;
+        this._sweepNodes();
+        if(this._activeNodes.length>=this._AUDIO_NODE_CAP)return;
         var now=this.ctx.currentTime;
         var o1=this.ctx.createOscillator(),o2=this.ctx.createOscillator();
         var g=this.ctx.createGain(),f=this.ctx.createBiquadFilter();
@@ -13326,12 +13058,16 @@ class MaestroV4 {
         g.gain.linearRampToValueAtTime(0,now+dur);
         o1.start(now);o1.stop(now+dur+0.05);
         o2.start(now);o2.stop(now+dur+0.05);
+        var expiry=Date.now()+(dur+0.2)*1000;
+        this._activeNodes.push({nodes:[o1,o2,m,g,f],expiry:expiry});
         var ms=(dur+0.2)*1000;
         setTimeout(function(){try{o1.disconnect();o2.disconnect();m.disconnect();g.disconnect();f.disconnect();}catch(e){}},ms);
     }
 
     _playBass(midi,dur){
         if(!this.ctx)return;
+        this._sweepNodes();
+        if(this._activeNodes.length>=this._AUDIO_NODE_CAP)return;
         var now=this.ctx.currentTime;
         var o=this.ctx.createOscillator(),sub=this.ctx.createOscillator();
         var g=this.ctx.createGain(),f=this.ctx.createBiquadFilter();
@@ -13344,12 +13080,16 @@ class MaestroV4 {
         g.gain.linearRampToValueAtTime(0.15,now+0.02);
         g.gain.exponentialRampToValueAtTime(0.01,now+dur);
         o.start(now);o.stop(now+dur+0.05);sub.start(now);sub.stop(now+dur+0.05);
+        var expiry=Date.now()+(dur+0.2)*1000;
+        this._activeNodes.push({nodes:[o,sub,m,g,f],expiry:expiry});
         setTimeout(function(){try{o.disconnect();sub.disconnect();m.disconnect();g.disconnect();f.disconnect();}catch(e){}},
         (dur+0.2)*1000);
     }
 
     _playPerc(vol,type){
         if(!this.ctx)return;
+        this._sweepNodes();
+        if(this._activeNodes.length>=this._AUDIO_NODE_CAP)return;
         var now=this.ctx.currentTime,dur=type==='kick'?0.12:0.04;
         var buf=this.ctx.createBuffer(1,this.ctx.sampleRate*dur,this.ctx.sampleRate);
         var d=buf.getChannelData(0);
@@ -13360,6 +13100,7 @@ class MaestroV4 {
         s.connect(f);f.connect(g);g.connect(this.dryGain);
         g.gain.setValueAtTime(vol,now);g.gain.exponentialRampToValueAtTime(0.001,now+dur);
         s.start(now);s.stop(now+dur+0.01);
+        this._activeNodes.push({nodes:[s,g,f],expiry:Date.now()+200});
         setTimeout(function(){try{s.disconnect();g.disconnect();f.disconnect();}catch(e){}},200);
     }
 
