@@ -2113,11 +2113,11 @@ save(true);
 }
 document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
 const el=document.getElementById(id);if(el)el.classList.add('active');
-if(id==='gacha')refreshGacha();
+if(id==='gacha'&&typeof refreshGacha==='function')refreshGacha();
 if(id==='barracks')refreshBarracks();
-if(id==='campaign')refreshCampaign();
+if(id==='campaign'&&typeof refreshCampaign==='function')refreshCampaign();
 if(id==='settings'){activeSettingsTab='images';setSettingsTab('images');}
-if(id==='modes')refreshModes();
+if(id==='modes'&&typeof refreshModes==='function')refreshModes();
 if(id==='daycare'&&typeof refreshDaycare==='function')refreshDaycare();
 if(id==='quests'){renderQuests();updateQuestBadge();}
 if(id==='tavern'&&typeof refreshTavern==='function')refreshTavern();
@@ -2326,32 +2326,6 @@ refreshTeamSlots();
 if(typeof refreshPresets==='function')refreshPresets();
 }
 
-function toggleBatchMode(){
-if(batchMode){
-if(batchSelected.size>0){
-// Sort descending so splicing doesn't shift earlier indices
-const sorted=[...batchSelected].sort((a,b)=>b-a);
-sorted.forEach(i=>{
-S.team=S.team.filter(t=>t!==i).map(t=>t>i?t-1:t);
-S.teamPresets=S.teamPresets.map(p=>{
-if(!p)return null;
-return{...p,team:p.team.filter(t=>t!==i).map(t=>t>i?t-1:t)};
-});
-S.roster.splice(i,1);
-});
-toast(`Dismissed ${sorted.length} unit(s)`,'ok');
-save(true);
-}
-batchMode=false;batchSelected.clear();
-document.getElementById('batchBtn').textContent='Batch';
-document.getElementById('batchBtn').classList.remove('active');
-}else{
-batchMode=true;
-document.getElementById('batchBtn').textContent='Dismiss (0)';
-document.getElementById('batchBtn').classList.add('active');
-}
-refreshBarracks();
-}
 
 function refreshTeamSlots(){
 const el=document.getElementById('teamSlots');el.innerHTML='';
@@ -2385,49 +2359,6 @@ const newName=prompt('Rename unit:',u.name);
 if(newName&&newName.trim()){u.name=newName.trim();refreshBarracks();save(true);}
 }
 
-function savePreset(slot){
-if(slot<0||slot>4)return;
-if(!S.teamPresets)S.teamPresets=[null,null,null,null,null];
-const name=prompt(`Name for Team ${slot+1}:`,S.teamPresets[slot]?.name||`Team ${slot+1}`);
-if(name===null)return;
-S.teamPresets[slot]={name,team:[...S.team]};
-S.activePreset=slot;
-toast(`Saved as "${name}"!`,'ok');save(true);refreshPresets();
-}
-function loadPreset(slot){
-if(!S.teamPresets||!S.teamPresets[slot])return;
-S.team=[...S.teamPresets[slot].team];
-S.activePreset=slot;
-refreshBarracks();
-toast(`Loaded "${S.teamPresets[slot].name}"!`,'ok');
-}
-function refreshPresets(){
-const el=document.getElementById('presetBar');if(!el)return;
-el.innerHTML='';
-for(let i=0;i<5;i++){
-const p=S.teamPresets?.[i];
-const btn=document.createElement('button');
-btn.className='btn2 btn-sm'+(S.activePreset===i?' active':'');
-btn.style.cssText=`font-size:.55rem;padding:4px 8px;min-width:48px;position:relative;${S.activePreset===i?'border-color:var(--gold);color:var(--gold)':''}`;
-btn.innerHTML=p?`${p.name.substring(0,7)}`:`Slot ${i+1}`;
-// Mobile-friendly save/load mechanics
-let pressTimer;
-const startPress=(e)=>{e.preventDefault();pressTimer=setTimeout(()=>savePreset(i),600);};
-const cancelPress=(e)=>{e.preventDefault();clearTimeout(pressTimer);loadPreset(i);};
-btn.addEventListener('touchstart',startPress,{passive:false});
-btn.addEventListener('touchend',cancelPress,{passive:false});
-// Desktop fallback
-btn.onmousedown=(e)=>{if(e.button===2)savePreset(i);};
-btn.onclick=()=>loadPreset(i);
-btn.oncontextmenu=(e)=>e.preventDefault();
-el.appendChild(btn);
-}
-// Add an instructional text for mobile
-const instr=document.createElement('div');
-instr.style.cssText="font-size:0.5rem;color:var(--text3);width:100%;text-align:center;margin-top:4px;";
-instr.textContent="Tap to Load | Hold to Save current team";
-el.appendChild(instr);
-}
 
 function openModal(idx){
 modalIdx=idx;const u=S.roster[idx];
@@ -5593,26 +5524,6 @@ const inTeam=S.team.includes(idx);
 document.getElementById('hdTeamBtn').textContent=inTeam?'Remove from Team':'Add to Team';
 }
 
-function hdDismiss(){
-const idx=currentHeroDetailIdx;if(idx<0)return;
-const u=S.roster[idx];if(!u)return;
-if(!confirm(`Dismiss ${u.name}?`))return;
-const dismissedId=u.id;
-const ti=S.team.indexOf(idx);if(ti>=0)S.team.splice(ti,1);
-S.team=S.team.map(t=>t>idx?t-1:t);
-// Update preset indices to account for the removed roster slot
-S.teamPresets=S.teamPresets.map(p=>{
-if(!p)return null;
-return{...p,team:p.team.filter(t=>t!==idx).map(t=>t>idx?t-1:t)};
-});
-// Clean up daycare slots referencing dismissed unit
-if(S.daycareSlots)S.daycareSlots=S.daycareSlots.map(uid=>uid===dismissedId?null:uid);
-// Clean up support map entries
-if(S.supportMap){Object.keys(S.supportMap).forEach(k=>{if(k.includes(String(dismissedId)))delete S.supportMap[k];});}
-S.roster.splice(idx,1);
-currentHeroDetailIdx=-1;
-save(true);nav('barracks');refreshBarracks();toast('Dismissed.');
-}
 
 function hdSaveStory(){
 const u=S.roster[currentHeroDetailIdx];if(!u)return;
@@ -5866,51 +5777,6 @@ else if(tab==='banners')renderSettingsBanners(body);
 else if(tab==='data')renderSettingsData(body);
 }
 
-function renderSettingsImages(body){
-const custom=S.images.filter(i=>!i.isDefault);
-body.innerHTML=`
-<div class="settings-section">
-  <h2>UPLOAD IMAGES</h2>
-  <div class="drop-zone-v2" id="dropZone" onclick="document.getElementById('fileIn').click()" ondragover="event.preventDefault();this.classList.add('drag-over')" ondragleave="this.classList.remove('drag-over')" ondrop="event.preventDefault();this.classList.remove('drag-over');loadFiles(Array.from(event.dataTransfer.files))">
-    <div class="dz-icon">⬆</div>
-    <div class="dz-title">DROP IMAGES HERE</div>
-    <div class="dz-sub">Click or drag any image format to create heroes.<br>Each image becomes a unique summomable unit.</div>
-    <div class="dz-formats">
-      <span class="dz-fmt-chip animated">GIF ✦</span>
-      <span class="dz-fmt-chip animated">APNG ✦</span>
-      <span class="dz-fmt-chip">PNG</span>
-      <span class="dz-fmt-chip">JPG</span>
-      <span class="dz-fmt-chip">SVG</span>
-      <span class="dz-fmt-chip">WEBP</span>
-      <span class="dz-fmt-chip">BMP</span>
-      <span class="dz-fmt-chip">AVIF</span>
-      <span class="dz-fmt-chip">ICO</span>
-    </div>
-  </div>
-  <div class="img-count-badge">
-    <span style="color:var(--t0);font-weight:700">${custom.length}</span> custom images
-    ${S.images.filter(i=>!i.isDefault&&i.isAnimated).length>0?`<span style="color:var(--t0);margin-left:6px">/ ${S.images.filter(i=>!i.isDefault&&i.isAnimated).length} animated ✦</span>`:''}
-  </div>
-</div>
-<div class="settings-section">
-  <h2>YOUR IMAGES</h2>
-  ${custom.length===0?`<div style="text-align:center;padding:30px;color:var(--text3);font-size:.75rem">No images uploaded yet.<br><span style="font-size:.65rem">Upload images above to create units!</span></div>`:''}
-  <div class="img-grid" id="imgGrid"></div>
-</div>`;
-// Render image grid
-const grid=document.getElementById('imgGrid');
-if(grid){
-S.images.filter(i=>!i.isDefault).forEach((img,rawIdx)=>{
-const actualIdx=S.images.indexOf(img);
-const card=document.createElement('div');card.className='img-card';
-const safeSrc=img.src&&img.src.startsWith('data:image/')?img.src:'';
-card.innerHTML=`<img src="${safeSrc}" title="${esc(img.name)}" draggable="false" style="width:100%;height:100%;object-fit:cover;pointer-events:none;">`
-+`${img.isAnimated?`<div class="img-card-anim-badge">GIF</div>`:''}<div class="img-card-name">${esc(img.name)}</div>
-<button class="img-card-del" onclick="event.stopPropagation();removeImage(${actualIdx})" title="Remove">✕</button>`;
-grid.appendChild(card);
-});
-}
-}
 
 function renderSettingsConfig(body){
 body.innerHTML=`
@@ -10864,13 +10730,13 @@ if(!S.campaignClears) S.campaignClears = {};
 if(!S.bookProgress) S.bookProgress = {};
 if(!S.campaignDone) S.campaignDone = [];
 
-const TOTAL_BATTLES = 1000;
-const BOOKS_COUNT = 10;
-const CHAPTERS_PER_BOOK = 10;
-const BATTLES_PER_CHAPTER = 10;
+var TOTAL_BATTLES = 1000;
+var BOOKS_COUNT = 10;
+var CHAPTERS_PER_BOOK = 10;
+var BATTLES_PER_CHAPTER = 10;
 
 // THE STORY: 10 BOOKS
-const STORY_BOOKS = [
+var STORY_BOOKS = [
 {
 id:1, name:'Genesis Protocol', theme:'awakening',
 subtitle:'The Summoner Awakens',
@@ -12554,10 +12420,6 @@ document.addEventListener('visibilitychange',function(){
 
 <script>
 // Apex HQ screen removed — keep glossary/renderGlossary as no-ops
-function renderGlossary() {};
-function refreshTavern() {
-    if(typeof checkAchievements==='function')checkAchievements();
-};
 </script>
 
 <script>
