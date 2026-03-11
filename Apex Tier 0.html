@@ -5838,6 +5838,14 @@ stats.textContent+=` | Story: ${total}/${TOTAL_BATTLES}`;
 }
 }
 updateQuestBadge();
+// Ensure credit line persists
+const _homeEl = document.getElementById('home');
+if (_homeEl && !_homeEl.querySelector('.home-credit')) {
+    const c = document.createElement('div');
+    c.className = 'home-credit';
+    c.textContent = 'Game made by Sincere Smith, ShadenXa';
+    _homeEl.appendChild(c);
+}
 }
 
 let activeSettingsTab='images';
@@ -8266,19 +8274,6 @@ TUTORIAL_STEPS.push(
   }
 );
 
-// FIX #6: Ensure updateHomeScreen includes credit
-const _patchedUpdateHome = updateHomeScreen;
-function updateHomeScreen() {
-  _patchedUpdateHome();
-  // Ensure credit persists
-  const home = document.getElementById('home');
-  if (home && !home.querySelector('.home-credit')) {
-    const c = document.createElement('div');
-    c.className = 'home-credit';
-    c.textContent = 'Game made by Sincere Smith, ShadenXa';
-    home.appendChild(c);
-  }
-};
 
 // FINAL: Re-trigger initialization hooks
   // Refresh presets if barracks is visible
